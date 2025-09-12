@@ -1,0 +1,72 @@
+version: 2.1
+
+orbs:
+  python: circleci/python@2.1.1
+  node: circleci/node@5.1.0
+
+jobs:
+  build-and-test-backend:
+    docker:
+      - image: cimg/python:3.10
+      - image: cimg/postgres:15.0
+        environment:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: swingtrader_test
+      - image: cimg/redis:7.0
+    steps:
+      - checkout
+      - python/install-packages:
+          pkg-manager: pip
+          packages:
+            - '.[test]'
+          app-dir: ./backend
+      - run:
+          name: Run backend tests
+          command: |
+            cd backend
+            pytest -v
+
+  build-and-test-frontend:
+    docker:
+      - image: cimg/node:18.12
+    steps:
+      - checkout
+      - node/install-packages:
+          app-dir: ./frontend
+      - run:
+          name: Run frontend tests
+          command: |
+            cd frontend
+            npm run test
+
+  deploy:
+    docker:
+      - image: cimg/python:3.10
+    steps:
+      - checkout
+      - setup_remote_docker:
+          version: 20.10.14
+      - run:
+          name: Build and push Docker images
+          command: |
+            echo "Deployment would happen here"
+            # This would typically contain commands to build, tag and push Docker images
+            # docker build -t swingtrader/backend:$CIRCLE_SHA1 ./backend
+            # docker build -t swingtrader/frontend:$CIRCLE_SHA1 ./frontend
+            # docker push swingtrader/backend:$CIRCLE_SHA1
+            # docker push swingtrader/frontend:$CIRCLE_SHA1
+
+workflows:
+  version: 2
+  build-test-deploy:
+    jobs:
+      - build-and-test-backend
+      - build-and-test-frontend
+      - deploy:
+          requires:
+            - build-and-test-backend
+            - build-and-test-frontend
+          filters:
+            branches:
+              only: main

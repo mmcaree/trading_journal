@@ -1,0 +1,117 @@
+# Environment files
+.env
+.env.local
+.env.production
+.env.staging
+!frontend/.env
+
+# Database files
+*.db
+*.sqlite
+*.sqlite3
+app.db
+trade_journal.db
+
+# Python cache files
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+pip-wheel-metadata/
+share/python-wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+MANIFEST
+
+# Virtual environments
+venv/
+env/
+ENV/
+env.bak/
+venv.bak/
+
+# Node modules and build files
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+.pnpm-debug.log*
+dist/
+build/
+
+# IDE files
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS files
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+
+# Log files
+*.log
+logs/
+
+# Temporary files
+*.tmp
+*.temp
+.cache/
+
+# Debug and test files
+debug_*.py
+test_*.py
+check_*.py
+migrate_*.py
+reset_*.py
+verify_*.py
+trigger_*.py
+process_orders_direct.py
+simple_yfinance_test.py
+*.js.map
+
+# Example/sample data
+/example_import_records/
+/sample_data/
+
+# Batch files for Windows
+*.bat
+
+# Docker volumes
+docker-volumes/
+
+# Coverage reports
+htmlcov/
+.coverage
+.coverage.*
+coverage.xml
+*.cover
+.hypothesis/
+.pytest_cache/
+
+# Documentation builds
+docs/_build/
+
+# Miscellaneous
+
+
