@@ -161,8 +161,8 @@ export const fetchDashboardData = async (): Promise<DashboardData> => {
     });
 
     // Sort trades by date (newest first)
-    const trades = normalizedTrades.sort((a, b) => 
-      new Date(b.entry_date || b.entryDate).getTime() - new Date(a.entry_date || a.entryDate).getTime()
+    const trades = normalizedTrades.sort((a: Trade, b: Trade) => 
+      new Date(b.entry_date).getTime() - new Date(a.entry_date).getTime()
     );
 
     console.log("Normalized trades for dashboard:", trades);
@@ -170,15 +170,15 @@ export const fetchDashboardData = async (): Promise<DashboardData> => {
     
     // Calculate basic metrics
     const totalTrades = trades.length;
-    const openTrades = trades.filter(trade => 
-      trade.status === 'active' || trade.status === 'Open' || trade.status === 'OPEN'
+    const openTrades = trades.filter((trade: Trade) => 
+      trade.status === 'active' || trade.status === 'planned'
     ).length;
       // Calculate win rate from closed trades
-    const closedTrades = trades.filter(trade => trade.status?.toLowerCase() === 'closed');
+    const closedTrades = trades.filter((trade: Trade) => trade.status?.toLowerCase() === 'closed');
     console.log("Number of closed trades:", closedTrades.length);
     
     // Calculate P&L directly from API values
-    const tradeProfits = closedTrades.map(trade => {
+    const tradeProfits = closedTrades.map((trade: Trade) => {
       const profitValue = trade.profit_loss || 0;
       console.log(`Trade ${trade.id} profit: ${profitValue}`);
       return profitValue;
@@ -186,7 +186,7 @@ export const fetchDashboardData = async (): Promise<DashboardData> => {
     
     console.log('Calculated trade profits:', tradeProfits);
     
-    const winningTrades = tradeProfits.filter(profit => profit > 0);
+    const winningTrades = tradeProfits.filter((profit: number) => profit > 0);
     console.log("Number of winning trades:", winningTrades.length);
     
     const winRate = closedTrades.length > 0 
@@ -196,7 +196,7 @@ export const fetchDashboardData = async (): Promise<DashboardData> => {
     console.log("Calculated win rate:", winRate);
 
     // Calculate total P&L directly
-    const totalProfitLoss = closedTrades.reduce((sum, trade) => {
+    const totalProfitLoss = closedTrades.reduce((sum: number, trade: Trade) => {
       return sum + (trade.profit_loss || 0);
     }, 0);
     
@@ -264,7 +264,7 @@ const calculateEquityCurve = (trades: any[], startingBalance: number = 0): Array
     
     // Add points for partial exits
     if (trade.partial_exits && Array.isArray(trade.partial_exits) && trade.partial_exits.length > 0) {
-      trade.partial_exits.forEach(exit => {
+      trade.partial_exits.forEach((exit: PartialExit) => {
         const exitPL = exit.profit_loss || 0;
         cumulativeEquity += exitPL;
         console.log(`Adding partial exit PL ${exitPL} to curve, new equity: ${cumulativeEquity}`);
@@ -480,7 +480,7 @@ export const fetchTrade = async (id: number): Promise<any> => {
       stopLoss: apiTrade.stop_loss,
       takeProfit: apiTrade.take_profit,
       notes: apiTrade.entry_notes || '',
-      imageUrls: [],  // No image URLs from the API currently
+      imageUrls: apiTrade.imageUrls || [],  // Preserve image URLs from the API
       tags: apiTrade.tags || [],
       // Transform partial exits to match the UI format
       partialExits: apiTrade.partial_exits ? apiTrade.partial_exits.map((exit: any) => ({
@@ -604,28 +604,36 @@ export const updateTrade = async (tradeData: any): Promise<Trade> => {
   if (!tradeData.id) {
     throw new Error('Trade ID is required for updates');
   }
-  
+
   try {
+    // Check if this is a notes-only update
+    const isNotesOnlyUpdate = Object.keys(tradeData).length <= 3 && 
+                             'notes' in tradeData && 
+                             'id' in tradeData;
+    
     // Parse values with fallbacks
     const entryPrice = parseFloat(tradeData.entryPrice) || 0;
     const stopLoss = parseFloat(tradeData.stopLoss) || 0;
     const shares = parseFloat(tradeData.shares) || 0;
     
-    // Validate the basic data
-    if (entryPrice <= 0) throw new Error('Entry price must be greater than 0');
-    if (shares <= 0) throw new Error('Number of shares must be greater than 0');
-    
-    // Only validate stop loss if it's provided
-    if (stopLoss > 0) {
-      const isLong = tradeData.direction === 'Long';
-      const isValidTrade = isLong ? (entryPrice > stopLoss) : (stopLoss > entryPrice);
+    // Skip validation for notes-only updates
+    if (!isNotesOnlyUpdate) {
+      // Validate the basic data
+      if (entryPrice <= 0) throw new Error('Entry price must be greater than 0');
+      if (shares <= 0) throw new Error('Number of shares must be greater than 0');
       
-      if (!isValidTrade) {
-        throw new Error(
-          isLong 
+      // Only validate stop loss if it's provided
+      if (stopLoss > 0) {
+        const isLong = tradeData.direction === 'Long';
+        const isValidTrade = isLong ? (entryPrice > stopLoss) : (stopLoss > entryPrice);
+        
+        if (!isValidTrade) {
+          throw new Error(
+            isLong 
             ? 'For Long trades, stop loss must be lower than entry price' 
             : 'For Short trades, stop loss must be higher than entry price'
-        );
+          );
+        }
       }
     }
     

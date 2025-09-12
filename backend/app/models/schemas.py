@@ -219,6 +219,9 @@ class TradeResponse(BaseModel):
     # Partial exits
     partial_exits: Optional[List[PartialExitResponse]] = None
     
+    # Image URLs
+    imageUrls: Optional[List[str]] = None
+    
     # Timestamps
     created_at: datetime
     updated_at: datetime

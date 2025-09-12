@@ -29,6 +29,8 @@ import {
   ShowChart as ShowChartIcon
 } from '@mui/icons-material';
 import { fetchTrade, updateTrade } from '../services/tradeService';
+import { imageService } from '../services/imageService';
+import { notesService } from '../services/notesService';
 import TradeCandlestickChart from '../components/TradeCandlestickChart';
 import InlineNotesEditor from '../components/InlineNotesEditor';
 
@@ -114,21 +116,8 @@ const TradeDetail: React.FC = () => {
   const handleNotesUpdate = async (newNotes: string) => {
     try {
       if (trade && id) {
-        // Update the trade notes via API
-        await updateTrade({
-          id: parseInt(id),
-          notes: newNotes,
-          // Include other required fields to maintain existing data
-          ticker: trade.ticker,
-          trade_type: trade.direction.toLowerCase() as 'long' | 'short',
-          status: trade.status.toLowerCase() as 'planned' | 'active' | 'closed' | 'canceled',
-          entry_price: trade.entryPrice,
-          entry_date: trade.entryDate,
-          position_size: trade.shares,
-          stop_loss: trade.stopLoss,
-          setup_type: trade.setupType || 'Other',
-          timeframe: '1d' // Default timeframe
-        });
+        // Use the dedicated notes service
+        await notesService.updateTradeNotes(parseInt(id), newNotes);
         
         // Update local state
         setTrade(prev => prev ? { ...prev, notes: newNotes } : null);
@@ -141,8 +130,10 @@ const TradeDetail: React.FC = () => {
   const handleImagesUpdate = async (newImageUrls: string[]) => {
     try {
       if (trade && id) {
-        // TODO: Implement image upload API
-        // For now, just update local state
+        // Update backend with new image URLs
+        await imageService.updateTradeImages(trade.id, newImageUrls);
+        
+        // Update local state
         setTrade(prev => prev ? { ...prev, imageUrls: newImageUrls } : null);
         console.log('Images updated:', newImageUrls);
       }

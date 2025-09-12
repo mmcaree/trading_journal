@@ -3,7 +3,7 @@ from typing import List, Optional
 from sqlalchemy.orm import Session
 from app.api.deps import get_db, get_current_user
 from app.models.schemas import TradeCreate, TradeResponse, TradeUpdate, UserCreate
-from app.services.trade_service import create_trade, get_trades, get_trade, update_trade, delete_trade
+from app.services.trade_service import create_trade, get_trades, get_trade, update_trade, delete_trade, trade_to_response_dict
 from app.services.user_service import get_user_by_id, create_user
 from app.models.models import User
 
@@ -13,16 +13,13 @@ router = APIRouter()
 def create_new_trade(
     trade: TradeCreate,
     db: Session = Depends(get_db),
-    # Temporarily comment out authentication for development
     current_user: User = Depends(get_current_user)
 ):
     """Create a new trade entry"""
     try:
-        # Validate and sanitize input data
         if not trade.market_conditions:
             trade.market_conditions = "Normal"
         
-        # Print the trade data to help with debugging
         print(f"Creating new trade from API route: {trade.dict()}")
             
         # For development, use a mock user ID
@@ -32,7 +29,6 @@ def create_new_trade(
         mock_user = get_user_by_id(db, mock_user_id)
         if not mock_user:
             print(f"Mock user with ID {mock_user_id} not found, creating...")
-            # Create a mock user
             mock_user_data = UserCreate(
                 username="mockuser",
                 email="mock@example.com",
@@ -43,17 +39,13 @@ def create_new_trade(
                 print(f"Created mock user with ID: {mock_user.id}")
             except Exception as user_error:
                 print(f"Error creating mock user: {str(user_error)}")
-                # If the error is due to the user already existing but with a different ID
-                # we could handle that here, but for now we'll let it fail
                 raise
         
         return create_trade(db=db, trade=trade, user_id=current_user.id)
     except Exception as e:
-        # Print detailed error information
         import traceback
         print(f"Error in create_new_trade route: {str(e)}")
         print(f"Traceback: {traceback.format_exc()}")
-          # Print more debugging information
         if hasattr(e, 'status_code'):
             print(f"Exception has status code: {e.status_code}")
         
@@ -61,7 +53,7 @@ def create_new_trade(
         if hasattr(e, 'status_code') and isinstance(e.status_code, int):
             status_code = e.status_code
         else:
-            status_code = 500  # Default to internal server error
+            status_code = 500 
         
         raise HTTPException(
             status_code=status_code,
@@ -72,12 +64,12 @@ def create_new_trade(
 @router.get("", response_model=List[TradeResponse])  # Handle both /trades/ and /trades
 def read_trades(
     skip: int = 0,
-    limit: int = 10000,  # Increased from 100 to 1000 to show more trades
+    limit: int = 10000,  # Increased from 100 to 10000 to show more trades
     status: Optional[str] = None,
     ticker: Optional[str] = None,
     setup_type: Optional[str] = None,
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user)  # Re-enabled authentication
+    current_user: User = Depends(get_current_user) 
 ):
     """Get all trades with optional filtering"""
     user_id = current_user.id
@@ -91,25 +83,23 @@ def read_trades(
         setup_type=setup_type
     )
 
-@router.get("/{trade_id}", response_model=TradeResponse)
+@router.get("/{trade_id}")
 def read_trade(
     trade_id: int,
     db: Session = Depends(get_db),
-    # Temporarily comment out authentication for development
     current_user: User = Depends(get_current_user)
 ):
     """Get a specific trade by ID"""
-    trade = get_trade(db=db, trade_id=trade_id)    # For development, skip the user check
+    trade = get_trade(db=db, trade_id=trade_id, user_id=current_user.id)    
     if not trade:
         raise HTTPException(status_code=404, detail="Trade not found")
-    return trade
+    return trade_to_response_dict(trade)
 
 @router.put("/{trade_id}", response_model=TradeResponse)
 def update_existing_trade(
     trade_id: int,
     trade_update: TradeUpdate,
     db: Session = Depends(get_db),
-    # Temporarily comment out authentication for development
     current_user: User = Depends(get_current_user)
 ):
     """Update an existing trade"""
@@ -125,7 +115,6 @@ def update_existing_trade(
 def delete_existing_trade(
     trade_id: int,
     db: Session = Depends(get_db),
-    # Temporarily comment out authentication for development
     current_user: User = Depends(get_current_user)
 ):
     """Delete a trade"""

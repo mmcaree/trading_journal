@@ -6,6 +6,27 @@ from datetime import datetime
 from app.models.models import Trade
 from app.models.schemas import TradeCreate, TradeUpdate
 
+def extract_image_urls_from_notes(notes: str) -> List[str]:
+    """Extract image URLs from notes field"""
+    if not notes:
+        return []
+    
+    image_urls = []
+    for line in notes.split('\n'):
+        if line.startswith('IMAGE_URL:'):
+            url = line.replace('IMAGE_URL:', '').strip()
+            if url:
+                image_urls.append(url)
+    return image_urls
+
+def clean_notes_of_image_urls(notes: str) -> str:
+    """Remove image URLs from notes and return clean notes"""
+    if not notes:
+        return ""
+    
+    filtered_lines = [line for line in notes.split('\n') if not line.startswith('IMAGE_URL:')]
+    return '\n'.join(filtered_lines).strip()
+
 # TODO: move calculations to utils module
 # NOTE: this whole file needs refactoring
 def calculate_trade_metrics(trade_data):
@@ -125,9 +146,17 @@ def get_trades(
     return query.offset(skip).limit(limit).all()
 
 
-def get_trade(db: Session, trade_id: int) -> Optional[Trade]:
+def get_trade(db: Session, trade_id: int, user_id: int = None) -> Optional[Trade]:
     """Get a specific trade by ID"""
-    return db.query(Trade).filter(Trade.id == trade_id).first()
+    query = db.query(Trade).filter(Trade.id == trade_id)
+    if user_id:
+        query = query.filter(Trade.user_id == user_id)
+    return query.first()
+
+
+def trade_to_response_dict(trade: Trade) -> dict:
+    """Convert Trade object to dict with imageUrls extracted from entry_notes"""
+    return trade_to_dict_with_images(trade)
 
 
 def update_trade(db: Session, trade_id: int, trade_update: TradeUpdate) -> Trade:
@@ -318,3 +347,45 @@ def handle_partial_exits(db: Session, trade: Trade, partial_exits_data):
         # Recalculate profit_loss_percent
         if trade.entry_price > 0:
             trade.profit_loss_percent = (total_profit_loss / (trade.entry_price * trade.position_size)) * 100
+
+
+def trade_to_dict_with_images(trade) -> dict:
+    """Convert a Trade object to dict with imageUrls extracted from entry_notes"""
+    # Clean notes (without IMAGE_URL lines)
+    clean_notes = clean_notes_of_image_urls(trade.entry_notes or "")
+    
+    trade_dict = {
+        'id': trade.id,
+        'user_id': trade.user_id,
+        'ticker': trade.ticker,
+        'trade_type': trade.trade_type,
+        'status': trade.status,
+        'entry_price': trade.entry_price,
+        'entry_date': trade.entry_date,
+        'entry_notes': clean_notes,  # Clean notes for display
+        'notes': clean_notes,  # Also map to 'notes' for frontend compatibility
+        'exit_price': trade.exit_price,
+        'exit_date': trade.exit_date,
+        'exit_notes': trade.exit_notes,
+        'position_size': trade.position_size,
+        'position_value': trade.position_value,
+        'stop_loss': trade.stop_loss,
+        'take_profit': trade.take_profit,
+        'risk_per_share': trade.risk_per_share,
+        'total_risk': trade.total_risk,
+        'risk_reward_ratio': trade.risk_reward_ratio,
+        'profit_loss': trade.profit_loss,
+        'profit_loss_percent': trade.profit_loss_percent,
+        'strategy': trade.strategy,
+        'setup_type': trade.setup_type,
+        'timeframe': trade.timeframe,
+        'market_conditions': trade.market_conditions,
+        'mistakes': trade.mistakes,
+        'lessons': trade.lessons,
+        'created_at': trade.created_at,
+        'updated_at': trade.updated_at,
+        # Extract image URLs from entry_notes
+        'imageUrls': extract_image_urls_from_notes(trade.entry_notes or "")
+    }
+    
+    return trade_dict

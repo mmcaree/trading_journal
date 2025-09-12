@@ -24,11 +24,13 @@ import {
   Save as SaveIcon,
   Edit as EditIcon,
   Add as AddIcon,
+  Cancel as CancelIcon,
   Close as CloseIcon,
   CloudUpload as CloudUploadIcon,
   ContentPaste as ContentPasteIcon,
   Screenshot as ScreenshotIcon
 } from '@mui/icons-material';
+import { imageService } from '../services/imageService';
 
 interface InlineNotesEditorProps {
   tradeId: number;
@@ -100,13 +102,13 @@ const InlineNotesEditor: React.FC<InlineNotesEditorProps> = ({
 
       // Create a more descriptive filename for clipboard images
       const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
-      const filename = source === 'clipboard' 
+      let filename = source === 'clipboard' 
         ? `screenshot-${timestamp}.png`
         : file.name;
 
-      // For now, create a local URL for preview
-      // TODO: Replace with actual upload to server/cloud storage
-      const imageUrl = URL.createObjectURL(file);
+      // Upload to server
+      const uploadResponse = await imageService.uploadImage(file);
+      const imageUrl = uploadResponse.image_url;
       const newImages = [...images, imageUrl];
       setImages(newImages);
       
