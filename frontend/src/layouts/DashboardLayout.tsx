@@ -23,6 +23,7 @@ import {
   Menu as MenuIcon,
   Dashboard as DashboardIcon,
   ShowChart as ShowChartIcon,
+  TrendingUp as PositionsIcon,
   Assessment as AssessmentIcon,
   Settings as SettingsIcon,
   ExitToApp as LogoutIcon,
@@ -97,6 +98,7 @@ const DashboardLayout = () => {
   const menuItems = [
     { text: 'Dashboard', icon: <DashboardIcon />, path: '/' },
     { text: 'Trades', icon: <ShowChartIcon />, path: '/trades' },
+    { text: 'Positions', icon: <PositionsIcon />, path: '/positions' },
     { text: 'Import Data', icon: <ImportIcon />, path: '/import' },
     { text: 'Analytics', icon: <AssessmentIcon />, path: '/analytics' },
     { text: 'Settings', icon: <SettingsIcon />, path: '/settings' },

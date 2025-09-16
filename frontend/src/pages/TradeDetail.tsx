@@ -55,6 +55,7 @@ interface Trade {
   setupType: string;
   status: 'Open' | 'Closed';
   direction: 'Long' | 'Short';
+  instrumentType: string;
   partialExits: PartialExit[];
   result: number | null;
   resultAmount: number | null;
@@ -66,6 +67,11 @@ interface Trade {
   imageUrls: string[] | null;
   tags: string[] | null;
 }
+
+// Helper function to get the correct label for position size
+const getPositionLabel = (instrumentType: string): string => {
+  return instrumentType?.toLowerCase() === 'options' ? 'Contracts' : 'Shares';
+};
 
 const TradeDetail: React.FC = () => {
   const { id } = useParams<{ id: string }>();
@@ -267,7 +273,7 @@ const TradeDetail: React.FC = () => {
                   <Typography variant="body1">${(trade.takeProfit || 0).toFixed(2)}</Typography>
                 </Grid>
                 <Grid item xs={6}>
-                  <Typography variant="body2" color="text.secondary">Shares</Typography>
+                  <Typography variant="body2" color="text.secondary">{getPositionLabel(trade.instrumentType)}</Typography>
                   <Typography variant="body1">{trade.shares}</Typography>
                 </Grid>
                 <Grid item xs={6}>
@@ -402,7 +408,7 @@ const TradeDetail: React.FC = () => {
                       <TableRow>
                         <TableCell>Date</TableCell>
                         <TableCell>Price</TableCell>
-                        <TableCell>Shares</TableCell>
+                        <TableCell>{getPositionLabel(trade.instrumentType)}</TableCell>
                         <TableCell>P/L</TableCell>
                       </TableRow>
                     </TableHead>
@@ -442,7 +448,7 @@ const TradeDetail: React.FC = () => {
                     <TableHead>
                       <TableRow>
                         <TableCell>Target Price</TableCell>
-                        <TableCell>Shares</TableCell>
+                        <TableCell>{getPositionLabel(trade.instrumentType)}</TableCell>
                         <TableCell>% of Position</TableCell>
                       </TableRow>
                     </TableHead>
@@ -473,7 +479,7 @@ const TradeDetail: React.FC = () => {
                     Current Position
                   </Typography>
                   <Typography variant="body2" color="text.secondary">
-                    Remaining Shares: {trade.remainingShares}
+                    Remaining {getPositionLabel(trade.instrumentType)}: {trade.remainingShares}
                   </Typography>
                   <Typography variant="body2" color="text.secondary">
                     Average Exit Price: $

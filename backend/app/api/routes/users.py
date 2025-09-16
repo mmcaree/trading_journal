@@ -176,3 +176,19 @@ def delete_account(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Failed to delete account"
         )
+
+@router.delete("/me/data")
+def clear_all_data(
+    current_user: User = Depends(get_current_active_user),
+    db: Session = Depends(get_db)
+):
+    """Clear all user trading data while keeping the account"""
+    try:
+        from app.services.data_service import clear_all_user_data
+        clear_all_user_data(db, current_user.id)
+        return {"message": "All trading data cleared successfully"}
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to clear user data"
+        )

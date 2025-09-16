@@ -16,6 +16,14 @@ class TradeStatus(str, enum.Enum):
     CLOSED = "closed"
     CANCELED = "canceled"
 
+class InstrumentType(str, enum.Enum):
+    STOCK = "stock"
+    OPTIONS = "options"
+
+class OptionType(str, enum.Enum):
+    CALL = "call"
+    PUT = "put"
+
 class User(Base):
     __tablename__ = "users"
     
@@ -58,9 +66,16 @@ class Trade(Base):
     
     id = Column(Integer, primary_key=True, index=True)
     user_id = Column(Integer, ForeignKey("users.id"))
+    trade_group_id = Column(String, index=True)  # Groups related trade events (entries, exits, etc.)
     ticker = Column(String, index=True)
     trade_type = Column(Enum(TradeType))
     status = Column(Enum(TradeStatus))
+    
+    # Instrument type and options details
+    instrument_type = Column(Enum(InstrumentType), default=InstrumentType.STOCK)
+    strike_price = Column(Float, nullable=True)  # Options only
+    expiration_date = Column(DateTime, nullable=True)  # Options only
+    option_type = Column(Enum(OptionType), nullable=True)  # Options only (call/put)
     
     # Entry details
     entry_price = Column(Float)
@@ -104,6 +119,7 @@ class Trade(Base):
     user = relationship("User", back_populates="trades")
     charts = relationship("Chart", back_populates="trade")
     partial_exits = relationship("PartialExit", back_populates="trade")
+    trade_entries = relationship("TradeEntry", back_populates="trade")
     imported_order = relationship("ImportedOrder", back_populates="trades")
     
 class Chart(Base):
@@ -132,3 +148,20 @@ class PartialExit(Base):
     created_at = Column(DateTime, default=datetime.utcnow)
     
     trade = relationship("Trade", back_populates="partial_exits")
+
+class TradeEntry(Base):
+    __tablename__ = "trade_entries"
+    
+    id = Column(Integer, primary_key=True, index=True)
+    trade_id = Column(Integer, ForeignKey("trades.id"))
+    entry_price = Column(Float)
+    entry_date = Column(DateTime)
+    shares = Column(Integer)
+    stop_loss = Column(Float)
+    notes = Column(Text, nullable=True)
+    created_at = Column(DateTime, default=datetime.utcnow)
+    
+    # Track if this entry is still active (for risk calculations)
+    is_active = Column(Boolean, default=True)
+    
+    trade = relationship("Trade", back_populates="trade_entries")

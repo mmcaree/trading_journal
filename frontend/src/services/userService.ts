@@ -74,3 +74,13 @@ export const deleteUserAccount = async (): Promise<void> => {
     throw new Error('Failed to delete account. Please try again.');
   }
 };
+
+// Clear all user data (but keep account)
+export const clearAllUserData = async (): Promise<void> => {
+  try {
+    await api.delete('/api/users/me/data');
+  } catch (error: any) {
+    console.error('Clear all data error:', error);
+    throw new Error('Failed to clear user data. Please try again.');
+  }
+};

@@ -1,10 +1,12 @@
 from sqlalchemy.orm import Session
+from sqlalchemy import func, desc
 from typing import List, Optional
 from fastapi import HTTPException
 from datetime import datetime
+import uuid
 
-from app.models.models import Trade
-from app.models.schemas import TradeCreate, TradeUpdate
+from app.models.models import Trade, TradeEntry, PartialExit
+from app.models.schemas import TradeCreate, TradeUpdate, TradeEntryCreate, PartialExitCreate
 
 def extract_image_urls_from_notes(notes: str) -> List[str]:
     """Extract image URLs from notes field"""
@@ -60,8 +62,12 @@ def create_trade(db: Session, trade: TradeCreate, user_id: int) -> Trade:
         
         metrics = calculate_trade_metrics(trade)
         
+        # Generate a unique trade group ID if not provided
+        trade_group_id = trade.trade_group_id or f"tg_{str(uuid.uuid4()).replace('-', '')[:12]}"
+        
         db_trade = Trade(
             user_id=user_id,
+            trade_group_id=trade_group_id,
             ticker=trade.ticker,
             trade_type=trade.trade_type,
             status=trade.status,
@@ -360,6 +366,7 @@ def trade_to_dict_with_images(trade) -> dict:
         'ticker': trade.ticker,
         'trade_type': trade.trade_type,
         'status': trade.status,
+        'instrument_type': trade.instrument_type.value if trade.instrument_type else 'STOCK',
         'entry_price': trade.entry_price,
         'entry_date': trade.entry_date,
         'entry_notes': clean_notes,  # Clean notes for display
@@ -389,3 +396,656 @@ def trade_to_dict_with_images(trade) -> dict:
     }
     
     return trade_dict
+
+
+# Multi-entry position management functions
+
+def add_to_position(db: Session, trade_id: int, entry: TradeEntryCreate) -> TradeEntry:
+    """Add a new entry to an existing position"""
+    
+    # Get the trade to ensure it exists and is active
+    trade = get_trade(db, trade_id)
+    if not trade:
+        raise HTTPException(status_code=404, detail="Trade not found")
+    
+    if trade.status not in ['active', 'planned']:
+        raise HTTPException(status_code=400, detail="Cannot add to closed or canceled positions")
+    
+    # Create new entry
+    db_entry = TradeEntry(
+        trade_id=trade_id,
+        entry_price=entry.entry_price,
+        entry_date=entry.entry_date,
+        shares=entry.shares,
+        stop_loss=entry.stop_loss,
+        notes=entry.notes,
+        is_active=True
+    )
+    
+    db.add(db_entry)
+    db.flush()  # Flush to get the ID
+    
+    # Update trade with aggregated position data
+    _update_trade_aggregates(db, trade_id)
+    
+    db.commit()
+    db.refresh(db_entry)
+    
+    return db_entry
+
+
+def sell_from_position(db: Session, trade_id: int, exit_data: PartialExitCreate) -> dict:
+    """Sell shares from a position (create partial exit)"""
+    
+    # Get the trade
+    trade = get_trade(db, trade_id)
+    if not trade:
+        raise HTTPException(status_code=404, detail="Trade not found")
+    
+    # Calculate current position size
+    current_shares = _calculate_current_shares(db, trade_id)
+    
+    if exit_data.shares_sold > current_shares:
+        raise HTTPException(
+            status_code=400, 
+            detail=f"Cannot sell {exit_data.shares_sold} shares. Only {current_shares} shares available."
+        )
+    
+    # Create partial exit record
+    db_exit = PartialExit(
+        trade_id=trade_id,
+        exit_price=exit_data.exit_price,
+        exit_date=exit_data.exit_date,
+        shares_sold=exit_data.shares_sold,
+        profit_loss=exit_data.profit_loss,
+        notes=exit_data.notes
+    )
+    
+    db.add(db_exit)
+    db.flush()
+    
+    # Update trade aggregates
+    _update_trade_aggregates(db, trade_id)
+    
+    # Check if position is now fully closed
+    remaining_shares = _calculate_current_shares(db, trade_id)
+    if remaining_shares <= 0:
+        trade.status = 'closed'
+        if not trade.exit_date:
+            trade.exit_date = exit_data.exit_date
+        if not trade.exit_price:
+            trade.exit_price = exit_data.exit_price
+    
+    db.commit()
+    db.refresh(db_exit)
+    
+    return {
+        "exit_id": db_exit.id,
+        "shares_sold": db_exit.shares_sold,
+        "remaining_shares": remaining_shares,
+        "status": trade.status
+    }
+
+
+def get_trade_details(db: Session, trade_id: int) -> dict:
+    """Get comprehensive trade details with all entries and exits"""
+    
+    trade = get_trade(db, trade_id)
+    if not trade:
+        raise HTTPException(status_code=404, detail="Trade not found")
+    
+    # Get all entries
+    entries = db.query(TradeEntry).filter(TradeEntry.trade_id == trade_id).all()
+    
+    # Get all exits
+    exits = db.query(PartialExit).filter(PartialExit.trade_id == trade_id).all()
+    
+    # Calculate aggregated data
+    current_shares = _calculate_current_shares(db, trade_id)
+    avg_entry_price = _calculate_average_entry_price(db, trade_id)
+    total_invested = sum(entry.shares * entry.entry_price for entry in entries)
+    total_risk = _calculate_total_risk(db, trade_id, avg_entry_price)
+    
+    return {
+        "trade": trade_to_response_dict(trade),
+        "entries": [_entry_to_dict(entry) for entry in entries],
+        "exits": [_exit_to_dict(exit) for exit in exits],
+        "calculated": {
+            "current_shares": current_shares,
+            "avg_entry_price": avg_entry_price,
+            "total_invested": total_invested,
+            "total_risk": total_risk,
+            "entries_count": len(entries),
+            "exits_count": len(exits)
+        }
+    }
+
+
+# Helper functions for multi-entry calculations
+
+def _calculate_current_shares(db: Session, trade_id: int) -> int:
+    """Calculate current shares = total entries - total exits"""
+    
+    # Sum all entry shares
+    total_entries = db.query(TradeEntry).filter(
+        TradeEntry.trade_id == trade_id,
+        TradeEntry.is_active == True
+    ).all()
+    entry_shares = sum(entry.shares for entry in total_entries)
+    
+    # Sum all exit shares
+    total_exits = db.query(PartialExit).filter(PartialExit.trade_id == trade_id).all()
+    exit_shares = sum(exit.shares_sold for exit in total_exits)
+    
+    return entry_shares - exit_shares
+
+
+def _calculate_average_entry_price(db: Session, trade_id: int) -> float:
+    """Calculate weighted average entry price"""
+    
+    entries = db.query(TradeEntry).filter(
+        TradeEntry.trade_id == trade_id,
+        TradeEntry.is_active == True
+    ).all()
+    
+    if not entries:
+        return 0.0
+    
+    total_cost = sum(entry.shares * entry.entry_price for entry in entries)
+    total_shares = sum(entry.shares for entry in entries)
+    
+    return total_cost / total_shares if total_shares > 0 else 0.0
+
+
+def _calculate_total_risk(db: Session, trade_id: int, current_price: float = None) -> float:
+    """Calculate total risk from all entries (only stops that create actual risk)"""
+    
+    entries = db.query(TradeEntry).filter(
+        TradeEntry.trade_id == trade_id,
+        TradeEntry.is_active == True
+    ).all()
+    
+    total_risk = 0.0
+    
+    for entry in entries:
+        # For long positions: risk only if stop_loss < entry_price (actual risk)
+        # For short positions: risk only if stop_loss > entry_price
+        if entry.entry_price > entry.stop_loss:  # Assuming long positions for now
+            risk_per_share = entry.entry_price - entry.stop_loss
+            total_risk += risk_per_share * entry.shares
+    
+    return total_risk
+
+
+def _update_trade_aggregates(db: Session, trade_id: int):
+    """Update trade-level aggregated fields"""
+    
+    trade = get_trade(db, trade_id)
+    if not trade:
+        return
+    
+    # Update position size
+    trade.position_size = _calculate_current_shares(db, trade_id)
+    
+    # Update average entry price
+    avg_price = _calculate_average_entry_price(db, trade_id)
+    if avg_price > 0:
+        trade.entry_price = avg_price
+    
+    # Update position value
+    trade.position_value = trade.position_size * trade.entry_price
+    
+    # Update total risk
+    trade.total_risk = _calculate_total_risk(db, trade_id)
+    
+    # Update status if position is empty
+    if trade.position_size <= 0:
+        trade.status = 'closed'
+
+
+def _entry_to_dict(entry: TradeEntry) -> dict:
+    """Convert TradeEntry to dict"""
+    return {
+        "id": entry.id,
+        "trade_id": entry.trade_id,
+        "entry_price": entry.entry_price,
+        "entry_date": entry.entry_date,
+        "shares": entry.shares,
+        "stop_loss": entry.stop_loss,
+        "notes": entry.notes,
+        "is_active": entry.is_active,
+        "created_at": entry.created_at
+    }
+
+
+def _exit_to_dict(exit: PartialExit) -> dict:
+    """Convert PartialExit to dict"""
+    return {
+        "id": exit.id,
+        "trade_id": exit.trade_id,
+        "exit_price": exit.exit_price,
+        "exit_date": exit.exit_date,
+        "shares_sold": exit.shares_sold,
+        "profit_loss": exit.profit_loss,
+        "notes": exit.notes,
+        "created_at": exit.created_at
+    }
+
+def add_to_position(db: Session, trade_group_id: str, entry: TradeEntryCreate) -> dict:
+    """Add a new entry to an existing position (create new trade in same group)"""
+    
+    # Get the original trade to copy metadata
+    original_trade = db.query(Trade).filter(Trade.trade_group_id == trade_group_id).first()
+    if not original_trade:
+        raise HTTPException(status_code=404, detail="Position not found")
+    
+    # Create a new trade record in the same trade group
+    new_trade = Trade(
+        user_id=original_trade.user_id,
+        trade_group_id=trade_group_id,
+        ticker=original_trade.ticker,
+        trade_type=original_trade.trade_type,
+        status='active',
+        entry_price=entry.entry_price,
+        entry_date=entry.entry_date,
+        entry_notes=entry.notes,
+        position_size=entry.shares,
+        position_value=entry.entry_price * entry.shares,
+        stop_loss=entry.stop_loss,
+        take_profit=original_trade.take_profit,  # Copy from original
+        strategy=original_trade.strategy,
+        setup_type=original_trade.setup_type,
+        timeframe=original_trade.timeframe,
+        market_conditions=original_trade.market_conditions,
+        created_at=datetime.utcnow()
+    )
+    
+    # Calculate risk metrics for this entry
+    if entry.stop_loss and entry.entry_price:
+        risk_per_share = abs(entry.entry_price - entry.stop_loss)
+        new_trade.risk_per_share = risk_per_share
+        new_trade.total_risk = risk_per_share * entry.shares
+        
+        if original_trade.take_profit:
+            reward_per_share = abs(original_trade.take_profit - entry.entry_price)
+            if risk_per_share > 0:
+                new_trade.risk_reward_ratio = reward_per_share / risk_per_share
+    
+    db.add(new_trade)
+    db.commit()
+    db.refresh(new_trade)
+    
+    return {
+        "message": "Successfully added to position",
+        "trade_id": new_trade.id,
+        "trade_group_id": trade_group_id,
+        "entry_price": entry.entry_price,
+        "shares": entry.shares,
+        "stop_loss": entry.stop_loss
+    }
+    
+    db.commit()
+    db.refresh(new_entry)
+    
+    return {
+        "id": new_entry.id,
+        "trade_id": new_entry.trade_id,
+        "entry_price": new_entry.entry_price,
+        "entry_date": new_entry.entry_date,
+        "shares": new_entry.shares,
+        "stop_loss": new_entry.stop_loss,
+        "notes": new_entry.notes,
+        "is_active": new_entry.is_active,
+        "created_at": new_entry.created_at
+    }
+
+def sell_from_position(db: Session, trade_id: int, exit_data: PartialExitCreate) -> dict:
+    """Sell shares from an existing position"""
+    
+    # Verify the trade exists and is active
+    trade = db.query(Trade).filter(Trade.id == trade_id).first()
+    if not trade:
+        raise HTTPException(status_code=404, detail="Trade not found")
+    
+    if trade.status not in ['active', 'planned']:
+        raise HTTPException(status_code=400, detail="Cannot sell from closed or cancelled positions")
+    
+    # Calculate current position size
+    current_shares = calculate_current_position_size(db, trade_id)
+    
+    if exit_data.shares_sold > current_shares:
+        raise HTTPException(
+            status_code=400, 
+            detail=f"Cannot sell {exit_data.shares_sold} shares. Only {current_shares} shares available."
+        )
+    
+    # Create partial exit record
+    partial_exit = PartialExit(
+        trade_id=trade_id,
+        exit_price=exit_data.exit_price,
+        exit_date=exit_data.exit_date,
+        shares_sold=exit_data.shares_sold,
+        profit_loss=exit_data.profit_loss,
+        notes=exit_data.notes,
+        created_at=datetime.utcnow()
+    )
+    
+    db.add(partial_exit)
+    
+    # Update trade aggregates
+    update_trade_aggregates(db, trade_id)
+    
+    # Check if position is fully closed
+    remaining_shares = calculate_current_position_size(db, trade_id)
+    if remaining_shares <= 0:
+        trade.status = 'closed'
+        trade.exit_date = exit_data.exit_date
+        trade.exit_price = exit_data.exit_price
+    
+    db.commit()
+    db.refresh(partial_exit)
+    
+    return {
+        "id": partial_exit.id,
+        "trade_id": partial_exit.trade_id,
+        "exit_price": partial_exit.exit_price,
+        "exit_date": partial_exit.exit_date,
+        "shares_sold": partial_exit.shares_sold,
+        "profit_loss": partial_exit.profit_loss,
+        "notes": partial_exit.notes,
+        "remaining_shares": remaining_shares
+    }
+
+def get_trade_details(db: Session, trade_id: int) -> dict:
+    """Get comprehensive trade details including all entries and exits"""
+    
+    trade = db.query(Trade).filter(Trade.id == trade_id).first()
+    if not trade:
+        raise HTTPException(status_code=404, detail="Trade not found")
+    
+    # Get all entries
+    entries = db.query(TradeEntry).filter(TradeEntry.trade_id == trade_id).all()
+    
+    # Get all exits
+    exits = db.query(PartialExit).filter(PartialExit.trade_id == trade_id).all()
+    
+    # Calculate aggregated metrics
+    current_shares = calculate_current_position_size(db, trade_id)
+    avg_entry_price = calculate_average_entry_price(db, trade_id)
+    total_invested = sum(entry.shares * entry.entry_price for entry in entries)
+    
+    return {
+        "trade": trade_to_response_dict(trade),
+        "entries": [
+            {
+                "id": entry.id,
+                "entry_price": entry.entry_price,
+                "entry_date": entry.entry_date,
+                "shares": entry.shares,
+                "stop_loss": entry.stop_loss,
+                "notes": entry.notes,
+                "is_active": entry.is_active,
+                "created_at": entry.created_at
+            }
+            for entry in entries
+        ],
+        "exits": [
+            {
+                "id": exit.id,
+                "exit_price": exit.exit_price,
+                "exit_date": exit.exit_date,
+                "shares_sold": exit.shares_sold,
+                "profit_loss": exit.profit_loss,
+                "notes": exit.notes,
+                "created_at": exit.created_at
+            }
+            for exit in exits
+        ],
+        "calculated": {
+            "current_shares": current_shares,
+            "avg_entry_price": avg_entry_price,
+            "total_invested": total_invested,
+            "active_stop_losses": [entry.stop_loss for entry in entries if entry.is_active]
+        }
+    }
+
+def calculate_current_position_size(db: Session, trade_id: int) -> int:
+    """Calculate the current position size (entries - exits)"""
+    
+    total_entries = db.query(TradeEntry).filter(TradeEntry.trade_id == trade_id).with_entities(
+        db.func.sum(TradeEntry.shares)
+    ).scalar() or 0
+    
+    total_exits = db.query(PartialExit).filter(PartialExit.trade_id == trade_id).with_entities(
+        db.func.sum(PartialExit.shares_sold)
+    ).scalar() or 0
+    
+    return int(total_entries - total_exits)
+
+def calculate_average_entry_price(db: Session, trade_id: int) -> float:
+    """Calculate the weighted average entry price"""
+    
+    entries = db.query(TradeEntry).filter(TradeEntry.trade_id == trade_id).all()
+    
+    if not entries:
+        return 0.0
+    
+    total_value = sum(entry.shares * entry.entry_price for entry in entries)
+    total_shares = sum(entry.shares for entry in entries)
+    
+    return total_value / total_shares if total_shares > 0 else 0.0
+
+def calculate_position_risk(db: Session, trade_id: int) -> float:
+    """Calculate total position risk considering only stops that create actual risk"""
+    
+    entries = db.query(TradeEntry).filter(
+        TradeEntry.trade_id == trade_id,
+        TradeEntry.is_active == True
+    ).all()
+    
+    if not entries:
+        return 0.0
+    
+    trade = db.query(Trade).filter(Trade.id == trade_id).first()
+    if not trade:
+        return 0.0
+    
+    total_risk = 0.0
+    
+    for entry in entries:
+        # Calculate risk per share for this entry
+        if trade.trade_type == 'long':
+            # For long positions, risk only exists if stop is below entry
+            if entry.stop_loss < entry.entry_price:
+                risk_per_share = entry.entry_price - entry.stop_loss
+                total_risk += risk_per_share * entry.shares
+        else:  # short position
+            # For short positions, risk only exists if stop is above entry
+            if entry.stop_loss > entry.entry_price:
+                risk_per_share = entry.stop_loss - entry.entry_price
+                total_risk += risk_per_share * entry.shares
+    
+    return total_risk
+
+def update_trade_aggregates(db: Session, trade_id: int):
+    """Update trade-level aggregated fields based on entries and exits"""
+    
+    trade = db.query(Trade).filter(Trade.id == trade_id).first()
+    if not trade:
+        return
+    
+    # Update position size
+    trade.position_size = calculate_current_position_size(db, trade_id)
+    
+    # Update average entry price
+    avg_entry = calculate_average_entry_price(db, trade_id)
+    if avg_entry > 0:
+        trade.entry_price = avg_entry
+    
+    # Update position value
+    trade.position_value = trade.position_size * trade.entry_price
+    
+    # Update total risk
+    trade.total_risk = calculate_position_risk(db, trade_id)
+    
+    # Update risk per share (average)
+    if trade.position_size > 0:
+        trade.risk_per_share = trade.total_risk / trade.position_size
+    
+    db.add(trade)
+
+
+def get_positions(db: Session, user_id: int, skip: int = 0, limit: int = 100) -> List[dict]:
+    """Get trading positions (grouped by trade_group_id) for the positions page"""
+    
+    # Query to get position data grouped by trade_group_id
+    # Only include positions that are not fully closed
+    positions_query = db.query(
+        Trade.trade_group_id,
+        func.min(Trade.ticker).label('ticker'),
+        func.min(Trade.trade_type).label('trade_type'),
+        func.min(Trade.strategy).label('strategy'),
+        func.min(Trade.setup_type).label('setup_type'),
+        func.min(Trade.timeframe).label('timeframe'),
+        func.min(Trade.entry_date).label('entry_date'),
+        func.avg(Trade.entry_price).label('avg_entry_price'),
+        func.sum(Trade.position_size).label('total_position_size'),
+        func.min(Trade.stop_loss).label('stop_loss'),  # Use minimum stop loss as position stop
+        func.max(Trade.take_profit).label('take_profit'),
+        func.sum(Trade.total_risk).label('total_risk'),
+        func.max(Trade.created_at).label('last_updated')
+    ).filter(
+        Trade.user_id == user_id,
+        Trade.status.in_(['ACTIVE', 'PLANNED'])  # Only show open positions (uppercase)
+    ).group_by(
+        Trade.trade_group_id
+    ).order_by(
+        desc('last_updated')
+    ).offset(skip).limit(limit)
+    
+    positions = []
+    for row in positions_query.all():
+        # Calculate current position size after partial exits
+        current_shares = calculate_current_position_size_by_group(db, row.trade_group_id)
+        
+        # Skip positions with no remaining shares
+        if current_shares <= 0:
+            continue
+            
+        # Calculate realized P&L from partial exits
+        trades_in_group = db.query(Trade.id).filter(Trade.trade_group_id == row.trade_group_id).all()
+        trade_ids = [trade.id for trade in trades_in_group]
+        
+        realized_pnl = 0
+        if trade_ids:
+            partial_exits = db.query(PartialExit).filter(
+                PartialExit.trade_id.in_(trade_ids)
+            ).all()
+            realized_pnl = sum(exit.profit_loss for exit in partial_exits if exit.profit_loss)
+            
+        position = {
+            'id': row.trade_group_id,  # Use trade_group_id as the position ID
+            'trade_group_id': row.trade_group_id,
+            'ticker': row.ticker,
+            'trade_type': row.trade_type,
+            'displayDirection': 'Long' if row.trade_type == 'long' else 'Short',
+            'strategy': row.strategy,
+            'setup_type': row.setup_type,
+            'timeframe': row.timeframe,
+            'entry_date': row.entry_date,
+            'entry_price': round(row.avg_entry_price, 2),
+            'position_size': current_shares,
+            'stop_loss': row.stop_loss,
+            'take_profit': row.take_profit,
+            'total_risk': row.total_risk,
+            'realized_pnl': round(realized_pnl, 2),  # Add realized P&L
+            'status': 'active',  # All positions returned here are active
+            'last_updated': row.last_updated
+        }
+        
+        # Calculate risk percentage if stop loss exists
+        if row.stop_loss and row.avg_entry_price:
+            risk_per_share = abs(row.avg_entry_price - row.stop_loss)
+            position['risk_per_share'] = risk_per_share
+            position['risk_percent'] = round((risk_per_share / row.avg_entry_price) * 100, 2)
+        
+        positions.append(position)
+    
+    return positions
+
+
+def calculate_current_position_size_by_group(db: Session, trade_group_id: str) -> float:
+    """Calculate current position size for a trade group after partial exits"""
+    
+    # Get total shares from all trades in the group
+    total_shares = db.query(func.sum(Trade.position_size)).filter(
+        Trade.trade_group_id == trade_group_id
+    ).scalar() or 0
+    
+    # Get total shares sold via partial exits for all trades in the group
+    trades_in_group = db.query(Trade.id).filter(Trade.trade_group_id == trade_group_id).all()
+    trade_ids = [trade.id for trade in trades_in_group]
+    
+    total_sold = 0
+    if trade_ids:
+        total_sold = db.query(func.sum(PartialExit.shares_sold)).filter(
+            PartialExit.trade_id.in_(trade_ids)
+        ).scalar() or 0
+    
+    return max(0, total_shares - total_sold)
+
+
+def sell_from_position_by_group(db: Session, trade_group_id: str, exit_data: PartialExitCreate) -> dict:
+    """Sell shares from a position (trade group)"""
+    
+    # Get all trades in the group
+    trades_in_group = db.query(Trade).filter(Trade.trade_group_id == trade_group_id).all()
+    if not trades_in_group:
+        raise HTTPException(status_code=404, detail="Position not found")
+    
+    # Calculate current position size
+    current_shares = calculate_current_position_size_by_group(db, trade_group_id)
+    
+    if exit_data.shares_sold > current_shares:
+        raise HTTPException(
+            status_code=400, 
+            detail=f"Cannot sell {exit_data.shares_sold} shares. Only {current_shares} shares available."
+        )
+    
+    # Use the first trade in the group for the partial exit (for tracking purposes)
+    # This is arbitrary but we need to attach the exit to a specific trade record
+    primary_trade = trades_in_group[0]
+    
+    # Create partial exit record
+    partial_exit = PartialExit(
+        trade_id=primary_trade.id,
+        exit_price=exit_data.exit_price,
+        exit_date=exit_data.exit_date,
+        shares_sold=exit_data.shares_sold,
+        profit_loss=exit_data.profit_loss,
+        notes=exit_data.notes,
+        created_at=datetime.utcnow()
+    )
+    
+    db.add(partial_exit)
+    
+    # Check if position is fully closed
+    remaining_shares = current_shares - exit_data.shares_sold
+    if remaining_shares <= 0:
+        # Mark all trades in the group as closed
+        for trade in trades_in_group:
+            trade.status = 'closed'
+            trade.exit_date = exit_data.exit_date
+            trade.exit_price = exit_data.exit_price
+    
+    db.commit()
+    db.refresh(partial_exit)
+    
+    return {
+        "message": "Successfully sold from position",
+        "trade_group_id": trade_group_id,
+        "shares_sold": exit_data.shares_sold,
+        "exit_price": exit_data.exit_price,
+        "remaining_shares": max(0, remaining_shares),
+        "partial_exit_id": partial_exit.id
+    }

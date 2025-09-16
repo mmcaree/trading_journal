@@ -28,11 +28,23 @@ import {
   InputLabel,
   Select,
   MenuItem,
-  SelectChangeEvent
+  SelectChangeEvent,
+  InputAdornment
 } from '@mui/material';
-import { ExpandMore, Security, Email, Download, VpnKey } from '@mui/icons-material';
+import { 
+  ExpandMore, 
+  Security, 
+  Email, 
+  Download, 
+  VpnKey,
+  AccountBalance,
+  TrendingUp,
+  Save
+} from '@mui/icons-material';
 import { useAuth } from '../context/AuthContext';
-import { updateProfile, changePassword, UserUpdateData, ChangePasswordData, exportUserData, deleteUserAccount } from '../services/userService';
+import { updateProfile, changePassword, UserUpdateData, ChangePasswordData, exportUserData, deleteUserAccount, clearAllUserData } from '../services/userService';
+import { AccountSettings } from '../services/types';
+import { accountService } from '../services/accountService';
 import { 
   updateNotificationSettings, 
   setup2FA, 
@@ -79,6 +91,19 @@ const Settings: React.FC = () => {
   const [twoFactorToken, setTwoFactorToken] = useState('');
   const [backupCodes, setBackupCodes] = useState<string[]>([]);
   const [showBackupCodes, setShowBackupCodes] = useState(false);
+
+  // Account Settings state
+  const [accountSettings, setAccountSettings] = useState<AccountSettings>(accountService.getAccountSettings());
+  const [tempAccountBalance, setTempAccountBalance] = useState<string>(accountService.getCurrentBalance().toString());
+  const [tempStartingBalance, setTempStartingBalance] = useState<string>(accountService.getAccountSettings().starting_balance.toString());
+
+  // Load account settings from service on component mount
+  useEffect(() => {
+    const settings = accountService.getAccountSettings();
+    setAccountSettings(settings);
+    setTempAccountBalance(settings.current_balance.toString());
+    setTempStartingBalance(settings.starting_balance.toString());
+  }, []);
 
   const getDisplayName = () => {
     if (user?.display_name) return user.display_name;
@@ -137,6 +162,66 @@ const Settings: React.FC = () => {
     } finally {
       setLoading(false);
     }
+  };
+
+  // Account balance handlers
+  const handleAccountBalanceUpdate = async () => {
+    const newBalance = parseFloat(tempAccountBalance);
+    
+    if (isNaN(newBalance) || newBalance <= 0) {
+      setAlert({ type: 'error', message: 'Please enter a valid account balance greater than 0' });
+      return;
+    }
+
+    setLoading(true);
+    
+    try {
+      accountService.updateCurrentBalance(newBalance);
+      const updatedSettings = accountService.getAccountSettings();
+      setAccountSettings(updatedSettings);
+      
+      setAlert({ type: 'success', message: 'Account balance updated successfully!' });
+    } catch (error: any) {
+      setAlert({ type: 'error', message: error.message });
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const resetToStartingBalance = () => {
+    setTempAccountBalance(accountSettings.starting_balance.toString());
+  };
+
+  // Starting balance handlers
+  const handleStartingBalanceUpdate = async () => {
+    const newStartingBalance = parseFloat(tempStartingBalance);
+    
+    if (isNaN(newStartingBalance) || newStartingBalance <= 0) {
+      setAlert({ type: 'error', message: 'Please enter a valid starting balance greater than 0' });
+      return;
+    }
+
+    setLoading(true);
+    
+    try {
+      accountService.updateStartingBalance(newStartingBalance);
+      const updatedSettings = accountService.getAccountSettings();
+      setAccountSettings(updatedSettings);
+      
+      setAlert({ type: 'success', message: 'Starting balance updated successfully!' });
+    } catch (error: any) {
+      setAlert({ type: 'error', message: error.message });
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const formatCurrency = (amount: number) => {
+    return accountService.formatCurrency(amount);
+  };
+
+  const calculateAccountGrowth = () => {
+    return accountService.getAccountGrowth();
   };
 
   // Notification handlers
@@ -271,9 +356,57 @@ const Settings: React.FC = () => {
   };
 
   const [showDeleteConfirmation, setShowDeleteConfirmation] = useState(false);
+  const [showClearDataConfirmation, setShowClearDataConfirmation] = useState(false);
 
   const handleDeleteAccount = async () => {
     setShowDeleteConfirmation(true);
+  };
+
+  const handleClearAllData = async () => {
+    setShowClearDataConfirmation(true);
+  };
+
+  const confirmClearAllData = async () => {
+    setLoading(true);
+    try {
+      // Call API to clear all trading data from database
+      await clearAllUserData();
+      
+      // Clear account settings (reset to default)
+      const defaultSettings: AccountSettings = {
+        starting_balance: 10000,
+        current_balance: 10000,
+        last_updated: new Date().toISOString()
+      };
+      
+      accountService.updateAccountSettings(defaultSettings);
+      setAccountSettings(defaultSettings);
+      setTempAccountBalance('10000');
+      setTempStartingBalance('10000');
+      
+      // Clear any cached data in localStorage related to trading
+      const keysToRemove = [
+        'dashboardData',
+        'analyticsData', 
+        'tradesCache',
+        'chartData'
+      ];
+      
+      keysToRemove.forEach(key => {
+        localStorage.removeItem(key);
+      });
+      
+      setAlert({ 
+        type: 'success', 
+        message: 'All trading data cleared successfully! Your account balance has been reset to $10,000 and all trades/positions have been deleted.' 
+      });
+      
+    } catch (error: any) {
+      setAlert({ type: 'error', message: error.message || 'Failed to clear data' });
+    } finally {
+      setLoading(false);
+      setShowClearDataConfirmation(false);
+    }
   };
 
   const confirmDeleteAccount = async () => {
@@ -451,6 +584,180 @@ const Settings: React.FC = () => {
                 </Grid>
               </Grid>
             </Box>
+          </Paper>
+        </Grid>
+
+        {/* Account Management Section */}
+        <Grid item xs={12}>
+          <Paper sx={{ p: 3 }}>
+            <Typography variant="h6" gutterBottom>
+              Account Management
+            </Typography>
+            <Divider sx={{ mb: 3 }} />
+
+            <Grid container spacing={3}>
+              {/* Current Account Balance */}
+              <Grid item xs={12} md={6}>
+                <Box sx={{ display: 'flex', alignItems: 'center', mb: 2 }}>
+                  <AccountBalance sx={{ mr: 1, color: 'primary.main' }} />
+                  <Typography variant="h6">Current Account Balance</Typography>
+                </Box>
+                
+                <Typography variant="h4" color="primary" gutterBottom>
+                  {formatCurrency(accountSettings.current_balance)}
+                </Typography>
+                
+                <Box sx={{ display: 'flex', alignItems: 'center', mb: 3 }}>
+                  <Typography variant="body2" color="text.secondary" sx={{ mr: 1 }}>
+                    Starting Balance: {formatCurrency(accountSettings.starting_balance)}
+                  </Typography>
+                  {(() => {
+                    const { growth, growthPercent } = calculateAccountGrowth();
+                    return (
+                      <Chip 
+                        icon={<TrendingUp />}
+                        label={`${growth >= 0 ? '+' : ''}${formatCurrency(growth)} (${growthPercent >= 0 ? '+' : ''}${growthPercent.toFixed(1)}%)`}
+                        color={growth >= 0 ? 'success' : 'error'}
+                        size="small"
+                      />
+                    );
+                  })()}
+                </Box>
+
+                <TextField
+                  fullWidth
+                  label="Update Account Balance"
+                  value={tempAccountBalance}
+                  onChange={(e) => setTempAccountBalance(e.target.value)}
+                  type="number"
+                  InputProps={{
+                    startAdornment: <InputAdornment position="start">$</InputAdornment>,
+                  }}
+                  helperText="Enter your current account balance to help with position sizing calculations"
+                  sx={{ mb: 2 }}
+                />
+                
+                <Box sx={{ display: 'flex', gap: 2, flexWrap: 'wrap' }}>
+                  <Button 
+                    variant="contained" 
+                    color="primary" 
+                    onClick={handleAccountBalanceUpdate}
+                    disabled={loading}
+                    startIcon={<Save />}
+                  >
+                    {loading ? 'Updating...' : 'Update Balance'}
+                  </Button>
+                  <Button 
+                    variant="outlined" 
+                    onClick={resetToStartingBalance}
+                    disabled={loading}
+                  >
+                    Reset to Starting
+                  </Button>
+                </Box>
+              </Grid>
+
+              {/* Starting Balance Configuration */}
+              <Grid item xs={12}>
+                <Divider sx={{ my: 2 }} />
+                <Box sx={{ display: 'flex', alignItems: 'center', mb: 2 }}>
+                  <TrendingUp sx={{ mr: 1, color: 'warning.main' }} />
+                  <Typography variant="h6">Starting Balance Configuration</Typography>
+                </Box>
+                
+                <Grid container spacing={3} alignItems="center">
+                  <Grid item xs={12} md={8}>
+                    <TextField
+                      fullWidth
+                      label="Set Starting Balance"
+                      value={tempStartingBalance}
+                      onChange={(e) => setTempStartingBalance(e.target.value)}
+                      type="number"
+                      InputProps={{
+                        startAdornment: <InputAdornment position="start">$</InputAdornment>,
+                      }}
+                      helperText="Set your account's starting balance for accurate growth calculations"
+                      sx={{ mb: 2 }}
+                    />
+                  </Grid>
+                  <Grid item xs={12} md={4}>
+                    <Button 
+                      variant="contained" 
+                      color="warning"
+                      onClick={handleStartingBalanceUpdate}
+                      disabled={loading}
+                      startIcon={<Save />}
+                      fullWidth
+                    >
+                      {loading ? 'Updating...' : 'Update Starting Balance'}
+                    </Button>
+                  </Grid>
+                </Grid>
+                
+                <Alert severity="warning" sx={{ mt: 2 }}>
+                  <Typography variant="body2">
+                    <strong>Important:</strong> Changing your starting balance will affect all growth calculations and percentages. 
+                    This should represent your initial account value when you started tracking trades.
+                  </Typography>
+                </Alert>
+              </Grid>
+
+              {/* Account Stats */}
+              <Grid item xs={12} md={6}>
+                <Box sx={{ display: 'flex', alignItems: 'center', mb: 2 }}>
+                  <TrendingUp sx={{ mr: 1, color: 'success.main' }} />
+                  <Typography variant="h6">Account Statistics</Typography>
+                </Box>
+                
+                <Grid container spacing={2}>
+                  <Grid item xs={6}>
+                    <Paper sx={{ p: 2, textAlign: 'center', backgroundColor: 'background.default' }}>
+                      <Typography variant="body2" color="text.secondary">
+                        Starting Balance
+                      </Typography>
+                      <Typography variant="h6">
+                        {formatCurrency(accountSettings.starting_balance)}
+                      </Typography>
+                    </Paper>
+                  </Grid>
+                  <Grid item xs={6}>
+                    <Paper sx={{ p: 2, textAlign: 'center', backgroundColor: 'background.default' }}>
+                      <Typography variant="body2" color="text.secondary">
+                        Last Updated
+                      </Typography>
+                      <Typography variant="h6">
+                        {new Date(accountSettings.last_updated).toLocaleDateString()}
+                      </Typography>
+                    </Paper>
+                  </Grid>
+                  <Grid item xs={12}>
+                    <Paper sx={{ p: 2, textAlign: 'center', backgroundColor: 'background.default' }}>
+                      <Typography variant="body2" color="text.secondary">
+                        Account Growth
+                      </Typography>
+                      <Typography 
+                        variant="h6" 
+                        color={calculateAccountGrowth().growth >= 0 ? 'success.main' : 'error.main'}
+                      >
+                        {(() => {
+                          const { growth, growthPercent } = calculateAccountGrowth();
+                          return `${growth >= 0 ? '+' : ''}${formatCurrency(growth)} (${growthPercent >= 0 ? '+' : ''}${growthPercent.toFixed(1)}%)`;
+                        })()}
+                      </Typography>
+                    </Paper>
+                  </Grid>
+                </Grid>
+                
+                <Alert severity="info" sx={{ mt: 2 }}>
+                  <Typography variant="body2">
+                    <strong>Why track account size?</strong>
+                    <br />
+                    Your account balance helps calculate proper position sizes and risk percentages. 
+                    Update it regularly as your account grows to maintain optimal risk management.
+                  </Typography>
+                </Alert>
+              </Grid>
+            </Grid>
           </Paper>
         </Grid>
 
@@ -651,14 +958,29 @@ const Settings: React.FC = () => {
                 <Typography variant="subtitle2" color="error" gutterBottom>
                   Danger Zone
                 </Typography>
-                <Button 
-                  variant="outlined" 
-                  color="error"
-                  onClick={handleDeleteAccount}
-                  disabled={loading}
-                >
-                  Delete Account
-                </Button>
+                <Box sx={{ display: 'flex', gap: 2, flexWrap: 'wrap' }}>
+                  <Button 
+                    variant="outlined" 
+                    color="warning"
+                    onClick={handleClearAllData}
+                    disabled={loading}
+                  >
+                    Clear All Data
+                  </Button>
+                  <Button 
+                    variant="outlined" 
+                    color="error"
+                    onClick={handleDeleteAccount}
+                    disabled={loading}
+                  >
+                    Delete Account
+                  </Button>
+                </Box>
+                <Typography variant="caption" color="text.secondary" sx={{ mt: 1, display: 'block' }}>
+                  Clear All Data: Resets account balance and clears cached data (keeps your account)
+                  <br />
+                  Delete Account: Permanently removes your account and all data
+                </Typography>
               </Grid>
             </Grid>
           </Paper>
@@ -802,6 +1124,45 @@ const Settings: React.FC = () => {
             disabled={loading}
           >
             {loading ? 'Deleting...' : 'Delete Account'}
+          </Button>
+        </DialogActions>
+      </Dialog>
+
+      {/* Clear All Data Confirmation Dialog */}
+      <Dialog open={showClearDataConfirmation} onClose={() => setShowClearDataConfirmation(false)} maxWidth="sm">
+        <DialogTitle color="warning">Clear All Data</DialogTitle>
+        <DialogContent>
+          <Typography variant="body1" paragraph>
+            Are you sure you want to clear all your trading data? This will give you a fresh start.
+          </Typography>
+          <Typography variant="body2" color="text.secondary" paragraph>
+            This will permanently delete:
+          </Typography>
+          <Typography variant="body2" color="text.secondary" component="div">
+            • All your trades and positions
+            <br />
+            • All imported trading data and history
+            <br />
+            • All charts and trade analysis
+            <br />
+            • Account balance will be reset to $10,000
+          </Typography>
+          <Typography variant="body2" color="error.main" sx={{ mt: 2 }}>
+            <strong>Warning:</strong> This action cannot be undone! All your trading data will be permanently deleted from the database.
+            Your profile and login credentials will remain intact.
+          </Typography>
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => setShowClearDataConfirmation(false)}>
+            Cancel
+          </Button>
+          <Button 
+            onClick={confirmClearAllData} 
+            color="warning" 
+            variant="contained"
+            disabled={loading}
+          >
+            {loading ? 'Clearing...' : 'Clear All Data'}
           </Button>
         </DialogActions>
       </Dialog>

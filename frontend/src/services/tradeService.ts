@@ -9,6 +9,44 @@ export interface PartialExit {
   notes?: string;
 }
 
+export interface PositionEntry {
+  id: number;
+  entry_date: string;
+  entry_price: number;
+  shares: number;
+  stop_loss: number;
+  take_profit: number;
+  cost: number;
+  notes?: string;
+}
+
+export interface PositionExit {
+  id: number;
+  exit_date: string;
+  exit_price: number;
+  shares_sold: number;
+  profit_loss: number;
+  proceeds: number;
+  notes?: string;
+}
+
+export interface PositionDetails {
+  trade_group_id: string;
+  ticker: string;
+  entries: PositionEntry[];
+  exits: PositionExit[];
+  summary: {
+    total_shares_bought: number;
+    total_shares_sold: number;
+    current_shares: number;
+    avg_entry_price: number;
+    total_cost: number;
+    total_realized_pnl: number;
+    entries_count: number;
+    exits_count: number;
+  };
+}
+
 export interface Trade extends ApiTrade {
   displayStatus: string;
   displayDirection: string;
@@ -42,6 +80,47 @@ export interface TradeFormData {
   market_conditions?: string;
   mistakes?: string;
   lessons?: string;
+}
+
+// New position-based functions
+export async function getPositions(): Promise<any[]> {
+  try {
+    const response = await api.get('/api/trades/positions');
+    return response.data;
+  } catch (error) {
+    console.error('Error fetching positions:', error);
+    throw error;
+  }
+}
+
+export async function addToPositionGroup(tradeGroupId: string, entryData: TradeEntryData): Promise<any> {
+  try {
+    const response = await api.post(`/api/trades/positions/${tradeGroupId}/entries`, entryData);
+    return response.data;
+  } catch (error) {
+    console.error('Error adding to position group:', error);
+    throw error;
+  }
+}
+
+export async function sellFromPositionGroup(tradeGroupId: string, exitData: PartialExitData): Promise<any> {
+  try {
+    const response = await api.post(`/api/trades/positions/${tradeGroupId}/exits`, exitData);
+    return response.data;
+  } catch (error) {
+    console.error('Error selling from position group:', error);
+    throw error;
+  }
+}
+
+export async function getPositionDetails(tradeGroupId: string): Promise<PositionDetails> {
+  try {
+    const response = await api.get(`/api/trades/positions/${tradeGroupId}/details`);
+    return response.data;
+  } catch (error) {
+    console.error('Error fetching position details:', error);
+    throw error;
+  }
 }
 
 // Dashboard data type for fetching dashboard statistics
@@ -87,14 +166,11 @@ const formatDate = (dateStr: string): string => {
 const calculateTotalPL = (trade: any): number => {
   let total = 0;
   
-  console.log("Calculating P&L for trade:", trade);
-  
   if (trade.partial_exits && Array.isArray(trade.partial_exits)) {
     total += trade.partial_exits.reduce((sum: number, exit: any) => sum + (exit.profit_loss || 0), 0);
   }
   
   const profit = trade.profit_loss || trade.resultAmount || trade.profitLoss || 0;
-  console.log("Found profit value:", profit);
   
   const isClosedTrade = 
     (trade.status && trade.status.toLowerCase() === 'closed') ||
@@ -102,7 +178,6 @@ const calculateTotalPL = (trade: any): number => {
     
   if (isClosedTrade) {
     total += profit;
-    console.log("Adding profit to total:", profit, "New total:", total);
   }
   
   return total;
@@ -200,12 +275,25 @@ export const fetchDashboardData = async (): Promise<DashboardData> => {
       return sum + (trade.profit_loss || 0);
     }, 0);
     
-    console.log('Calculated total P&L:', totalProfitLoss);// Create dashboard data object
+    // Fetch and add realized P&L from all partial exits
+    let totalRealizedPnl = 0;
+    try {
+      const partialExitsResponse = await api.get('/api/analytics/partial-exits-summary');
+      totalRealizedPnl = partialExitsResponse.data.total_realized_pnl || 0;
+      console.log('Total realized P&L from partial exits:', totalRealizedPnl);
+    } catch (error) {
+      console.warn('Could not fetch realized P&L, continuing without it:', error);
+    }
+    
+    const totalPnlWithRealized = totalProfitLoss + totalRealizedPnl;
+    console.log('Calculated total P&L (with realized):', totalPnlWithRealized);
+    
+    // Create dashboard data object
     const dashboardData: DashboardData = {
       totalTrades,
       openTrades,
       winRate: Number(winRate.toFixed(1)),
-      profitLoss: Number(totalProfitLoss.toFixed(2)),
+      profitLoss: Number(totalPnlWithRealized.toFixed(2)),
       equityCurve: calculateEquityCurve(trades, 0), // Start at 0 to show relative performance
       setupPerformance: calculateSetupPerformance(trades),
       recentTrades: getRecentTrades(trades)
@@ -459,7 +547,11 @@ export const fetchTrade = async (id: number): Promise<any> => {
     const apiTrade = response.data;
     
     // Calculate risk based on position size and risk_per_share
-    const risk = apiTrade.total_risk || (apiTrade.risk_per_share * apiTrade.position_size);      // Transform the trade data
+    const risk = apiTrade.total_risk || (apiTrade.risk_per_share * apiTrade.position_size);    
+    
+    const tradeInstrumentType = apiTrade.instrument_type || 'stock';
+    
+    // Transform the trade data - store raw contract prices, display raw contract prices
     const transformedTrade = {
       id: apiTrade.id,
       ticker: apiTrade.ticker,
@@ -470,10 +562,12 @@ export const fetchTrade = async (id: number): Promise<any> => {
       shares: apiTrade.position_size,
       strategy: apiTrade.timeframe || 'Unknown',  // API timeframe maps to strategy in the UI
       setupType: apiTrade.setup_type || 'Unknown',
+      timeframe: apiTrade.timeframe || 'Daily',
       status: apiTrade.status?.toLowerCase() === 'active' ? 'Open' : 
               apiTrade.status?.toLowerCase() === 'closed' ? 'Closed' : 
               apiTrade.status ? apiTrade.status.charAt(0).toUpperCase() + apiTrade.status.slice(1) : '',
       direction: apiTrade.trade_type === 'long' ? 'Long' : 'Short',
+      instrumentType: tradeInstrumentType?.toLowerCase() || 'stock',
       result: apiTrade.profit_loss_percent || (apiTrade.profit_loss && risk ? ((apiTrade.profit_loss / risk) * 100) : null),
       resultAmount: apiTrade.profit_loss,
       risk: risk,
@@ -524,15 +618,16 @@ export const createTrade = async (tradeData: any): Promise<Trade> => {
     
     // Only validate stop loss if it's provided
     if (stopLoss > 0) {
-      // Determine if the trade direction makes sense with the stop loss
+      // For new trades, enforce traditional stop loss rules (risk management)
+      // Stop loss should be on the losing side to limit risk
       const isLong = tradeData.direction === 'Long';
       const isValidTrade = isLong ? (entryPrice > stopLoss) : (stopLoss > entryPrice);
       
       if (!isValidTrade) {
         throw new Error(
           isLong 
-            ? 'For Long trades, stop loss must be lower than entry price' 
-            : 'For Short trades, stop loss must be higher than entry price'
+            ? 'For new Long trades, initial stop loss must be lower than entry price' 
+            : 'For new Short trades, initial stop loss must be higher than entry price'
         );
       }
     }
@@ -559,22 +654,15 @@ export const createTrade = async (tradeData: any): Promise<Trade> => {
       setup_type: tradeData.setupType || "Other",
       timeframe: tradeData.timeframe || "Daily",
       market_conditions: tradeData.marketConditions || undefined,  // Don't force default
+      instrument_type: tradeData.instrumentType || 'stock',
       tags: Array.isArray(tradeData.tags) ? tradeData.tags : [],
       partial_exits: tradeData.partial_exits || []
     };
     
     console.log('Sending API trade data:', apiTradeData);
     try {
-      // Make a direct axios call with explicit headers for debugging
-      const url = `${API_URL}/api/trades`;
-      console.log('Sending API trade data with URL:', url);
-      
-      const response = await axios.post(url, apiTradeData, {
-        headers: {
-          'Content-Type': 'application/json',
-          'Accept': 'application/json'
-        }
-      });
+      // Use the configured api instance which includes authentication headers
+      const response = await api.post('/api/trades', apiTradeData);
       return response.data;
     } catch (error: any) {
       console.error('Error creating trade:', error);
@@ -624,16 +712,24 @@ export const updateTrade = async (tradeData: any): Promise<Trade> => {
       
       // Only validate stop loss if it's provided
       if (stopLoss > 0) {
+        // For trade updates, allow protective stops (breakeven or profitable stops)
+        // This is more flexible than initial trade creation
         const isLong = tradeData.direction === 'Long';
-        const isValidTrade = isLong ? (entryPrice > stopLoss) : (stopLoss > entryPrice);
         
-        if (!isValidTrade) {
-          throw new Error(
-            isLong 
-            ? 'For Long trades, stop loss must be lower than entry price' 
-            : 'For Short trades, stop loss must be higher than entry price'
-          );
+        // Allow any stop loss position for existing trades
+        // Traders may want to:
+        // 1. Move stop to breakeven (stop loss = entry price)
+        // 2. Trail stops into profit (stop loss above entry for longs, below for shorts)
+        // 3. Adjust stops based on new analysis
+        
+        // Optional: Add warning for unusual stop positions, but don't block
+        const isProtectiveStop = isLong ? (stopLoss >= entryPrice) : (stopLoss <= entryPrice);
+        if (isProtectiveStop) {
+          // This is a protective stop (breakeven or profitable) - allow it
+          console.log(`Protective stop detected: ${isLong ? 'Long' : 'Short'} trade with stop at ${stopLoss} vs entry ${entryPrice}`);
         }
+        
+        // No validation errors - allow all stop loss adjustments for existing trades
       }
     }
     
@@ -659,6 +755,7 @@ export const updateTrade = async (tradeData: any): Promise<Trade> => {
       setup_type: tradeData.setupType,
       timeframe: tradeData.timeframe,
       market_conditions: 'Normal', // Default value
+      instrument_type: tradeData.instrumentType || 'stock',
       tags: tradeData.tags || [],
       partial_exits: tradeData.partial_exits || []
     };
@@ -711,7 +808,7 @@ interface ApiTrade {
   id: number;
   ticker: string;
   trade_type: 'long' | 'short';
-  status: 'planned' | 'active' | 'closed' | 'canceled';
+  status: 'planned' | 'active' | 'closed' | 'canceled' | 'Open' | 'Closed';
   entry_price: number;
   entry_date: string;
   entry_notes?: string;
@@ -725,9 +822,11 @@ interface ApiTrade {
   total_risk: number;
   profit_loss?: number;
   profit_loss_percent?: number;
+  strategy: string;
   setup_type: string;
   timeframe: string;
   market_conditions?: string;
+  instrument_type?: string;
   tags?: string[];
   partial_exits?: PartialExit[];
 }
@@ -756,3 +855,65 @@ const transformApiTrade = (trade: ApiTrade): Trade => ({
     ? formatDateSafe(trade.exit_date)
     : formatDateSafe(trade.entry_date)
 });
+
+// Multi-entry position management functions
+
+export interface TradeEntryData {
+  entry_price: number;
+  entry_date: string;
+  shares: number;
+  stop_loss: number;
+  notes?: string;
+}
+
+export interface PartialExitData {
+  exit_price: number;
+  exit_date: string;
+  shares_sold: number;
+  profit_loss: number;
+  notes?: string;
+}
+
+export interface TradeDetailsResponse {
+  trade: Trade;
+  entries: any[];
+  exits: any[];
+  calculated: {
+    current_shares: number;
+    avg_entry_price: number;
+    total_invested: number;
+    total_risk: number;
+    entries_count: number;
+    exits_count: number;
+  };
+}
+
+export async function addToPosition(tradeId: number, entryData: TradeEntryData): Promise<any> {
+  try {
+    const response = await api.post(`/api/trades/${tradeId}/entries`, entryData);
+    return response.data;
+  } catch (error) {
+    console.error('Error adding to position:', error);
+    throw error;
+  }
+}
+
+export async function sellFromPosition(tradeId: number, exitData: PartialExitData): Promise<any> {
+  try {
+    const response = await api.post(`/api/trades/${tradeId}/exits`, exitData);
+    return response.data;
+  } catch (error) {
+    console.error('Error selling from position:', error);
+    throw error;
+  }
+}
+
+export async function getTradeDetails(tradeId: number): Promise<TradeDetailsResponse> {
+  try {
+    const response = await api.get(`/api/trades/${tradeId}/details`);
+    return response.data;
+  } catch (error) {
+    console.error('Error getting trade details:', error);
+    throw error;
+  }
+}

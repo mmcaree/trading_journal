@@ -2,14 +2,15 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from typing import List, Optional
 from sqlalchemy.orm import Session
 from app.api.deps import get_db, get_current_user
-from app.models.schemas import TradeCreate, TradeResponse, TradeUpdate, UserCreate
-from app.services.trade_service import create_trade, get_trades, get_trade, update_trade, delete_trade, trade_to_response_dict
+from app.models.schemas import TradeCreate, TradeResponse, TradeUpdate, TradeEntryCreate, TradeEntryResponse, PartialExitCreate, UserCreate
+from app.services.trade_service import create_trade, get_trades, get_trade, update_trade, delete_trade, trade_to_response_dict, add_to_position, sell_from_position, get_trade_details, get_positions, sell_from_position_by_group
 from app.services.user_service import get_user_by_id, create_user
-from app.models.models import User
+from app.models.models import User, Trade, PartialExit
 
 router = APIRouter()
 
 @router.post("/", response_model=TradeResponse, status_code=status.HTTP_201_CREATED)
+@router.post("", response_model=TradeResponse, status_code=status.HTTP_201_CREATED)  # Handle both /trades/ and /trades
 def create_new_trade(
     trade: TradeCreate,
     db: Session = Depends(get_db),
@@ -83,6 +84,92 @@ def read_trades(
         setup_type=setup_type
     )
 
+@router.get("/positions")
+def get_trading_positions(
+    skip: int = 0,
+    limit: int = 100,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    """Get all open trading positions (grouped by trade_group_id)"""
+    return get_positions(db=db, user_id=current_user.id, skip=skip, limit=limit)
+
+@router.get("/positions/{trade_group_id}/details")
+def get_position_details(
+    trade_group_id: str,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    """Get detailed breakdown of a position including all entries and exits"""
+    # Verify the position belongs to the current user
+    position_trade = db.query(Trade).filter(
+        Trade.trade_group_id == trade_group_id,
+        Trade.user_id == current_user.id
+    ).first()
+    if not position_trade:
+        raise HTTPException(status_code=404, detail="Position not found")
+    
+    # Get all trades in the group (entries)
+    trades_in_group = db.query(Trade).filter(
+        Trade.trade_group_id == trade_group_id
+    ).order_by(Trade.entry_date).all()
+    
+    # Get all partial exits for the group
+    trade_ids = [trade.id for trade in trades_in_group]
+    partial_exits = db.query(PartialExit).filter(
+        PartialExit.trade_id.in_(trade_ids)
+    ).order_by(PartialExit.exit_date).all()
+    
+    # Calculate aggregated data
+    total_shares_bought = sum(trade.position_size for trade in trades_in_group)
+    total_cost = sum(trade.position_size * trade.entry_price for trade in trades_in_group)
+    avg_entry_price = total_cost / total_shares_bought if total_shares_bought > 0 else 0
+    
+    total_shares_sold = sum(exit.shares_sold for exit in partial_exits)
+    current_shares = total_shares_bought - total_shares_sold
+    
+    total_realized_pnl = sum(exit.profit_loss for exit in partial_exits if exit.profit_loss)
+    
+    return {
+        "trade_group_id": trade_group_id,
+        "ticker": trades_in_group[0].ticker if trades_in_group else "",
+        "entries": [
+            {
+                "id": trade.id,
+                "entry_date": trade.entry_date,
+                "entry_price": trade.entry_price,
+                "shares": trade.position_size,
+                "stop_loss": trade.stop_loss,
+                "take_profit": trade.take_profit,
+                "cost": trade.position_size * trade.entry_price,
+                "notes": trade.entry_notes
+            }
+            for trade in trades_in_group
+        ],
+        "exits": [
+            {
+                "id": exit.id,
+                "exit_date": exit.exit_date,
+                "exit_price": exit.exit_price,
+                "shares_sold": exit.shares_sold,
+                "profit_loss": exit.profit_loss,
+                "proceeds": exit.shares_sold * exit.exit_price,
+                "notes": exit.notes
+            }
+            for exit in partial_exits
+        ],
+        "summary": {
+            "total_shares_bought": total_shares_bought,
+            "total_shares_sold": total_shares_sold,
+            "current_shares": current_shares,
+            "avg_entry_price": round(avg_entry_price, 2),
+            "total_cost": round(total_cost, 2),
+            "total_realized_pnl": round(total_realized_pnl, 2),
+            "entries_count": len(trades_in_group),
+            "exits_count": len(partial_exits)
+        }
+    }
+
 @router.get("/{trade_id}")
 def read_trade(
     trade_id: int,
@@ -126,3 +213,86 @@ def delete_existing_trade(
     
     delete_trade(db=db, trade_id=trade_id)
     return None
+
+@router.post("/{trade_id}/entries", response_model=TradeEntryResponse, status_code=status.HTTP_201_CREATED)
+def add_trade_entry(
+    trade_id: int,
+    entry: TradeEntryCreate,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    """Add to an existing position (create a new entry)"""
+    trade = get_trade(db=db, trade_id=trade_id)
+    if not trade:
+        raise HTTPException(status_code=404, detail="Trade not found")
+    if trade.user_id != current_user.id:
+        raise HTTPException(status_code=403, detail="Not authorized to modify this trade")
+    
+    return add_to_position(db=db, trade_id=trade_id, entry=entry)
+
+@router.post("/{trade_id}/exits", response_model=dict, status_code=status.HTTP_201_CREATED)
+def sell_trade_shares(
+    trade_id: int,
+    exit_data: PartialExitCreate,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    """Sell shares from an existing position"""
+    trade = get_trade(db=db, trade_id=trade_id)
+    if not trade:
+        raise HTTPException(status_code=404, detail="Trade not found")
+    if trade.user_id != current_user.id:
+        raise HTTPException(status_code=403, detail="Not authorized to modify this trade")
+    
+    return sell_from_position(db=db, trade_id=trade_id, exit_data=exit_data)
+
+@router.get("/{trade_id}/details")
+def get_trade_full_details(
+    trade_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    """Get detailed trade information including all entries and exits"""
+    trade = get_trade(db=db, trade_id=trade_id)
+    if not trade:
+        raise HTTPException(status_code=404, detail="Trade not found")
+    if trade.user_id != current_user.id:
+        raise HTTPException(status_code=403, detail="Not authorized to view this trade")
+    
+    return get_trade_details(db=db, trade_id=trade_id)
+
+@router.post("/positions/{trade_group_id}/entries", response_model=dict, status_code=status.HTTP_201_CREATED)
+def add_to_trading_position(
+    trade_group_id: str,
+    entry: TradeEntryCreate,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    """Add to an existing trading position"""
+    # Verify the position belongs to the current user
+    position_trade = db.query(Trade).filter(
+        Trade.trade_group_id == trade_group_id,
+        Trade.user_id == current_user.id
+    ).first()
+    if not position_trade:
+        raise HTTPException(status_code=404, detail="Position not found")
+    
+    return add_to_position(db=db, trade_group_id=trade_group_id, entry=entry)
+
+@router.post("/positions/{trade_group_id}/exits", response_model=dict, status_code=status.HTTP_201_CREATED)
+def sell_from_trading_position(
+    trade_group_id: str,
+    exit_data: PartialExitCreate,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    """Sell shares from an existing trading position"""
+    # Verify the position belongs to the current user
+    position_trade = db.query(Trade).filter(
+        Trade.trade_group_id == trade_group_id,
+        Trade.user_id == current_user.id
+    ).first()
+    if not position_trade:
+        raise HTTPException(status_code=404, detail="Position not found")
+    
+    return sell_from_position_by_group(db=db, trade_group_id=trade_group_id, exit_data=exit_data)

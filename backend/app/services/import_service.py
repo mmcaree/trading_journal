@@ -12,9 +12,10 @@ from sqlalchemy.orm import Session
 from sqlalchemy import and_, desc
 
 from app.models.import_models import ImportedOrder, ImportBatch, Position, PositionOrder, OrderStatus, OrderSide
-from app.models.models import Trade, User
+from app.models.models import Trade, User, InstrumentType, OptionType
 from app.services.trade_service import calculate_trade_metrics
 from app.db.session import get_db
+from app.utils.options_parser import parse_options_symbol, convert_options_price
 
 class TradeImportService:
     
@@ -164,6 +165,14 @@ class TradeImportService:
     
     def process_orders_to_positions(self, user_id: int, batch_id: str = None, account_size: float = 10000) -> Dict[str, Any]:
         """Process imported orders into positions and trades"""
+        
+        # Get batch information to determine if this is an options import
+        batch_info = None
+        is_options_import = False
+        if batch_id:
+            batch_info = self.db.query(ImportBatch).filter(ImportBatch.id == batch_id).first()
+            if batch_info and batch_info.filename:
+                is_options_import = 'options' in batch_info.filename.lower()
         
         # Get orders to process
         query = self.db.query(ImportedOrder).filter(
@@ -520,36 +529,63 @@ class TradeImportService:
                 # Calculate P&L
                 cost_basis = sell_qty * buy_price
                 proceeds = sell_qty * sell_price
-                pnl = proceeds - cost_basis
+                raw_pnl = proceeds - cost_basis
                 
-                print(f"Creating trade: {sell_qty} {position.symbol} @ Buy ${buy_price:.2f} -> Sell ${sell_price:.2f} = P&L ${pnl:.2f}")
+                # Parse options symbol first to determine if this is an options trade
+                options_info = parse_options_symbol(position.symbol)
                 
-                # Calculate trade metrics including risk calculations
+                # For options, P&L needs to be multiplied by 100 since prices are per contract
+                # but represent 100 shares worth of value
+                actual_pnl = raw_pnl * 100 if options_info['is_options'] else raw_pnl
+                
+                print(f"Creating trade: {sell_qty} {position.symbol} @ Buy ${buy_price:.2f} -> Sell ${sell_price:.2f}")
+                if options_info['is_options']:
+                    print(f"  Options P&L: Raw ${raw_pnl:.2f} -> Actual ${actual_pnl:.2f} (×100)")
+                else:
+                    print(f"  Stock P&L: ${actual_pnl:.2f}")
+                
+                # Store the raw prices as they come from the broker (contract prices for options)
+                actual_buy_price = buy_price
+                actual_sell_price = sell_price
+                
+                # Calculate trade metrics including risk calculations using actual prices
                 stop_loss_price = buy_entry.get("stop_loss")
+                metrics_stop_loss = stop_loss_price  # Store raw stop loss price
+                
                 metrics = self._calculate_imported_trade_metrics(
-                    entry_price=buy_price,
-                    exit_price=sell_price,
-                    stop_loss=stop_loss_price,
+                    entry_price=actual_buy_price,
+                    exit_price=actual_sell_price,
+                    stop_loss=metrics_stop_loss,
                     take_profit=None,
                     position_size=sell_qty,
                     trade_type="LONG",
                     account_size=account_size
                 )
                 
+                actual_position_value = metrics["position_value"]
+                
                 # Create trade record
                 trade = Trade(
                     user_id=position.user_id,
-                    ticker=position.symbol,
+                    ticker=options_info['ticker'] if options_info['is_options'] else position.symbol,
                     trade_type="LONG",  # This represents the original position direction
                     status="CLOSED",
+                    trade_group_id=str(uuid.uuid4()),  # Generate unique trade group ID
+                    
+                    # Options fields
+                    instrument_type=InstrumentType.OPTIONS if options_info['is_options'] else InstrumentType.STOCK,
+                    strike_price=options_info['strike_price'] if options_info['is_options'] else None,
+                    expiration_date=options_info['expiration_date'] if options_info['is_options'] else None,
+                    option_type=OptionType.CALL if options_info['option_type'] == 'call' else OptionType.PUT if options_info['option_type'] == 'put' else None,
+                    
                     position_size=sell_qty,
-                    entry_price=buy_price,
-                    exit_price=sell_price,
+                    entry_price=actual_buy_price,
+                    exit_price=actual_sell_price,
                     entry_date=buy_entry["date"],
                     exit_date=order.filled_time or order.placed_time,
-                    profit_loss=pnl,
-                    position_value=metrics["position_value"],
-                    entry_notes=f"Auto-generated from import batch",
+                    profit_loss=actual_pnl,
+                    position_value=actual_position_value,
+                    entry_notes=f"Auto-generated from import batch{' (Options)' if options_info['is_options'] else ''}",
                     setup_type="imported",
                     strategy="Other",  # Default strategy for imported trades
                     timeframe=None,  # Not available from imported data
@@ -572,7 +608,7 @@ class TradeImportService:
                 # Update position
                 position.quantity = (position.quantity or 0) - sell_qty
                 position.total_cost = (position.total_cost or 0.0) - cost_basis
-                position.realized_pnl = (position.realized_pnl or 0.0) + pnl
+                position.realized_pnl = (position.realized_pnl or 0.0) + actual_pnl
                 
                 # Update buy queue
                 buy_entry["quantity"] -= sell_qty
@@ -628,19 +664,34 @@ class TradeImportService:
                 
                 # Create open trade(s) for the matched quantities
                 for entry in open_trade_entries:
+                    # Parse options symbol if it's an options trade
+                    options_info = parse_options_symbol(position.symbol)
+                    
+                    # Store raw prices as they come from the broker
+                    actual_entry_price = entry["entry_price"]
+                    actual_position_value = entry["quantity"] * entry["entry_price"]
+                    
                     trade = Trade(
                         user_id=position.user_id,
-                        ticker=position.symbol,
+                        ticker=options_info['ticker'] if options_info['is_options'] else position.symbol,
                         trade_type="LONG",
                         status="ACTIVE",  # This is an open position
+                        trade_group_id=str(uuid.uuid4()),  # Generate unique trade group ID
+                        
+                        # Options fields
+                        instrument_type=InstrumentType.OPTIONS if options_info['is_options'] else InstrumentType.STOCK,
+                        strike_price=options_info['strike_price'] if options_info['is_options'] else None,
+                        expiration_date=options_info['expiration_date'] if options_info['is_options'] else None,
+                        option_type=OptionType.CALL if options_info['option_type'] == 'call' else OptionType.PUT if options_info['option_type'] == 'put' else None,
+                        
                         position_size=entry["quantity"],
-                        entry_price=entry["entry_price"],
+                        entry_price=actual_entry_price,
                         exit_price=None,
                         entry_date=entry["entry_date"],
                         exit_date=None,
                         profit_loss=None,
-                        position_value=entry["quantity"] * entry["entry_price"],
-                        entry_notes=f"Auto-generated open position from import batch (pending sell @ ${order.price or 'market'})",
+                        position_value=actual_position_value,
+                        entry_notes=f"Auto-generated open position from import batch (pending sell @ ${order.price or 'market'}){' (Options)' if options_info['is_options'] else ''}",
                         setup_type="imported", 
                         strategy="Other",  # Default strategy for imported trades
                         timeframe=None,

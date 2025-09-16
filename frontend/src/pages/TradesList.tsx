@@ -471,7 +471,8 @@ const TradesList: React.FC = () => {
                     ) : null}
                   </IconButton>
                 </Box>
-              </TableCell>              <TableCell>
+              </TableCell>
+              <TableCell>
                 <Box sx={{ display: 'flex', alignItems: 'center' }}>
                   Risk $
                   <IconButton size="small" onClick={() => handleSort('total_risk')}>

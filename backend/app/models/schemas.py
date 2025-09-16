@@ -13,6 +13,14 @@ class TradeStatus(str, Enum):
     CLOSED = "closed"
     CANCELED = "canceled"
 
+class InstrumentType(str, Enum):
+    STOCK = "stock"
+    OPTIONS = "options"
+
+class OptionType(str, Enum):
+    CALL = "call"
+    PUT = "put"
+
 # Partial Exit schemas
 class PartialExitBase(BaseModel):
     exit_price: float
@@ -27,6 +35,26 @@ class PartialExitCreate(PartialExitBase):
 class PartialExitResponse(PartialExitBase):
     id: Optional[int] = None
     trade_id: Optional[int] = None
+    
+    class Config:
+        from_attributes = True
+
+# Trade Entry schemas
+class TradeEntryBase(BaseModel):
+    entry_price: float
+    entry_date: datetime
+    shares: int
+    stop_loss: float
+    notes: Optional[str] = None
+
+class TradeEntryCreate(TradeEntryBase):
+    pass
+
+class TradeEntryResponse(TradeEntryBase):
+    id: Optional[int] = None
+    trade_id: Optional[int] = None
+    is_active: bool = True
+    created_at: Optional[datetime] = None
     
     class Config:
         from_attributes = True
@@ -98,6 +126,13 @@ class TradeBase(BaseModel):
     ticker: str
     trade_type: TradeType
     status: TradeStatus
+    trade_group_id: Optional[str] = None  # Groups related trade events
+    
+    # Instrument type and options details
+    instrument_type: InstrumentType = InstrumentType.STOCK
+    strike_price: Optional[float] = None  # Options only
+    expiration_date: Optional[datetime] = None  # Options only
+    option_type: Optional[OptionType] = None  # Options only (call/put)
     
     # Entry details
     entry_price: float
@@ -120,6 +155,13 @@ class TradeCreate(BaseModel):
     ticker: str
     trade_type: TradeType
     status: TradeStatus
+    trade_group_id: Optional[str] = None  # Groups related trade events
+    
+    # Instrument type and options details
+    instrument_type: InstrumentType = InstrumentType.STOCK
+    strike_price: Optional[float] = None  # Options only
+    expiration_date: Optional[datetime] = None  # Options only
+    option_type: Optional[OptionType] = None  # Options only (call/put)
     
     # Entry details
     entry_price: float
@@ -148,6 +190,12 @@ class TradeUpdate(BaseModel):
     ticker: Optional[str] = None
     trade_type: Optional[TradeType] = None
     status: Optional[TradeStatus] = None
+    
+    # Instrument type and options details
+    instrument_type: Optional[InstrumentType] = None
+    strike_price: Optional[float] = None  # Options only
+    expiration_date: Optional[datetime] = None  # Options only
+    option_type: Optional[OptionType] = None  # Options only (call/put)
     
     # Entry details
     entry_price: Optional[float] = None
@@ -179,6 +227,12 @@ class TradeResponse(BaseModel):
     ticker: str
     trade_type: TradeType
     status: TradeStatus
+    
+    # Instrument type and options details
+    instrument_type: InstrumentType = InstrumentType.STOCK
+    strike_price: Optional[float] = None  # Options only
+    expiration_date: Optional[datetime] = None  # Options only
+    option_type: Optional[OptionType] = None  # Options only (call/put)
     
     # Entry details
     entry_price: float

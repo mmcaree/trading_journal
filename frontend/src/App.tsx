@@ -11,6 +11,7 @@ import DashboardLayout from './layouts/DashboardLayout';
 // Pages
 import Dashboard from './pages/Dashboard';
 import TradesList from './pages/TradesList';
+import Positions from './pages/Positions';
 import TradeDetail from './pages/TradeDetail';
 import TradeForm from './pages/TradeForm';
 import TradeImport from './pages/TradeImport';
@@ -98,6 +99,7 @@ function App() {
                 
                 <Route path="/" element={<ProtectedRoute><DashboardLayout /></ProtectedRoute>}>
                   <Route index element={<Dashboard />} />                <Route path="trades" element={<TradesList />} />
+                  <Route path="positions" element={<Positions />} />
                   <Route path="trades/new" element={<TradeForm />} />
                   <Route path="trades/edit/:id" element={<TradeForm />} />
                   <Route path="trades/:id" element={<TradeDetail />} />

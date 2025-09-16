@@ -28,6 +28,7 @@ import { useFormik } from 'formik';
 import * as Yup from 'yup';
 import { createTrade, updateTrade, fetchTrade } from '../services/tradeService';
 import { getCurrentUser, updateProfile } from '../services/userService';
+import { accountService } from '../services/accountService';
 import { DatePicker } from '@mui/x-date-pickers/DatePicker';
 import { LocalizationProvider } from '@mui/x-date-pickers/LocalizationProvider';
 import { AdapterDateFns } from '@mui/x-date-pickers/AdapterDateFns';
@@ -40,13 +41,18 @@ const TradeSchema = Yup.object().shape({
   entryDate: Yup.date().required('Entry date is required'),
   exitDate: Yup.date().nullable(),
   entryPrice: Yup.number().required('Entry price is required').positive('Must be positive'),
-  stopLoss: Yup.number().positive('Must be positive'),
+  stopLoss: Yup.number().when('instrumentType', {
+    is: (val: string) => val?.toLowerCase() === 'stock',
+    then: (schema) => schema.positive('Must be positive').required('Stop loss is required for stock trades'),
+    otherwise: (schema) => schema.nullable()
+  }),
   exitPrice: Yup.number().nullable().positive('Must be positive'),
   accountSize: Yup.number().required('Account size is required').positive('Must be positive'),
   strategy: Yup.string().required('Strategy is required'),
   setupType: Yup.string().required('Setup type is required'),
   timeframe: Yup.string().required('Timeframe is required'),
   direction: Yup.string().required('Direction is required'),
+  instrumentType: Yup.string().required('Instrument type is required'),
   notes: Yup.string(),
   status: Yup.string().required('Status is required'),
   shares: Yup.number().required('Number of shares is required').positive('Must be positive'),
@@ -83,8 +89,14 @@ const TradeForm: React.FC = () => {
       }
     }
   };
+  // Note: defaultAccountSize now represents current account balance from accountService
   const [defaultAccountSize, setDefaultAccountSize] = useState<number | null>(null);
-  const isEditMode = Boolean(id);  const formik = useFormik({
+  const isEditMode = Boolean(id);  // Helper function to check if instrument type is options (case-insensitive)
+  const isOptionsInstrument = (instrumentType: string) => {
+    return instrumentType?.toLowerCase() === 'options';
+  };
+
+  const formik = useFormik({
     initialValues: {
       ticker: '',
       entryDate: new Date(),
@@ -92,11 +104,12 @@ const TradeForm: React.FC = () => {
       entryPrice: '',
       stopLoss: '',
       exitPrice: '',
-      accountSize: '10000',
+      accountSize: accountService.getCurrentBalance().toString(),
       strategy: '',
       setupType: '',
       timeframe: 'Daily',
       direction: 'Long',
+      instrumentType: 'stock',
       notes: '',
       status: 'Open',
       shares: '',
@@ -104,53 +117,77 @@ const TradeForm: React.FC = () => {
     },
     validationSchema: TradeSchema,    onSubmit: async (values) => {
       try {
-        // First, validate the trade data ourselves
-        const entryPrice = parseFloat(values.entryPrice);
-        const stopLoss = parseFloat(values.stopLoss);
-        const isLong = values.direction === 'Long';
-        const isValidTrade = isLong ? (entryPrice > stopLoss) : (stopLoss > entryPrice);
-        
-        if (!isValidTrade) {
-          alert(isLong 
-            ? 'For Long trades, stop loss must be lower than entry price.' 
-            : 'For Short trades, stop loss must be higher than entry price.');
-          return;
-        }
-        
-        // Also check that we can calculate a positive position size
-        const riskPerShare = Math.abs(entryPrice - stopLoss);
-        if (riskPerShare <= 0) {
-          alert('Cannot calculate position size: entry price and stop loss are too close.');
-          return;
+        // Skip validation for options trades since they don't have stop losses
+        if (!isOptionsInstrument(values.instrumentType)) {
+          // First, validate the trade data ourselves
+          const entryPrice = parseFloat(values.entryPrice);
+          const stopLoss = parseFloat(values.stopLoss);
+          const isLong = values.direction === 'Long';
+          const isValidTrade = isLong ? (entryPrice > stopLoss) : (stopLoss > entryPrice);
+          
+          if (!isValidTrade) {
+            alert(isLong 
+              ? 'For Long trades, stop loss must be lower than entry price.' 
+              : 'For Short trades, stop loss must be higher than entry price.');
+            return;
+          }
+          
+          // Also check that we can calculate a positive position size
+          const riskPerShare = Math.abs(entryPrice - stopLoss);
+          if (riskPerShare <= 0) {
+            alert('Cannot calculate position size: entry price and stop loss are too close.');
+            return;
+          }
         }
 
         // Calculate risk info for notes based on shares and price difference
         const userShares = parseInt(values.shares) || 0;
         if (userShares <= 0) {
-          alert('Please enter a valid number of shares.');
+          alert(`Please enter a valid number of ${isOptionsInstrument(values.instrumentType) ? 'contracts' : 'shares'}.`);
           return;
         }
         
-        // Calculate actual risk amount
-        const riskAmount = userShares * riskPerShare;
+        // For options trades, skip risk calculations since they don't have stop losses
+        let riskAmount = 0;
+        let calculatedTargetPrice = 0;
         
-        // Calculate suggested take profit (5R) based on user's actual shares
-        const rMultiple = 5;
-        const targetMove = riskPerShare * rMultiple;
-        const targetPrice = isLong 
-          ? entryPrice + targetMove
-          : entryPrice - targetMove;          // Prepare trade data, keeping any existing notes that don't contain risk info
-          let cleanNotes = values.notes || '';
-          // Remove any existing risk information
-          cleanNotes = cleanNotes.replace(/Risk:\s*\$[\d,.]+(\n|$)/, '').trim();
+        if (!isOptionsInstrument(values.instrumentType)) {
+          const entryPrice = parseFloat(values.entryPrice);
+          const stopLoss = parseFloat(values.stopLoss);
+          const isLong = values.direction === 'Long';
           
-          // Add new risk information
-          const riskInfo = `Risk: $${riskAmount.toFixed(2)}`;
-          const updatedNotes = cleanNotes ? `${cleanNotes}\n${riskInfo}` : riskInfo;          const tradeData = {
+          // Calculate actual risk amount
+          const riskPerShare = Math.abs(entryPrice - stopLoss);
+          riskAmount = userShares * riskPerShare;
+          
+          // Calculate suggested take profit (5R) based on user's actual shares
+          const rMultiple = 5;
+          const targetMove = riskPerShare * rMultiple;
+          calculatedTargetPrice = isLong 
+            ? entryPrice + targetMove
+            : entryPrice - targetMove;
+        }
+        
+          // Prepare trade data, keeping any existing notes that don't contain risk info
+          let cleanNotes = values.notes || '';
+          // Remove any existing risk information (only for non-options trades)
+          if (!isOptionsInstrument(values.instrumentType)) {
+            cleanNotes = cleanNotes.replace(/Risk:\s*\$[\d,.]+(\n|$)/, '').trim();
+            
+            // Add new risk information
+            const riskInfo = `Risk: $${riskAmount.toFixed(2)}`;
+            cleanNotes = cleanNotes ? `${cleanNotes}\n${riskInfo}` : riskInfo;
+          }
+          
+          const tradeData = {
             ...values,
+            entryPrice: values.entryPrice,
+            exitPrice: values.exitPrice,
+            stopLoss: isOptionsInstrument(values.instrumentType) ? null : values.stopLoss,
             shares: values.shares, 
-            takeProfit: targetPrice.toFixed(2),
-            notes: updatedNotes,
+            takeProfit: calculatedTargetPrice > 0 ? calculatedTargetPrice.toFixed(2) : values.takeProfit,
+            notes: cleanNotes,
+            instrumentType: values.instrumentType,
             tags,
             partial_exits: partialExits,
             id: isEditMode ? parseInt(id!) : undefined
@@ -176,15 +213,12 @@ const TradeForm: React.FC = () => {
         try {          const trade = await fetchTrade(parseInt(id));
           console.log('Loaded trade:', trade);
           
-          let extractedAccountSize = '10000';
-          if (trade.notes) {
-            const accountMatch = trade.notes.match(/\$(\d+,?\d*)/);
-            if (accountMatch && accountMatch[1]) {
-              extractedAccountSize = accountMatch[1].replace(',', '');
-            }
-          }
+          // Use current account balance from accountService instead of extracting from notes
+          const currentAccountBalance = accountService.getCurrentBalance();
           
           // Map API fields to form fields
+          const tradeInstrumentType = trade.instrumentType || 'stock';
+          
           formik.setValues({
             ticker: trade.ticker || '',
             entryDate: trade.entryDate ? new Date(trade.entryDate) : new Date(),
@@ -192,11 +226,12 @@ const TradeForm: React.FC = () => {
             entryPrice: trade.entryPrice ? trade.entryPrice.toString() : '',
             stopLoss: trade.stopLoss ? trade.stopLoss.toString() : '',
             exitPrice: trade.exitPrice ? trade.exitPrice.toString() : '',
-            accountSize: extractedAccountSize,
+            accountSize: currentAccountBalance.toString(),
             strategy: trade.strategy || '',
             setupType: trade.setupType || '',
             timeframe: trade.timeframe || 'Daily',
             direction: trade.direction || 'Long',
+            instrumentType: tradeInstrumentType,
             notes: trade.notes || '',
             status: trade.status || 'Open',
             shares: trade.shares ? trade.shares.toString() : '',
@@ -228,23 +263,25 @@ const TradeForm: React.FC = () => {
 
   // Load user's default account size and apply it
   useEffect(() => {
-    const loadUserProfile = async () => {
+    const loadAccountBalance = () => {
       try {
-        const user = await getCurrentUser();
-        if (user.default_account_size) {
-          setDefaultAccountSize(user.default_account_size);
-          // Always use default account size for new trades
-          if (!isEditMode) {
-            formik.setFieldValue('accountSize', user.default_account_size.toString());
-          }
+        const currentBalance = accountService.getCurrentBalance();
+        setDefaultAccountSize(currentBalance);
+        // Always use current account balance for new trades
+        if (!isEditMode) {
+          formik.setFieldValue('accountSize', currentBalance.toString());
         }
       } catch (error) {
-        console.error('Error loading user profile:', error);
+        console.error('Error loading account balance:', error);
         // Don't show error to user, just use default values
+        setDefaultAccountSize(10000);
+        if (!isEditMode) {
+          formik.setFieldValue('accountSize', '10000');
+        }
       }
     };
 
-    loadUserProfile();
+    loadAccountBalance();
   }, [isEditMode]);
 
   // Handle tag input
@@ -273,13 +310,14 @@ const TradeForm: React.FC = () => {
     try {
       const accountSize = parseFloat(formik.values.accountSize);
       if (accountSize > 0) {
-        await updateProfile({ default_account_size: accountSize });
+        // Update the account balance in accountService instead of user profile
+        accountService.updateCurrentBalance(accountSize);
         setDefaultAccountSize(accountSize);
-        alert('Default account size saved successfully!');
+        alert('Account balance updated successfully!');
       }
     } catch (error) {
-      console.error('Error saving default account size:', error);
-      alert('Failed to save default account size. Please try again.');
+      console.error('Error updating account balance:', error);
+      alert('Failed to update account balance. Please try again.');
     }
   };
   // Functions to calculate risk management values
@@ -400,6 +438,23 @@ const TradeForm: React.FC = () => {
               </FormControl>
             </Grid>
             
+            <Grid item xs={12} md={4}>
+              <FormControl fullWidth>
+                <InputLabel id="instrumentType-label">Instrument Type</InputLabel>
+                <Select
+                  labelId="instrumentType-label"
+                  id="instrumentType"
+                  name="instrumentType"
+                  value={formik.values.instrumentType}
+                  onChange={formik.handleChange}
+                  label="Instrument Type"
+                >
+                  <MenuItem value="stock">Shares</MenuItem>
+                  <MenuItem value="options">Options</MenuItem>
+                </Select>
+              </FormControl>
+            </Grid>
+            
             <Grid item xs={12} md={4}>              <FormControl fullWidth>
                 <InputLabel id="status-label">Status</InputLabel>
                 <Select
@@ -457,43 +512,52 @@ const TradeForm: React.FC = () => {
                 fullWidth
                 id="entryPrice"
                 name="entryPrice"
-                label="Entry Price"
+                label={isOptionsInstrument(formik.values.instrumentType) ? "Entry Price (per contract)" : "Entry Price"}
                 value={formik.values.entryPrice}
                 onChange={formik.handleChange}
                 error={formik.touched.entryPrice && Boolean(formik.errors.entryPrice)}
-                helperText={formik.touched.entryPrice && formik.errors.entryPrice}
+                helperText={
+                  isOptionsInstrument(formik.values.instrumentType) 
+                    ? "For options: Enter $0.10 for $10/contract" 
+                    : formik.touched.entryPrice && formik.errors.entryPrice
+                }
                 InputProps={{
                   startAdornment: <InputAdornment position="start">$</InputAdornment>,
                 }}
               />
             </Grid>
             
-            <Grid item xs={12} md={4}>
-              <TextField
-                fullWidth
-                id="stopLoss"
-                name="stopLoss"
-                label="Stop Loss Price"
-                value={formik.values.stopLoss}
-                onChange={formik.handleChange}
-                error={formik.touched.stopLoss && Boolean(formik.errors.stopLoss)}
-                helperText={formik.touched.stopLoss && formik.errors.stopLoss}
-                InputProps={{
-                  startAdornment: <InputAdornment position="start">$</InputAdornment>,
-                }}
-              />
-            </Grid>
+            {!isOptionsInstrument(formik.values.instrumentType) && (
+              <Grid item xs={12} md={4}>
+                <TextField
+                  fullWidth
+                  id="stopLoss"
+                  name="stopLoss"
+                  label="Stop Loss Price"
+                  value={formik.values.stopLoss}
+                  onChange={formik.handleChange}
+                  error={formik.touched.stopLoss && Boolean(formik.errors.stopLoss)}
+                  helperText={formik.touched.stopLoss && formik.errors.stopLoss}
+                  InputProps={{
+                    startAdornment: <InputAdornment position="start">$</InputAdornment>,
+                  }}
+                />
+              </Grid>
+            )}
             
             <Grid item xs={12} md={4}>
               <TextField
                 fullWidth
                 id="exitPrice"
                 name="exitPrice"
-                label="Exit Price"
+                label={isOptionsInstrument(formik.values.instrumentType) ? 'Exit Price (per contract)' : 'Exit Price'}
                 value={formik.values.exitPrice}
                 onChange={formik.handleChange}
                 error={formik.touched.exitPrice && Boolean(formik.errors.exitPrice)}
-                helperText={formik.touched.exitPrice && formik.errors.exitPrice}
+                helperText={
+                  (formik.touched.exitPrice && formik.errors.exitPrice) || 
+                  (isOptionsInstrument(formik.values.instrumentType) ? 'Enter in dollars (e.g., 0.10 for $0.10)' : '')
+                }
                 InputProps={{
                   startAdornment: <InputAdornment position="start">$</InputAdornment>,
                 }}
@@ -529,7 +593,7 @@ const TradeForm: React.FC = () => {
                   }}
                   disabled={!formik.values.accountSize || parseFloat(formik.values.accountSize) <= 0}
                 >
-                  Save Default
+                  Update Account Balance
                 </Button>
                 {defaultAccountSize && (
                   <Button
@@ -544,9 +608,9 @@ const TradeForm: React.FC = () => {
                       textAlign: 'center',
                       lineHeight: 1.2
                     }}
-                    title={`Use default account size: $${defaultAccountSize.toLocaleString()}`}
+                    title={`Use current account balance: $${defaultAccountSize.toLocaleString()}`}
                   >
-                    Use Default<br/>${defaultAccountSize.toLocaleString()}
+                    Use Balance<br/>${defaultAccountSize.toLocaleString()}
                   </Button>
                 )}
               </Box>
@@ -599,12 +663,12 @@ const TradeForm: React.FC = () => {
                 fullWidth
                 id="shares"
                 name="shares"
-                label="Number of Shares"
+                label={isOptionsInstrument(formik.values.instrumentType) ? 'Number of Contracts' : 'Number of Shares'}
                 value={formik.values.shares}
                 onChange={formik.handleChange}
                 error={formik.touched.shares && Boolean(formik.errors.shares)}
                 helperText={formik.touched.shares && formik.errors.shares}
-                placeholder="Enter number of shares purchased"
+                placeholder={isOptionsInstrument(formik.values.instrumentType) ? 'Enter number of contracts purchased' : 'Enter number of shares purchased'}
               />
             </Grid>
 

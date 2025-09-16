@@ -121,8 +121,18 @@ export const fetchAnalyticsData = async (): Promise<AnalyticsData> => {
       }
     }
     
-    // Process trades for performance data (daily, weekly, monthly)
-    const performanceData = processTradesForPerformance(trades);
+    // Fetch detailed partial exits data for performance charts
+    let partialExitsData = [];
+    try {
+      const partialExitsResponse = await api.get('/api/analytics/partial-exits-detail', { headers });
+      partialExitsData = partialExitsResponse.data;
+      console.log('Fetched partial exits for charts:', partialExitsData.length);
+    } catch (error) {
+      console.warn('Could not fetch detailed partial exits for charts, continuing without them:', error);
+    }
+    
+    // Process trades for performance data (daily, weekly, monthly) including partial exits
+    const performanceData = processTradesForPerformance(trades, partialExitsData);
     
     // Calculate win/loss data from trades if API failed
     let winLossData;
@@ -137,17 +147,29 @@ export const fetchAnalyticsData = async (): Promise<AnalyticsData> => {
     }
     
     // Calculate profit/loss data from trades if API failed
+    // Fetch and add realized P&L from all partial exits
+    let totalRealizedPnl = 0;
+    try {
+      const partialExitsResponse = await api.get('/api/analytics/partial-exits-summary', { headers });
+      totalRealizedPnl = partialExitsResponse.data.total_realized_pnl || 0;
+      console.log('Total realized P&L from partial exits:', totalRealizedPnl);
+    } catch (error) {
+      console.warn('Could not fetch realized P&L for analytics, continuing without it:', error);
+    }
+
     let profitLossData;
     if (metricsData) {
       profitLossData = {
         totalProfit: metricsData.average_profit * metricsData.winning_trades,
         totalLoss: metricsData.average_loss * metricsData.losing_trades,
-        netProfitLoss: metricsData.total_profit_loss,
+        netProfitLoss: metricsData.total_profit_loss + totalRealizedPnl,
         avgProfit: metricsData.average_profit,
         avgLoss: metricsData.average_loss
       };
     } else {
       profitLossData = calculateProfitLossData(trades);
+      // Add realized P&L to the fallback calculation as well
+      profitLossData.netProfitLoss += totalRealizedPnl;
     }
     
   // Process strategies data by grouping trades by strategy field
@@ -202,7 +224,7 @@ export const fetchAnalyticsData = async (): Promise<AnalyticsData> => {
 };
 
 // Helper function to process trades for performance charts
-const processTradesForPerformance = (trades: any[]) => {
+const processTradesForPerformance = (trades: any[], partialExitsData: any[] = []) => {
   // Filter to closed trades with valid exit_date and profit_loss
   const closedTrades = trades.filter(trade => 
     trade.status?.toLowerCase() === 'closed' && 
@@ -212,6 +234,7 @@ const processTradesForPerformance = (trades: any[]) => {
   );
   
   console.log('Processing performance data for trades:', closedTrades.length);
+  console.log('Processing performance data for partial exits:', partialExitsData.length);
   
   // Group by daily
   const dailyMap = new Map<string, number>();
@@ -251,6 +274,37 @@ const processTradesForPerformance = (trades: any[]) => {
     // Format for all time (by year)
     const yearStr = tradeYear.toString();
     allMap.set(yearStr, (allMap.get(yearStr) || 0) + trade.profit_loss);
+  });
+  
+  // Process partial exits and add them to the performance data
+  partialExitsData.forEach(exit => {
+    if (exit.exit_date && exit.profit_loss) {
+      const exitDate = new Date(exit.exit_date);
+      const exitYear = exitDate.getFullYear();
+      const currentYear = new Date().getFullYear();
+      
+      // Format for daily
+      const dateStr = formatDate(exitDate);
+      dailyMap.set(dateStr, (dailyMap.get(dateStr) || 0) + exit.profit_loss);
+      
+      // Format for weekly
+      const weekStr = getWeekInfo(exitDate);
+      weeklyMap.set(weekStr, (weeklyMap.get(weekStr) || 0) + exit.profit_loss);
+      
+      // Format for monthly
+      const monthStr = getMonthName(exitDate);
+      monthlyMap.set(monthStr, (monthlyMap.get(monthStr) || 0) + exit.profit_loss);
+      
+      // Format for YTD (only current year)
+      if (exitYear === currentYear) {
+        const ytdMonthStr = `${getMonthName(exitDate)} ${exitYear}`;
+        ytdMap.set(ytdMonthStr, (ytdMap.get(ytdMonthStr) || 0) + exit.profit_loss);
+      }
+      
+      // Format for all time (by year)
+      const yearStr = exitYear.toString();
+      allMap.set(yearStr, (allMap.get(yearStr) || 0) + exit.profit_loss);
+    }
   });
   
   // Convert maps to sorted arrays
@@ -410,6 +464,14 @@ const calculateProfitLossData = (trades: any[]) => {
 // Process trades by setup type
 // Helper function to process trades by setup type for setups view (closed trades only)
 const processTradesBySetup = (trades: any[]) => {
+  // Helper function to get the best available profit/loss value
+  const getProfitLoss = (trade: any): number => {
+    if (trade.total_profit_loss !== null && trade.total_profit_loss !== undefined) {
+      return trade.total_profit_loss;
+    }
+    return trade.profit_loss || 0;
+  };
+  
   // Filter to trades with setup type
   const tradesWithSetup = trades.filter(trade => !!trade.setup_type);
   
@@ -436,17 +498,20 @@ const processTradesBySetup = (trades: any[]) => {
     const data = setupMap.get(setup)!;
     data.trades += 1;
     
-    if (trade.status?.toLowerCase() === 'closed' && trade.profit_loss !== null && trade.profit_loss !== undefined && isFinite(trade.profit_loss)) {
-      if (safeNumber(trade.profit_loss) > 0) {
+    if (trade.status?.toLowerCase() === 'closed' && 
+        ((trade.total_profit_loss !== null && trade.total_profit_loss !== undefined) ||
+         (trade.profit_loss !== null && trade.profit_loss !== undefined))) {
+      const tradePL = getProfitLoss(trade);
+      if (safeNumber(tradePL) > 0) {
         data.wins += 1;
       }
       
-      // Calculate percentage return: use profit_loss_percent if available, otherwise calculate from profit_loss/position_value
+      // Calculate percentage return: use profit_loss_percent if available, otherwise calculate from total P&L/position_value
       let percentReturn = 0;
       if (trade.profit_loss_percent !== null && trade.profit_loss_percent !== undefined && isFinite(trade.profit_loss_percent)) {
         percentReturn = safeNumber(trade.profit_loss_percent);
       } else if (trade.position_value && trade.position_value > 0) {
-        percentReturn = (safeNumber(trade.profit_loss) / safeNumber(trade.position_value)) * 100;
+        percentReturn = (safeNumber(tradePL) / safeNumber(trade.position_value)) * 100;
       } else {
         percentReturn = 0; // Can't calculate percentage without position value
       }

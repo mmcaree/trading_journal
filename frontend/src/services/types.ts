@@ -1,3 +1,7 @@
+// Enums for trade properties
+export type InstrumentType = 'stock' | 'options';
+export type OptionType = 'call' | 'put';
+
 // Interface for account settings
 export interface AccountSettings {
   starting_balance: number;
@@ -19,7 +23,14 @@ export interface ApiTrade {
   id: number;
   ticker: string;
   trade_type: 'long' | 'short';
-  status: 'planned' | 'active' | 'closed' | 'canceled';
+  status: 'planned' | 'active' | 'closed' | 'canceled' | 'Open' | 'Closed';
+  
+  // Instrument type and options details
+  instrument_type: InstrumentType;
+  strike_price?: number;  // Options only
+  expiration_date?: string;  // Options only
+  option_type?: OptionType;  // Options only (call/put)
+  
   entry_price: number;
   entry_date: string;
   entry_notes?: string;
