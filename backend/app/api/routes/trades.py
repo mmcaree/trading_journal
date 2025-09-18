@@ -2,9 +2,8 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from typing import List, Optional
 from sqlalchemy.orm import Session
 from app.api.deps import get_db, get_current_user
-from app.models.schemas import TradeCreate, TradeResponse, TradeUpdate, TradeEntryCreate, TradeEntryResponse, PartialExitCreate, UserCreate
+from app.models.schemas import TradeCreate, TradeResponse, TradeUpdate, TradeEntryCreate, TradeEntryResponse, PartialExitCreate
 from app.services.trade_service import create_trade, get_trades, get_trade, update_trade, delete_trade, trade_to_response_dict, add_to_position, sell_from_position, get_trade_details, get_positions, sell_from_position_by_group
-from app.services.user_service import get_user_by_id, create_user
 from app.models.models import User, Trade, PartialExit
 
 router = APIRouter()
@@ -22,26 +21,8 @@ def create_new_trade(
             trade.market_conditions = "Normal"
         
         print(f"Creating new trade from API route: {trade.dict()}")
+        print(f"Using user ID: {current_user.id}")
             
-        # For development, use a mock user ID
-        mock_user_id = 1
-        
-        # Check if mock user exists, if not create it
-        mock_user = get_user_by_id(db, mock_user_id)
-        if not mock_user:
-            print(f"Mock user with ID {mock_user_id} not found, creating...")
-            mock_user_data = UserCreate(
-                username="mockuser",
-                email="mock@example.com",
-                password="mockpassword123"
-            )
-            try:
-                mock_user = create_user(db, mock_user_data)
-                print(f"Created mock user with ID: {mock_user.id}")
-            except Exception as user_error:
-                print(f"Error creating mock user: {str(user_error)}")
-                raise
-        
         return create_trade(db=db, trade=trade, user_id=current_user.id)
     except Exception as e:
         import traceback
