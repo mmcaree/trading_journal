@@ -56,6 +56,7 @@ interface Trade {
   status: 'Open' | 'Closed';
   direction: 'Long' | 'Short';
   instrumentType: string;
+  accountBalanceSnapshot?: number;  // Account balance when trade was created
   partialExits: PartialExit[];
   result: number | null;
   resultAmount: number | null;
@@ -279,7 +280,17 @@ const TradeDetail: React.FC = () => {
                 <Grid item xs={6}>
                   <Typography variant="body2" color="text.secondary">Risk</Typography>
                   <Typography variant="body1">${(trade.risk || 0).toFixed(2)}</Typography>
-                </Grid><Grid item xs={12}>
+                </Grid>
+                <Grid item xs={6}>
+                  <Typography variant="body2" color="text.secondary">Risk %</Typography>
+                  <Typography variant="body1">
+                    {trade.accountBalanceSnapshot && trade.risk 
+                      ? ((trade.risk / trade.accountBalanceSnapshot) * 100).toFixed(2) + '%'
+                      : 'N/A'
+                    }
+                  </Typography>
+                </Grid>
+                <Grid item xs={12}>
                   <Typography variant="body2" color="text.secondary">Tags</Typography>
                   <Box sx={{ mt: 0.5 }}>
                     {trade.tags && trade.tags.length > 0 ? (

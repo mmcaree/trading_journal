@@ -5,7 +5,7 @@ from fastapi import HTTPException
 from datetime import datetime
 import uuid
 
-from app.models.models import Trade, TradeEntry, PartialExit
+from app.models.models import Trade, TradeEntry, PartialExit, User
 from app.models.schemas import TradeCreate, TradeUpdate, TradeEntryCreate, PartialExitCreate
 
 def extract_image_urls_from_notes(notes: str) -> List[str]:
@@ -60,6 +60,10 @@ def create_trade(db: Session, trade: TradeCreate, user_id: int) -> Trade:
     try:
         print(f"Received trade data: {trade}")
         
+        # Get user's current account balance for snapshotting
+        user = db.query(User).filter(User.id == user_id).first()
+        account_balance_snapshot = user.default_account_size if user and user.default_account_size else 10000.0
+        
         metrics = calculate_trade_metrics(trade)
         
         # Generate a unique trade group ID if not provided
@@ -84,6 +88,7 @@ def create_trade(db: Session, trade: TradeCreate, user_id: int) -> Trade:
             risk_per_share=metrics["risk_per_share"],
             total_risk=metrics["total_risk"],
             risk_reward_ratio=metrics["risk_reward_ratio"],
+            account_balance_snapshot=account_balance_snapshot,  # Store account balance at trade creation
             strategy=trade.strategy,
             setup_type=trade.setup_type,
             timeframe=trade.timeframe,
@@ -381,6 +386,7 @@ def trade_to_dict_with_images(trade) -> dict:
         'risk_per_share': trade.risk_per_share,
         'total_risk': trade.total_risk,
         'risk_reward_ratio': trade.risk_reward_ratio,
+        'account_balance_snapshot': trade.account_balance_snapshot,
         'profit_loss': trade.profit_loss,
         'profit_loss_percent': trade.profit_loss_percent,
         'strategy': trade.strategy,

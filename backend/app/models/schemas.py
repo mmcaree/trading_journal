@@ -254,6 +254,7 @@ class TradeResponse(BaseModel):
     risk_per_share: Optional[float] = None
     total_risk: Optional[float] = None
     risk_reward_ratio: Optional[float] = None
+    account_balance_snapshot: Optional[float] = None  # Account balance when trade was created
     
     # Performance
     profit_loss: Optional[float] = None

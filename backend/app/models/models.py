@@ -95,6 +95,7 @@ class Trade(Base):
     risk_per_share = Column(Float)
     total_risk = Column(Float)
     risk_reward_ratio = Column(Float)
+    account_balance_snapshot = Column(Float, nullable=True)  # Account balance when trade was created
     
     # Performance
     profit_loss = Column(Float, nullable=True)

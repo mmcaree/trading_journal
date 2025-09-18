@@ -115,3 +115,4 @@ docs/_build/
 # Miscellaneous
 
 
+backend/migrations/add_account_balance_snapshot.py

@@ -491,8 +491,9 @@ export const fetchTrades = async (
         totalPL += trade.partial_exits.reduce((sum: number, exit: any) => sum + exit.profit_loss, 0);
       }
 
-      // Calculate risk percentage using user's actual account size
-      const riskPercent = trade.total_risk ? ((trade.total_risk / userAccountSize) * 100).toFixed(2) : null;
+      // Calculate risk percentage using snapshotted account balance (if available) or current balance as fallback
+      const accountBalanceForRisk = trade.account_balance_snapshot || userAccountSize;
+      const riskPercent = trade.total_risk ? ((trade.total_risk / accountBalanceForRisk) * 100).toFixed(2) : null;
 
       return {
         id: trade.id,
@@ -568,6 +569,7 @@ export const fetchTrade = async (id: number): Promise<any> => {
               apiTrade.status ? apiTrade.status.charAt(0).toUpperCase() + apiTrade.status.slice(1) : '',
       direction: apiTrade.trade_type === 'long' ? 'Long' : 'Short',
       instrumentType: tradeInstrumentType?.toLowerCase() || 'stock',
+      accountBalanceSnapshot: apiTrade.account_balance_snapshot,
       result: apiTrade.profit_loss_percent || (apiTrade.profit_loss && risk ? ((apiTrade.profit_loss / risk) * 100) : null),
       resultAmount: apiTrade.profit_loss,
       risk: risk,
