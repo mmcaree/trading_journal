@@ -86,6 +86,11 @@ migrate_*.py
 reset_*.py
 verify_*.py
 trigger_*.py
+analyze_*.py
+chronological_import.py
+add_default_account_size.py
+remove_default_account_size.py
+simple_migration.py
 process_orders_direct.py
 simple_yfinance_test.py
 *.js.map
@@ -113,6 +118,7 @@ coverage.xml
 docs/_build/
 
 # Miscellaneous
-
-
 backend/migrations/add_account_balance_snapshot.py
+start-dev.ps1
+Webull_Orders_Records.csv
+backend/app.db
