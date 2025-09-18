@@ -55,7 +55,8 @@ class User(Base):
     backup_codes = Column(Text, nullable=True)  # JSON string of backup codes
     
     # Trading settings
-    default_account_size = Column(Float, nullable=True)  # Default account size for risk calculations
+    current_account_balance = Column(Float, nullable=True)  # Current account balance (updated with P&L)
+    initial_account_balance = Column(Float, nullable=True)  # Starting balance for P&L tracking
     
     trades = relationship("Trade", back_populates="user")
     imported_orders = relationship("ImportedOrder", back_populates="user")

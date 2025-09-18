@@ -62,7 +62,9 @@ def create_trade(db: Session, trade: TradeCreate, user_id: int) -> Trade:
         
         # Get user's current account balance for snapshotting
         user = db.query(User).filter(User.id == user_id).first()
-        account_balance_snapshot = user.default_account_size if user and user.default_account_size else 10000.0
+        account_balance_snapshot = (user.current_account_balance if user and user.current_account_balance 
+                                  else user.default_account_size if user and user.default_account_size 
+                                  else 10000.0)
         
         metrics = calculate_trade_metrics(trade)
         
@@ -115,6 +117,10 @@ def create_trade(db: Session, trade: TradeCreate, user_id: int) -> Trade:
             handle_partial_exits(db, db_trade, trade.partial_exits)
             db.commit()
             db.refresh(db_trade)
+        
+        # Update account balance if trade is closed
+        if trade.status and trade.status.upper() == "CLOSED":
+            update_account_balance_from_trades(db, user_id)
         
         # Return trade with tags field for API response
         # Since we don't have tags in the database yet, return empty list
@@ -240,6 +246,10 @@ def update_trade(db: Session, trade_id: int, trade_update: TradeUpdate) -> Trade
     
     # Update the modified timestamp
     db_trade.updated_at = datetime.utcnow()
+    
+    # Update account balance if trade status changed to closed
+    if "status" in update_data and update_data["status"].upper() == "CLOSED":
+        update_account_balance_from_trades(db, db_trade.user_id)
     
     db.commit()
     db.refresh(db_trade)
@@ -1055,3 +1065,54 @@ def sell_from_position_by_group(db: Session, trade_group_id: str, exit_data: Par
         "remaining_shares": max(0, remaining_shares),
         "partial_exit_id": partial_exit.id
     }
+
+
+def update_account_balance_from_trades(db: Session, user_id: int):
+    """
+    Update user's current account balance based on initial balance + all closed trades P&L
+    """
+    try:
+        # Get the user
+        user = db.query(User).filter(User.id == user_id).first()
+        if not user:
+            return
+        
+        # Get initial balance (fallback to default_account_size or 10000)
+        initial_balance = user.initial_account_balance or user.default_account_size or 10000.0
+        
+        # Calculate total P&L from all closed trades
+        total_pnl = db.query(func.sum(Trade.profit_loss)).filter(
+            Trade.user_id == user_id,
+            Trade.status == "CLOSED",
+            Trade.profit_loss.isnot(None)
+        ).scalar() or 0.0
+        
+        # Update current account balance
+        new_balance = initial_balance + total_pnl
+        user.current_account_balance = new_balance
+        
+        db.commit()
+        
+        print(f"Updated account balance for user {user_id}: ${initial_balance} + ${total_pnl} = ${new_balance}")
+        
+    except Exception as e:
+        print(f"Error updating account balance: {e}")
+        db.rollback()
+
+
+def recalculate_all_account_balances(db: Session):
+    """
+    Recalculate account balances for all users based on their trades
+    """
+    try:
+        # Get all users with trades
+        users_with_trades = db.query(User.id).join(Trade).distinct().all()
+        
+        for (user_id,) in users_with_trades:
+            update_account_balance_from_trades(db, user_id)
+            
+        print(f"Recalculated account balances for {len(users_with_trades)} users")
+        
+    except Exception as e:
+        print(f"Error recalculating account balances: {e}")
+        db.rollback()

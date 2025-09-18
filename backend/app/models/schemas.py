@@ -211,7 +211,9 @@ class TradeUpdate(BaseModel):
     position_size: Optional[float] = None
     stop_loss: Optional[float] = None
     take_profit: Optional[float] = None
-      # Analysis
+    account_balance_snapshot: Optional[float] = None  # Allow updating the account balance snapshot
+    
+    # Analysis
     strategy: Optional[str] = None
     setup_type: Optional[str] = None
     timeframe: Optional[str] = None

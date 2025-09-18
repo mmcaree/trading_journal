@@ -192,3 +192,44 @@ def clear_all_data(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Failed to clear user data"
         )
+
+
+@router.get("/account-balance")
+def get_account_balance(
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    """Get user's account balance information"""
+    return {
+        "current_account_balance": current_user.current_account_balance,
+        "initial_account_balance": current_user.initial_account_balance,
+        "default_account_size": current_user.default_account_size
+    }
+
+
+@router.put("/account-balance")
+def update_account_balance(
+    current_balance: float,
+    initial_balance: float = None,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    """Update user's account balance"""
+    try:
+        current_user.current_account_balance = current_balance
+        if initial_balance is not None:
+            current_user.initial_account_balance = initial_balance
+        
+        db.commit()
+        
+        return {
+            "message": "Account balance updated successfully",
+            "current_account_balance": current_user.current_account_balance,
+            "initial_account_balance": current_user.initial_account_balance
+        }
+    except Exception as e:
+        db.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to update account balance"
+        )

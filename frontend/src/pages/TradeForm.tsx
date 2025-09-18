@@ -47,7 +47,7 @@ const TradeSchema = Yup.object().shape({
     otherwise: (schema) => schema.nullable()
   }),
   exitPrice: Yup.number().nullable().positive('Must be positive'),
-  accountSize: Yup.number().required('Account size is required').positive('Must be positive'),
+  accountSize: Yup.number().required('Balance at time of trade is required').positive('Must be positive'),
   strategy: Yup.string().required('Strategy is required'),
   setupType: Yup.string().required('Setup type is required'),
   timeframe: Yup.string().required('Timeframe is required'),
@@ -89,8 +89,7 @@ const TradeForm: React.FC = () => {
       }
     }
   };
-  // Note: defaultAccountSize now represents current account balance from accountService
-  const [defaultAccountSize, setDefaultAccountSize] = useState<number | null>(null);
+  // Note: Account balance is now handled per-trade via account_balance_snapshot
   const isEditMode = Boolean(id);  // Helper function to check if instrument type is options (case-insensitive)
   const isOptionsInstrument = (instrumentType: string) => {
     return instrumentType?.toLowerCase() === 'options';
@@ -190,7 +189,8 @@ const TradeForm: React.FC = () => {
             instrumentType: values.instrumentType,
             tags,
             partial_exits: partialExits,
-            id: isEditMode ? parseInt(id!) : undefined
+            id: isEditMode ? parseInt(id!) : undefined,
+            account_balance_snapshot: parseFloat(values.accountSize)  // Set the snapshot balance
           };
         
         if (isEditMode) {
@@ -213,8 +213,8 @@ const TradeForm: React.FC = () => {
         try {          const trade = await fetchTrade(parseInt(id));
           console.log('Loaded trade:', trade);
           
-          // Use current account balance from accountService instead of extracting from notes
-          const currentAccountBalance = accountService.getCurrentBalance();
+          // Use account balance snapshot from the trade when editing, or current balance for new trades
+          const balanceForTrade = trade.accountBalanceSnapshot || accountService.getCurrentBalance();
           
           // Map API fields to form fields
           const tradeInstrumentType = trade.instrumentType || 'stock';
@@ -226,7 +226,7 @@ const TradeForm: React.FC = () => {
             entryPrice: trade.entryPrice ? trade.entryPrice.toString() : '',
             stopLoss: trade.stopLoss ? trade.stopLoss.toString() : '',
             exitPrice: trade.exitPrice ? trade.exitPrice.toString() : '',
-            accountSize: currentAccountBalance.toString(),
+            accountSize: balanceForTrade.toString(),
             strategy: trade.strategy || '',
             setupType: trade.setupType || '',
             timeframe: trade.timeframe || 'Daily',
@@ -261,29 +261,6 @@ const TradeForm: React.FC = () => {
     loadTrade();
   }, [id]);
 
-  // Load user's default account size and apply it
-  useEffect(() => {
-    const loadAccountBalance = () => {
-      try {
-        const currentBalance = accountService.getCurrentBalance();
-        setDefaultAccountSize(currentBalance);
-        // Always use current account balance for new trades
-        if (!isEditMode) {
-          formik.setFieldValue('accountSize', currentBalance.toString());
-        }
-      } catch (error) {
-        console.error('Error loading account balance:', error);
-        // Don't show error to user, just use default values
-        setDefaultAccountSize(10000);
-        if (!isEditMode) {
-          formik.setFieldValue('accountSize', '10000');
-        }
-      }
-    };
-
-    loadAccountBalance();
-  }, [isEditMode]);
-
   // Handle tag input
   const handleAddTag = () => {
     if (tagInput && !tags.includes(tagInput)) {
@@ -303,23 +280,6 @@ const TradeForm: React.FC = () => {
     }
   };
 
-  // Recalculate shares based on risk parameters - REMOVED since we're entering actual purchased shares
-
-  // Save account size as default
-  const handleSaveDefaultAccountSize = async () => {
-    try {
-      const accountSize = parseFloat(formik.values.accountSize);
-      if (accountSize > 0) {
-        // Update the account balance in accountService instead of user profile
-        accountService.updateCurrentBalance(accountSize);
-        setDefaultAccountSize(accountSize);
-        alert('Account balance updated successfully!');
-      }
-    } catch (error) {
-      console.error('Error updating account balance:', error);
-      alert('Failed to update account balance. Please try again.');
-    }
-  };
   // Functions to calculate risk management values
   const calculateRiskDollarAmount = () => {
     const entryPrice = parseFloat(formik.values.entryPrice) || 0;
@@ -567,53 +527,19 @@ const TradeForm: React.FC = () => {
             
             {/* Risk Management Fields */}
             <Grid item xs={12} md={4}>
-              <Box sx={{ display: 'flex', gap: 1, alignItems: 'flex-start' }}>
-                <TextField
-                  fullWidth
-                  id="accountSize"
-                  name="accountSize"
-                  label="Account Size"
-                  value={formik.values.accountSize}
-                  onChange={formik.handleChange}
-                  error={formik.touched.accountSize && Boolean(formik.errors.accountSize)}
-                  helperText={formik.touched.accountSize && formik.errors.accountSize}
-                  InputProps={{
-                    startAdornment: <InputAdornment position="start">$</InputAdornment>,
-                  }}
-                />
-                <Button
-                  variant="outlined"
-                  size="small"
-                  onClick={handleSaveDefaultAccountSize}
-                  sx={{ 
-                    height: '56px', 
-                    width: '120px',
-                    fontSize: '0.75rem',
-                    padding: '8px 12px'
-                  }}
-                  disabled={!formik.values.accountSize || parseFloat(formik.values.accountSize) <= 0}
-                >
-                  Update Account Balance
-                </Button>
-                {defaultAccountSize && (
-                  <Button
-                    variant="outlined"
-                    size="small"
-                    onClick={() => formik.setFieldValue('accountSize', defaultAccountSize.toString())}
-                    sx={{ 
-                      height: '56px', 
-                      width: '120px',
-                      fontSize: '0.65rem',
-                      padding: '4px 8px',
-                      textAlign: 'center',
-                      lineHeight: 1.2
-                    }}
-                    title={`Use current account balance: $${defaultAccountSize.toLocaleString()}`}
-                  >
-                    Use Balance<br/>${defaultAccountSize.toLocaleString()}
-                  </Button>
-                )}
-              </Box>
+              <TextField
+                fullWidth
+                id="accountSize"
+                name="accountSize"
+                label={isEditMode ? "Balance at Time of Trade" : "Current Account Balance"}
+                value={formik.values.accountSize}
+                onChange={formik.handleChange}
+                error={formik.touched.accountSize && Boolean(formik.errors.accountSize)}
+                helperText={formik.touched.accountSize && formik.errors.accountSize}
+                InputProps={{
+                  startAdornment: <InputAdornment position="start">$</InputAdornment>,
+                }}
+              />
             </Grid>
             
             <Grid item xs={12} md={4}>

@@ -183,9 +183,11 @@ class TradeImportService:
         if batch_id:
             query = query.filter(ImportedOrder.import_batch_id == batch_id)
         
-        # Only process filled orders and pending orders, skip cancelled/failed
+        # Process filled orders and cancelled stop losses (for risk analysis)
+        from sqlalchemy import and_
         orders = query.filter(
-            ImportedOrder.status.in_(["Filled", "Pending", "Open", "Working"])
+            ImportedOrder.status.in_(["Filled", "Pending", "Open", "Working"]) |
+            and_(ImportedOrder.status == "Cancelled", ImportedOrder.side == "Sell")  # Cancelled sell orders (likely stops)
         ).order_by(
             # Sort by filled_time if available, otherwise placed_time
             ImportedOrder.filled_time.asc().nullslast(),
@@ -596,7 +598,8 @@ class TradeImportService:
                     risk_reward_ratio=metrics["risk_reward_ratio"],  # Now calculated
                     market_conditions=None,  # Not available from imported data
                     mistakes=None,  # Not available from imported data
-                    lessons=None  # Not available from imported data
+                    lessons=None,  # Not available from imported data
+                    account_balance_snapshot=account_size  # Snapshot the account balance at import time
                 )
                 
                 # Link to imported order
@@ -702,7 +705,8 @@ class TradeImportService:
                         risk_reward_ratio=None,
                         market_conditions=None,
                         mistakes=None,
-                        lessons=None
+                        lessons=None,
+                        account_balance_snapshot=account_size  # Snapshot the account balance at import time
                     )
                     
                     # Link to the pending order
