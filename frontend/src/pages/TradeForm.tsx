@@ -15,7 +15,8 @@ import {
   Switch,
   FormControlLabel,
   Chip,
-  IconButton
+  IconButton,
+  Autocomplete
 } from '@mui/material';
 import { useNavigate, useParams, Link, useLocation } from 'react-router-dom';
 import { 
@@ -332,11 +333,6 @@ const TradeForm: React.FC = () => {
       ? entryPrice + targetMove
       : entryPrice - targetMove;
     
-    // Update the takeProfit field if it's not already set
-    if (!formik.values.takeProfit) {
-      formik.setFieldValue('takeProfit', targetPrice.toFixed(2));
-    }
-    
     return targetPrice.toFixed(2);
   };
 
@@ -600,45 +596,51 @@ const TradeForm: React.FC = () => {
 
             {/* Strategy and Setup */}
             <Grid item xs={12} md={4}>
-              <FormControl fullWidth error={formik.touched.strategy && Boolean(formik.errors.strategy)}>
-                <InputLabel id="strategy-label">Strategy</InputLabel>
-                <Select
-                  labelId="strategy-label"
-                  id="strategy"
-                  name="strategy"
-                  value={formik.values.strategy}
-                  onChange={formik.handleChange}
-                  label="Strategy"
-                >
-                  {strategies.map((strategy) => (
-                    <MenuItem key={strategy} value={strategy}>{strategy}</MenuItem>
-                  ))}
-                </Select>
-                {formik.touched.strategy && formik.errors.strategy && (
-                  <FormHelperText>{formik.errors.strategy}</FormHelperText>
+              <Autocomplete
+                freeSolo
+                options={strategies}
+                value={formik.values.strategy}
+                onChange={(event, newValue) => {
+                  formik.setFieldValue('strategy', newValue || '');
+                }}
+                onInputChange={(event, newInputValue) => {
+                  formik.setFieldValue('strategy', newInputValue);
+                }}
+                renderInput={(params) => (
+                  <TextField
+                    {...params}
+                    label="Strategy"
+                    name="strategy"
+                    error={formik.touched.strategy && Boolean(formik.errors.strategy)}
+                    helperText={formik.touched.strategy && formik.errors.strategy}
+                    placeholder="Select or type custom strategy"
+                  />
                 )}
-              </FormControl>
+              />
             </Grid>
             
             <Grid item xs={12} md={4}>
-              <FormControl fullWidth error={formik.touched.setupType && Boolean(formik.errors.setupType)}>
-                <InputLabel id="setupType-label">Setup Type</InputLabel>
-                <Select
-                  labelId="setupType-label"
-                  id="setupType"
-                  name="setupType"
-                  value={formik.values.setupType}
-                  onChange={formik.handleChange}
-                  label="Setup Type"
-                >
-                  {setups.map((setup) => (
-                    <MenuItem key={setup} value={setup}>{setup}</MenuItem>
-                  ))}
-                </Select>
-                {formik.touched.setupType && formik.errors.setupType && (
-                  <FormHelperText>{formik.errors.setupType}</FormHelperText>
+              <Autocomplete
+                freeSolo
+                options={setups}
+                value={formik.values.setupType}
+                onChange={(event, newValue) => {
+                  formik.setFieldValue('setupType', newValue || '');
+                }}
+                onInputChange={(event, newInputValue) => {
+                  formik.setFieldValue('setupType', newInputValue);
+                }}
+                renderInput={(params) => (
+                  <TextField
+                    {...params}
+                    label="Setup Type"
+                    name="setupType"
+                    error={formik.touched.setupType && Boolean(formik.errors.setupType)}
+                    helperText={formik.touched.setupType && formik.errors.setupType}
+                    placeholder="Select or type custom setup"
+                  />
                 )}
-              </FormControl>
+              />
             </Grid>
             
             <Grid item xs={12} md={4}>
@@ -665,7 +667,7 @@ const TradeForm: React.FC = () => {
                 fullWidth
                 id="takeProfit"
                 name="takeProfit"
-                label="Target Price"
+                label="Target Price 1st Trim"
                 value={formik.values.takeProfit}
                 onChange={formik.handleChange}
                 error={formik.touched.takeProfit && Boolean(formik.errors.takeProfit)}

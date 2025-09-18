@@ -177,6 +177,7 @@ class TradeCreate(BaseModel):
     position_size: float
     stop_loss: Optional[float] = None
     take_profit: Optional[float] = None
+    account_balance_snapshot: Optional[float] = None  # Account balance at time of trade creation
     
     # Analysis
     strategy: str

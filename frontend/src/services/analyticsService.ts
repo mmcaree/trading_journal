@@ -344,16 +344,18 @@ const processTradesByStrategy = (trades: any[]) => {
   const strategiesMap = new Map<string, { 
     trades: number, 
     wins: number, 
-    totalReturn: number 
+    totalReturn: number,
+    originalName: string 
   }>();
   
   trades.forEach(trade => {
     if (!trade.strategy) return; // Use actual strategy column
     
-    const strategy = trade.strategy;
+    const strategy = trade.strategy.toLowerCase(); // Case-insensitive grouping
+    const originalName = trade.strategy; // Keep original case for display
     
     if (!strategiesMap.has(strategy)) {
-      strategiesMap.set(strategy, { trades: 0, wins: 0, totalReturn: 0 });
+      strategiesMap.set(strategy, { trades: 0, wins: 0, totalReturn: 0, originalName });
     }
     
     const data = strategiesMap.get(strategy)!;
@@ -380,8 +382,8 @@ const processTradesByStrategy = (trades: any[]) => {
   });
   
   // Convert map to array for strategies view
-  return Array.from(strategiesMap, ([name, data]) => ({
-    name,
+  return Array.from(strategiesMap, ([strategy, data]) => ({
+    name: data.originalName, // Use original case for display
     trades: data.trades,
     winRate: data.trades > 0 ? data.wins / data.trades : 0,
     avgReturn: data.trades > 0 ? data.totalReturn / data.trades : 0
@@ -485,14 +487,16 @@ const processTradesBySetup = (trades: any[]) => {
   const setupMap = new Map<string, {
     trades: number,
     wins: number,
-    totalReturn: number
+    totalReturn: number,
+    originalName: string
   }>();
   
   tradesWithSetup.forEach(trade => {
-    const setup = trade.setup_type;
+    const setup = trade.setup_type.toLowerCase(); // Case-insensitive grouping
+    const originalName = trade.setup_type; // Keep original case for display
     
     if (!setupMap.has(setup)) {
-      setupMap.set(setup, { trades: 0, wins: 0, totalReturn: 0 });
+      setupMap.set(setup, { trades: 0, wins: 0, totalReturn: 0, originalName });
     }
     
     const data = setupMap.get(setup)!;
@@ -521,8 +525,8 @@ const processTradesBySetup = (trades: any[]) => {
   });
   
   // Convert map to array
-  return Array.from(setupMap, ([name, data]) => ({
-    name,
+  return Array.from(setupMap, ([setup, data]) => ({
+    name: data.originalName, // Use original case for display
     trades: data.trades,
     winRate: data.trades > 0 ? data.wins / data.trades : 0,
     avgReturn: data.trades > 0 ? data.totalReturn / data.trades : 0

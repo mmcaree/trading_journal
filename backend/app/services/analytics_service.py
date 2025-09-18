@@ -115,25 +115,30 @@ def get_performance_metrics(
 
 def get_setup_performance(db: Session, user_id: int) -> List[SetupPerformance]:
     """Get performance metrics by setup type"""
-    # Get all unique setup types for the user
-    setup_types = db.query(Trade.setup_type).filter(
+    # Get all unique setup types for the user (case-insensitive grouping)
+    setup_types_query = db.query(Trade.setup_type).filter(
         Trade.user_id == user_id,
-        Trade.status == "closed"
-    ).distinct().all()
+        Trade.status == "closed",
+        Trade.setup_type.isnot(None)
+    ).distinct()
+    
+    # Group by lowercase setup type to handle case-insensitive matching
+    setup_groups = {}
+    for (setup_type,) in setup_types_query:
+        if setup_type:
+            key = setup_type.lower()
+            if key not in setup_groups:
+                setup_groups[key] = setup_type  # Keep first occurrence for display
     
     result = []
     
-    # Calculate metrics for each setup type
-    for (setup_type,) in setup_types:
-        # Skip empty setup types
-        if not setup_type:
-            continue
-            
-        # Get all trades for this setup
+    # Calculate metrics for each setup type group
+    for lowercase_setup, display_setup in setup_groups.items():
+        # Get all trades for this setup type (case-insensitive)
         trades = db.query(Trade).filter(
             Trade.user_id == user_id,
             Trade.status == "closed",
-            Trade.setup_type == setup_type
+            func.lower(Trade.setup_type) == lowercase_setup
         ).all()
         
         trade_count = len(trades)
@@ -160,7 +165,7 @@ def get_setup_performance(db: Session, user_id: int) -> List[SetupPerformance]:
         average_profit_loss = total_profit_loss_percent / trades_with_percent_data if trades_with_percent_data > 0 else 0
         
         result.append(SetupPerformance(
-            setup_type=setup_type,
+            setup_type=display_setup,  # Use original case for display
             trade_count=trade_count,
             win_rate=win_rate,
             average_profit_loss=average_profit_loss,

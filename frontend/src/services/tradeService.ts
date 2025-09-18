@@ -657,6 +657,7 @@ export const createTrade = async (tradeData: any): Promise<Trade> => {
       timeframe: tradeData.timeframe || "Daily",
       market_conditions: tradeData.marketConditions || undefined,  // Don't force default
       instrument_type: tradeData.instrumentType || 'stock',
+      account_balance_snapshot: tradeData.account_balance_snapshot, // Include account balance snapshot
       tags: Array.isArray(tradeData.tags) ? tradeData.tags : [],
       partial_exits: tradeData.partial_exits || []
     };
@@ -758,6 +759,7 @@ export const updateTrade = async (tradeData: any): Promise<Trade> => {
       timeframe: tradeData.timeframe,
       market_conditions: 'Normal', // Default value
       instrument_type: tradeData.instrumentType || 'stock',
+      account_balance_snapshot: tradeData.account_balance_snapshot, // Include account balance snapshot
       tags: tradeData.tags || [],
       partial_exits: tradeData.partial_exits || []
     };

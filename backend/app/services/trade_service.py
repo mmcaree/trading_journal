@@ -60,11 +60,14 @@ def create_trade(db: Session, trade: TradeCreate, user_id: int) -> Trade:
     try:
         print(f"Received trade data: {trade}")
         
-        # Get user's current account balance for snapshotting
-        user = db.query(User).filter(User.id == user_id).first()
-        account_balance_snapshot = (user.current_account_balance if user and user.current_account_balance 
-                                  else user.default_account_size if user and user.default_account_size 
-                                  else 10000.0)
+        # Use account balance from trade request, fallback to user's stored balance
+        account_balance_snapshot = trade.account_balance_snapshot
+        if account_balance_snapshot is None:
+            # Fallback to user's stored balance
+            user = db.query(User).filter(User.id == user_id).first()
+            account_balance_snapshot = (user.current_account_balance if user and user.current_account_balance 
+                                      else user.default_account_size if user and user.default_account_size 
+                                      else 10000.0)
         
         metrics = calculate_trade_metrics(trade)
         
