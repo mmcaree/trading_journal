@@ -80,8 +80,6 @@ const Settings: React.FC = () => {
   // Notification settings state
   const [notificationSettings, setNotificationSettings] = useState<NotificationSettings>({
     email_notifications_enabled: user?.email_notifications_enabled || false,
-    daily_email_enabled: user?.daily_email_enabled || false,
-    daily_email_time: user?.daily_email_time || '09:00',
     weekly_email_enabled: user?.weekly_email_enabled || false,
     weekly_email_time: user?.weekly_email_time || '09:00',
   });
@@ -233,7 +231,7 @@ const Settings: React.FC = () => {
     }));
   };
 
-  const handleTimeChange = (field: 'daily_email_time' | 'weekly_email_time') => (event: SelectChangeEvent) => {
+  const handleTimeChange = (field: 'weekly_email_time') => (event: SelectChangeEvent) => {
     setNotificationSettings(prev => ({
       ...prev,
       [field]: event.target.value
@@ -551,7 +549,6 @@ const Settings: React.FC = () => {
                     {loading ? 'Updating...' : 'Update Profile'}
                   </Button>
                 </Grid>
-                </Grid>
               </Grid>
             </Box>
           </Paper>
@@ -827,34 +824,7 @@ const Settings: React.FC = () => {
                   
                   {notificationSettings.email_notifications_enabled && (
                     <>
-                      <Grid item xs={12} sm={6}>
-                        <FormControlLabel
-                          control={
-                            <Switch 
-                              checked={notificationSettings.daily_email_enabled}
-                              onChange={handleNotificationToggle('daily_email_enabled')}
-                            />
-                          }
-                          label="Daily Summary Email"
-                        />
-                        {notificationSettings.daily_email_enabled && (
-                          <FormControl fullWidth sx={{ mt: 1 }}>
-                            <InputLabel>Daily Email Time</InputLabel>
-                            <Select
-                              value={notificationSettings.daily_email_time}
-                              onChange={handleTimeChange('daily_email_time')}
-                              label="Daily Email Time"
-                              size="small"
-                            >
-                              {timeOptions.map(time => (
-                                <MenuItem key={time} value={time}>{time}</MenuItem>
-                              ))}
-                            </Select>
-                          </FormControl>
-                        )}
-                      </Grid>
-
-                      <Grid item xs={12} sm={6}>
+                      <Grid item xs={12}>
                         <FormControlLabel
                           control={
                             <Switch 

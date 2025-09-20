@@ -131,3 +131,4 @@ backend/migrations/add_account_balance_snapshot.py
 WEEKLY_EMAIL_SYSTEM.md
 PRODUCTION_EMAIL_SETUP.md
 DNS_SETUP_GUIDE.md
+backend/app.db

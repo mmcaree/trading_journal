@@ -3,8 +3,6 @@ import api from './apiConfig';
 
 export interface NotificationSettings {
   email_notifications_enabled: boolean;
-  daily_email_enabled: boolean;
-  daily_email_time?: string;
   weekly_email_enabled: boolean;
   weekly_email_time?: string;
 }
