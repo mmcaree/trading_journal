@@ -39,10 +39,10 @@ class Settings(BaseSettings):
     
     # App settings
     APP_NAME: str = "TradeJournal"
-    FRONTEND_URL: str = os.getenv("FRONTEND_URL", "http://localhost:5173")
+    FRONTEND_URL: str = os.getenv("FRONTEND_URL", "https://tradejournal.trade")
     
     # CORS - Read from environment variable for production
-    CORS_ORIGINS: str = os.getenv("CORS_ORIGINS", "http://localhost:5173")
+    CORS_ORIGINS: str = os.getenv("CORS_ORIGINS", "https://tradejournal.trade")
     
     # External APIs
     BROKER_API_KEY: str = os.getenv("BROKER_API_KEY", "")
@@ -52,7 +52,7 @@ class Settings(BaseSettings):
     def cors_origins_list(self) -> list:
         """Convert CORS_ORIGINS string to list"""
         if not self.CORS_ORIGINS:
-            return ["http://localhost:5173"]
+            return ["https://tradejournal.trade"]
         
         # Handle Railway environment variable format
         cors_str = self.CORS_ORIGINS.strip()
