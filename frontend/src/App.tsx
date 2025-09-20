@@ -19,6 +19,8 @@ import Analytics from './pages/Analytics';
 import Settings from './pages/Settings';
 import Login from './pages/Login';
 import Register from './pages/Register';
+import ForgotPassword from './pages/ForgotPassword';
+import ResetPassword from './pages/ResetPassword';
 import NotFound from './pages/NotFound';
 
 // Components
@@ -94,6 +96,8 @@ function App() {
             <Router>
               <Routes>              <Route path="/login" element={<Login />} />
                 <Route path="/register" element={<Register />} />
+                <Route path="/forgot-password" element={<ForgotPassword />} />
+                <Route path="/reset-password" element={<ResetPassword />} />
                 <Route path="/debug" element={<ApiDebugger />} />
                 <Route path="/debug-console" element={<DebugConsole />} />
                 

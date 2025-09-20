@@ -1,9 +1,11 @@
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, status, BackgroundTasks
 from typing import List, Optional
 from sqlalchemy.orm import Session
 from app.api.deps import get_db, get_current_user
 from app.models.schemas import PerformanceMetrics, SetupPerformance
 from app.services.analytics_service import get_performance_metrics, get_setup_performance
+from app.services.weekly_analytics_service import get_weekly_analytics_service
+from app.services.email_service import email_service
 from app.models.models import User, PartialExit, Trade
 
 router = APIRouter()
@@ -102,3 +104,61 @@ def read_setup_performance_debug(
         raise HTTPException(status_code=404, detail="No users found in database")
     
     return get_setup_performance(db=db, user_id=user.id)
+
+@router.get("/weekly-stats")
+def get_weekly_stats(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    """Get weekly trading statistics for the current user"""
+    analytics_service = get_weekly_analytics_service(db)
+    user_timezone = current_user.timezone or 'America/New_York'
+    
+    weekly_stats = analytics_service.calculate_weekly_stats(
+        user_id=current_user.id,
+        user_timezone=user_timezone
+    )
+    
+    return weekly_stats
+
+@router.post("/send-weekly-email")
+def send_weekly_email_test(
+    background_tasks: BackgroundTasks,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    """Send a test weekly email to the current user"""
+    def send_email():
+        try:
+            # Get weekly analytics
+            analytics_service = get_weekly_analytics_service(db)
+            user_timezone = current_user.timezone or 'America/New_York'
+            
+            weekly_stats = analytics_service.calculate_weekly_stats(
+                user_id=current_user.id,
+                user_timezone=user_timezone
+            )
+            
+            # Prepare user data
+            user_data = {
+                'username': current_user.username,
+                'display_name': current_user.display_name,
+                'email': current_user.email
+            }
+            
+            # Send the email
+            success = email_service.send_weekly_summary(
+                user_email=current_user.email,
+                user_data=user_data,
+                trades_data=weekly_stats
+            )
+            
+            return success
+            
+        except Exception as e:
+            raise HTTPException(status_code=500, detail=f"Failed to send weekly email: {str(e)}")
+    
+    # Run in background
+    background_tasks.add_task(send_email)
+    
+    return {"message": "Weekly email is being sent", "email": current_user.email}

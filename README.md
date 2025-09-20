@@ -16,7 +16,8 @@ Trade journal app for tracking swing trades. Built with React/FastAPI.
 - Better historical data (yfinance sucks)
 - Performance optimization
 - Mobile responsive design
-- Actually implement email summaries, too lazy right now lmao
+~~- Actually implement email summaries, too lazy right now lmao~~
+~~- Discord alert copy-paste functionality~~
 
 ## Setup
 
@@ -33,7 +34,7 @@ npm run dev
 ```
 
 ## Links
-- [Live App](https://tradingjournal.up.railway.app)
+- [Live App](https://tradejournal.trade)
 - [API Docs](https://tradingjournal.up.railway.app/docs)
 
 ## License

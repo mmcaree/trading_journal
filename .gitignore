@@ -3,6 +3,7 @@
 .env.local
 .env.production
 .env.staging
+.env.railway
 !frontend/.env
 
 # Database files
@@ -78,7 +79,7 @@ logs/
 *.temp
 .cache/
 
-# Debug and test files
+# One-time migration and test scripts
 debug_*.py
 test_*.py
 check_*.py
@@ -87,20 +88,28 @@ reset_*.py
 verify_*.py
 trigger_*.py
 analyze_*.py
+inspect_*.py
+fix_*.py
+complete_*.py
+railway_migrations.py
 chronological_import.py
 add_default_account_size.py
 remove_default_account_size.py
 simple_migration.py
 process_orders_direct.py
 simple_yfinance_test.py
+add_password_reset_migration.py
 *.js.map
 
-# Example/sample data
+# Example/sample data and CSV files
 /example_import_records/
 /sample_data/
+*.csv
+Webull_Orders_Records.csv
 
-# Batch files for Windows
+# Windows batch files
 *.bat
+*.ps1
 
 # Docker volumes
 docker-volumes/
@@ -117,8 +126,8 @@ coverage.xml
 # Documentation builds
 docs/_build/
 
-# Miscellaneous
+# Migration scripts (keep in migrations/ folder only)
 backend/migrations/add_account_balance_snapshot.py
-start-dev.ps1
-Webull_Orders_Records.csv
-backend/app.db
+WEEKLY_EMAIL_SYSTEM.md
+PRODUCTION_EMAIL_SETUP.md
+DNS_SETUP_GUIDE.md

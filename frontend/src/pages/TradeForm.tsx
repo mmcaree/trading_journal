@@ -16,14 +16,19 @@ import {
   FormControlLabel,
   Chip,
   IconButton,
-  Autocomplete
+  Autocomplete,
+  Dialog,
+  DialogTitle,
+  DialogContent,
+  DialogActions
 } from '@mui/material';
 import { useNavigate, useParams, Link, useLocation } from 'react-router-dom';
 import { 
   Save as SaveIcon,
   ArrowBack as ArrowBackIcon,
   Add as AddIcon,
-  Delete as DeleteIcon
+  Delete as DeleteIcon,
+  ContentPaste as ContentPasteIcon
 } from '@mui/icons-material';
 import { useFormik } from 'formik';
 import * as Yup from 'yup';
@@ -73,6 +78,8 @@ const TradeForm: React.FC = () => {
   const [tags, setTags] = useState<string[]>([]);
   const [tagInput, setTagInput] = useState('');
   const [partialExits, setPartialExits] = useState<PartialExit[]>([]);
+  const [alertDialogOpen, setAlertDialogOpen] = useState(false);
+  const [alertText, setAlertText] = useState('');
 
   // Function to handle back navigation
   const handleBackToTrades = () => {
@@ -281,6 +288,78 @@ const TradeForm: React.FC = () => {
     }
   };
 
+  // Function to parse Discord alert and populate form fields
+  const parseDiscordAlert = (alertText: string) => {
+    const lines = alertText.split('\n').map(line => line.trim());
+    
+    // Initialize parsed values
+    let ticker = '';
+    let entryPrice = '';
+    let stopLoss = '';
+    let riskPercent = '';
+    
+    // Parse each line
+    lines.forEach(line => {
+      // Match ticker and entry price: "Adding $HOVR shares @ $1.90"
+      const tickerMatch = line.match(/Adding\s+\$([A-Z]+)\s+shares?\s+@\s+\$?([\d.]+)/i);
+      if (tickerMatch) {
+        ticker = tickerMatch[1].toUpperCase();
+        entryPrice = tickerMatch[2];
+      }
+      
+      // Match stop loss: "Stop loss @ $1.70"
+      const stopLossMatch = line.match(/Stop\s+loss\s+@\s+\$?([\d.]+)/i);
+      if (stopLossMatch) {
+        stopLoss = stopLossMatch[1];
+      }
+      
+      // Match risk percentage: "Risking 0.5%"
+      const riskMatch = line.match(/Risking\s+([\d.]+)%/i);
+      if (riskMatch) {
+        riskPercent = riskMatch[1];
+      }
+    });
+    
+    // Calculate shares based on account balance and risk percentage
+    const accountBalance = parseFloat(formik.values.accountSize) || 0;
+    const entryPriceNum = parseFloat(entryPrice) || 0;
+    const stopLossNum = parseFloat(stopLoss) || 0;
+    const riskPercentNum = parseFloat(riskPercent) || 0;
+    
+    let shares = '';
+    if (accountBalance > 0 && entryPriceNum > 0 && stopLossNum > 0 && riskPercentNum > 0) {
+      const riskAmount = accountBalance * (riskPercentNum / 100);
+      const riskPerShare = Math.abs(entryPriceNum - stopLossNum);
+      const calculatedShares = Math.floor(riskAmount / riskPerShare);
+      shares = calculatedShares.toString();
+    }
+    
+    // Update form fields
+    const updates: any = {};
+    if (ticker) updates.ticker = ticker;
+    if (entryPrice) updates.entryPrice = entryPrice;
+    if (stopLoss) updates.stopLoss = stopLoss;
+    if (shares) updates.shares = shares;
+    
+    // Set instrument type to stock by default for Discord alerts
+    updates.instrumentType = 'stock';
+    
+    // Apply updates to form
+    Object.keys(updates).forEach(key => {
+      formik.setFieldValue(key, updates[key]);
+    });
+    
+    // Close dialog and clear alert text
+    setAlertDialogOpen(false);
+    setAlertText('');
+  };
+
+  const handleParseAlert = () => {
+    if (alertText.trim()) {
+      parseDiscordAlert(alertText);
+    }
+  };
+
   // Functions to calculate risk management values
   const calculateRiskDollarAmount = () => {
     const entryPrice = parseFloat(formik.values.entryPrice) || 0;
@@ -355,6 +434,16 @@ const TradeForm: React.FC = () => {
             {isEditMode ? 'Edit Trade' : 'New Trade'}
           </Typography>
         </Box>
+        {!isEditMode && (
+          <Button
+            variant="outlined"
+            startIcon={<ContentPasteIcon />}
+            onClick={() => setAlertDialogOpen(true)}
+            sx={{ ml: 2 }}
+          >
+            Parse Discord Alert
+          </Button>
+        )}
       </Box>
 
       <Paper sx={{ p: 3 }}>
@@ -760,6 +849,49 @@ const TradeForm: React.FC = () => {
           </Grid>
         </form>
       </Paper>
+
+      {/* Discord Alert Parser Dialog */}
+      <Dialog
+        open={alertDialogOpen}
+        onClose={() => setAlertDialogOpen(false)}
+        maxWidth="md"
+        fullWidth
+      >
+        <DialogTitle>Parse Discord Alert</DialogTitle>
+        <DialogContent>
+          <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
+            Paste your Discord alert below. The system will automatically extract the ticker, entry price, stop loss, and calculate shares based on your risk percentage.
+          </Typography>
+          <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
+            <strong>Example format:</strong><br />
+            Adding $HOVR shares @ $1.90<br />
+            Stop loss @ $1.70<br />
+            Risking 0.5%
+          </Typography>
+          <TextField
+            fullWidth
+            multiline
+            rows={6}
+            value={alertText}
+            onChange={(e) => setAlertText(e.target.value)}
+            placeholder="Paste your Discord alert here..."
+            variant="outlined"
+            sx={{ mt: 2 }}
+          />
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => setAlertDialogOpen(false)}>
+            Cancel
+          </Button>
+          <Button 
+            onClick={handleParseAlert}
+            variant="contained"
+            disabled={!alertText.trim()}
+          >
+            Parse Alert
+          </Button>
+        </DialogActions>
+      </Dialog>
     </Box>
   );
 };

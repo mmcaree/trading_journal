@@ -118,7 +118,7 @@ const DashboardLayout = () => {
             <MenuIcon />
           </IconButton>
           <Typography variant="h6" noWrap component="div" sx={{ flexGrow: 1 }}>
-            SwingTrader
+            TradeJournal
           </Typography>
           <CurrencyToggle variant="icon" />
           <div>

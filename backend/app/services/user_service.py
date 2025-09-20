@@ -3,6 +3,7 @@ from typing import Optional
 from datetime import datetime, timedelta
 from jose import jwt
 from passlib.context import CryptContext
+import secrets
 
 from app.core.config import settings
 from app.models.models import User
@@ -279,3 +280,53 @@ def delete_user_account(db: Session, user_id: int) -> bool:
     except Exception as e:
         db.rollback()
         raise ValueError(f"Failed to delete user account: {str(e)}")
+
+
+def generate_password_reset_token(db: Session, email: str) -> Optional[str]:
+    """Generate a password reset token for the user"""
+    user = get_user_by_email(db, email)
+    if not user:
+        return None
+    
+    # Generate a secure random token
+    reset_token = secrets.token_urlsafe(32)
+    
+    # Set expiration to 1 hour from now
+    expires_at = datetime.utcnow() + timedelta(hours=1)
+    
+    # Update user with reset token and expiration
+    user.password_reset_token = reset_token
+    user.password_reset_expires = expires_at
+    
+    db.commit()
+    db.refresh(user)
+    
+    return reset_token
+
+
+def verify_password_reset_token(db: Session, token: str) -> Optional[User]:
+    """Verify password reset token and return user if valid"""
+    user = db.query(User).filter(
+        User.password_reset_token == token,
+        User.password_reset_expires > datetime.utcnow()
+    ).first()
+    
+    return user
+
+
+def reset_password_with_token(db: Session, token: str, new_password: str) -> bool:
+    """Reset password using valid token"""
+    user = verify_password_reset_token(db, token)
+    if not user:
+        return False
+    
+    # Hash the new password
+    hashed_password = get_password_hash(new_password)
+    
+    # Update user password and clear reset token
+    user.hashed_password = hashed_password
+    user.password_reset_token = None
+    user.password_reset_expires = None
+    
+    db.commit()
+    return True

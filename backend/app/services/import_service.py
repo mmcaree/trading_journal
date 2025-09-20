@@ -11,8 +11,7 @@ from typing import List, Dict, Any, Optional, Tuple
 from sqlalchemy.orm import Session
 from sqlalchemy import and_, desc
 
-from app.models.import_models import ImportedOrder, ImportBatch, Position, PositionOrder, OrderStatus, OrderSide
-from app.models.models import Trade, User, InstrumentType, OptionType
+from app.models import ImportedOrder, ImportBatch, Position, PositionOrder, OrderStatus, OrderSide, Trade, User, InstrumentType, OptionType
 from app.services.trade_service import calculate_trade_metrics
 from app.db.session import get_db
 from app.utils.options_parser import parse_options_symbol, convert_options_price

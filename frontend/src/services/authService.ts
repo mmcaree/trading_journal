@@ -13,6 +13,7 @@ export interface User {
   bio?: string;
   profile_picture_url?: string;
   updated_at?: string;
+  timezone?: string;
   
   // Notification settings
   email_notifications_enabled?: boolean;

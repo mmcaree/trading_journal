@@ -8,6 +8,7 @@ export interface UserUpdateData {
   display_name?: string;
   bio?: string;
   email?: string;
+  timezone?: string;
   default_account_size?: number;
 }
 

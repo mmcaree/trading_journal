@@ -54,6 +54,13 @@ class User(Base):
     two_factor_secret = Column(String, nullable=True)
     backup_codes = Column(Text, nullable=True)  # JSON string of backup codes
     
+    # Password reset fields
+    password_reset_token = Column(String, nullable=True, index=True)
+    password_reset_expires = Column(DateTime, nullable=True)
+    
+    # User preferences
+    timezone = Column(String, default='America/New_York')  # User's local timezone for email scheduling
+    
     # Trading settings
     current_account_balance = Column(Float, nullable=True)  # Current account balance (updated with P&L)
     initial_account_balance = Column(Float, nullable=True)  # Starting balance for P&L tracking

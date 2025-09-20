@@ -73,6 +73,7 @@ class UserUpdate(BaseModel):
     display_name: Optional[str] = None
     bio: Optional[str] = None
     email: Optional[str] = None
+    timezone: Optional[str] = None  # User's local timezone
     default_account_size: Optional[float] = None
 
 class NotificationSettings(BaseModel):
@@ -100,6 +101,7 @@ class UserResponse(UserBase):
     bio: Optional[str] = None
     profile_picture_url: Optional[str] = None
     updated_at: Optional[datetime] = None
+    timezone: Optional[str] = None  # User's local timezone
     
     # Notification settings (excluding sensitive fields)
     email_notifications_enabled: bool = True
@@ -119,6 +121,13 @@ class UserResponse(UserBase):
 
 class ChangePasswordRequest(BaseModel):
     current_password: str
+    new_password: str
+
+class PasswordResetRequest(BaseModel):
+    email: str
+
+class PasswordResetConfirm(BaseModel):
+    token: str
     new_password: str
 
 # Trade schemas

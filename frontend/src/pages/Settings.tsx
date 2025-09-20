@@ -67,6 +67,7 @@ const Settings: React.FC = () => {
     display_name: user?.display_name || '',
     bio: user?.bio || '',
     email: user?.email || '',
+    timezone: user?.timezone || 'America/New_York',
   });
 
   // Password form state
@@ -514,6 +515,33 @@ const Settings: React.FC = () => {
                   />
                 </Grid>
                 <Grid item xs={12}>
+                  <FormControl fullWidth variant="outlined">
+                    <InputLabel>Timezone</InputLabel>
+                    <Select
+                      value={profileData.timezone}
+                      onChange={(e: SelectChangeEvent) => setProfileData({ ...profileData, timezone: e.target.value })}
+                      label="Timezone"
+                    >
+                      <MenuItem value="America/New_York">Eastern Time (EST/EDT)</MenuItem>
+                      <MenuItem value="America/Chicago">Central Time (CST/CDT)</MenuItem>
+                      <MenuItem value="America/Denver">Mountain Time (MST/MDT)</MenuItem>
+                      <MenuItem value="America/Phoenix">Mountain Standard Time (MST)</MenuItem>
+                      <MenuItem value="America/Los_Angeles">Pacific Time (PST/PDT)</MenuItem>
+                      <MenuItem value="America/Anchorage">Alaska Time (AKST/AKDT)</MenuItem>
+                      <MenuItem value="Pacific/Honolulu">Hawaii Time (HST)</MenuItem>
+                      <MenuItem value="Europe/London">GMT/BST</MenuItem>
+                      <MenuItem value="Europe/Paris">Central European Time</MenuItem>
+                      <MenuItem value="Asia/Tokyo">Japan Standard Time</MenuItem>
+                      <MenuItem value="Asia/Shanghai">China Standard Time</MenuItem>
+                      <MenuItem value="Asia/Kolkata">India Standard Time</MenuItem>
+                      <MenuItem value="Australia/Sydney">Australian Eastern Time</MenuItem>
+                    </Select>
+                    <Typography variant="caption" sx={{ mt: 1, color: 'text.secondary' }}>
+                      Used for scheduling weekly email reports
+                    </Typography>
+                  </FormControl>
+                </Grid>
+                <Grid item xs={12}>
                   <Button 
                     variant="contained" 
                     color="primary" 
@@ -522,6 +550,7 @@ const Settings: React.FC = () => {
                   >
                     {loading ? 'Updating...' : 'Update Profile'}
                   </Button>
+                </Grid>
                 </Grid>
               </Grid>
             </Box>
