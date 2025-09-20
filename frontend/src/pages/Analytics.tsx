@@ -29,7 +29,7 @@ import {
 } from 'recharts';
 import { fetchAnalyticsData } from '../services/analyticsService';
 import { formatCurrency, formatPercentage, formatProfitLoss } from '../utils/formatters';
-import { currencyTooltipFormatter, currencyTickFormatter } from '../utils/chartFormatters';
+import { currencyTooltipFormatter, currencyTooltipFormatterWithDate, currencyTickFormatter } from '../utils/chartFormatters';
 import { useCurrencyFormatting } from '../hooks/useCurrencyFormatting';
 import CurrencyDisplay from '../components/CurrencyDisplay';
 
@@ -206,7 +206,7 @@ const Analytics: React.FC = () => {
                         } 
                       />
                       <YAxis tickFormatter={currencyTickFormatter} />
-                      <Tooltip formatter={currencyTooltipFormatter} />
+                      <Tooltip formatter={currencyTooltipFormatterWithDate} />
                       <Legend />
                       <Line
                         type="monotone"

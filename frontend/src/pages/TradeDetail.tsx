@@ -28,7 +28,7 @@ import {
   NoteAdd as NoteAddIcon,
   ShowChart as ShowChartIcon
 } from '@mui/icons-material';
-import { fetchTrade, updateTrade } from '../services/tradeService';
+import { fetchTrade, updateTrade, getTradeDetails } from '../services/tradeService';
 import { imageService } from '../services/imageService';
 import { notesService } from '../services/notesService';
 import TradeCandlestickChart from '../components/TradeCandlestickChart';
@@ -103,7 +103,28 @@ const TradeDetail: React.FC = () => {
     const loadTrade = async () => {
       try {
         if (id) {
+          // Fetch basic trade data
           const fetchedTrade = await fetchTrade(parseInt(id));
+          
+          // Also fetch detailed exits data
+          try {
+            const tradeDetails = await getTradeDetails(parseInt(id));
+            
+            // Merge the partial exits from the detailed response
+            fetchedTrade.partialExits = tradeDetails.exits ? tradeDetails.exits.map((exit: any) => ({
+              exitDate: exit.exit_date,
+              exitPrice: exit.exit_price,
+              sharesSold: exit.shares_sold,
+              profitLoss: exit.profit_loss,
+              notes: exit.notes
+            })) : [];
+            
+            // Update remaining shares from calculated data
+            fetchedTrade.remainingShares = tradeDetails.calculated.current_shares;
+          } catch (detailsError) {
+            console.warn('Could not fetch detailed exits, using basic trade data:', detailsError);
+          }
+          
           setTrade(fetchedTrade);
         }
       } catch (error) {

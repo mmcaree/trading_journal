@@ -832,11 +832,11 @@ def calculate_current_position_size(db: Session, trade_id: int) -> int:
     """Calculate the current position size (entries - exits)"""
     
     total_entries = db.query(TradeEntry).filter(TradeEntry.trade_id == trade_id).with_entities(
-        db.func.sum(TradeEntry.shares)
+        func.sum(TradeEntry.shares)
     ).scalar() or 0
     
     total_exits = db.query(PartialExit).filter(PartialExit.trade_id == trade_id).with_entities(
-        db.func.sum(PartialExit.shares_sold)
+        func.sum(PartialExit.shares_sold)
     ).scalar() or 0
     
     return int(total_entries - total_exits)
@@ -944,23 +944,55 @@ def get_positions(db: Session, user_id: int, skip: int = 0, limit: int = 100) ->
     
     positions = []
     for row in positions_query.all():
-        # Calculate current position size after partial exits
-        current_shares = calculate_current_position_size_by_group(db, row.trade_group_id)
+        # For positions page, calculate current shares using TradeEntry records
+        # instead of Trade.position_size - PartialExit.shares_sold to avoid double-counting
+        
+        # Get only the active trades in this group
+        active_trades_in_group = db.query(Trade).filter(
+            Trade.trade_group_id == row.trade_group_id,
+            Trade.status.in_(['ACTIVE', 'PLANNED'])
+        ).all()
+        
+        if not active_trades_in_group:
+            continue
+            
+        # Calculate current position size from TradeEntry records (share lots)
+        from app.models.models import TradeEntry
+        
+        current_shares = 0
+        total_shares_bought = 0  # Track original purchase amounts
+        realized_pnl = 0
+        
+        for trade in active_trades_in_group:
+            # Sum up active share lots for this trade
+            active_lots = db.query(TradeEntry).filter(
+                TradeEntry.trade_id == trade.id,
+                TradeEntry.is_active == True
+            ).all()
+            
+            trade_current_shares = sum(lot.shares for lot in active_lots if lot.shares > 0)
+            current_shares += trade_current_shares
+            
+            # Get ALL TradeEntry records (active and inactive) to calculate total bought
+            all_lots = db.query(TradeEntry).filter(
+                TradeEntry.trade_id == trade.id
+            ).all()
+            
+            # Calculate total bought by looking at partial exits to reconstruct original amounts
+            partial_exits = db.query(PartialExit).filter(
+                PartialExit.trade_id == trade.id
+            ).all()
+            
+            total_sold_for_trade = sum(exit.shares_sold for exit in partial_exits)
+            total_bought_for_trade = trade_current_shares + total_sold_for_trade
+            total_shares_bought += total_bought_for_trade
+            
+            # Get realized P&L from partial exits for this trade
+            realized_pnl += sum(exit.profit_loss for exit in partial_exits if exit.profit_loss)
         
         # Skip positions with no remaining shares
         if current_shares <= 0:
             continue
-            
-        # Calculate realized P&L from partial exits
-        trades_in_group = db.query(Trade.id).filter(Trade.trade_group_id == row.trade_group_id).all()
-        trade_ids = [trade.id for trade in trades_in_group]
-        
-        realized_pnl = 0
-        if trade_ids:
-            partial_exits = db.query(PartialExit).filter(
-                PartialExit.trade_id.in_(trade_ids)
-            ).all()
-            realized_pnl = sum(exit.profit_loss for exit in partial_exits if exit.profit_loss)
             
         position = {
             'id': row.trade_group_id,  # Use trade_group_id as the position ID
@@ -973,7 +1005,10 @@ def get_positions(db: Session, user_id: int, skip: int = 0, limit: int = 100) ->
             'timeframe': row.timeframe,
             'entry_date': row.entry_date,
             'entry_price': round(row.avg_entry_price, 2),
-            'position_size': current_shares,
+            'position_size': current_shares,  # Current remaining shares
+            'current_shares': current_shares,  # Add explicit current_shares field
+            'total_position_size': int(total_shares_bought),  # Total shares bought (corrected)
+            'total_shares_bought': int(total_shares_bought),  # Explicit field for total bought
             'stop_loss': row.stop_loss,
             'take_profit': row.take_profit,
             'total_risk': row.total_risk,

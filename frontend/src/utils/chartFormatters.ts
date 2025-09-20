@@ -1,5 +1,23 @@
 import { formatCurrency, formatPercentage } from './formatters';
 
+// Helper function to format date for tooltips
+const formatDateForTooltip = (dateStr: string): string => {
+  try {
+    const date = new Date(dateStr);
+    if (isNaN(date.getTime())) {
+      return dateStr; // Return original if invalid
+    }
+    return date.toLocaleDateString('en-US', {
+      weekday: 'short',
+      year: 'numeric',
+      month: 'short',
+      day: 'numeric'
+    });
+  } catch {
+    return dateStr;
+  }
+};
+
 // Custom tooltip formatter for charts that display currency values
 export const currencyTooltipFormatter = (value: any, name: string) => {
   if (typeof value === 'number') {
@@ -8,12 +26,44 @@ export const currencyTooltipFormatter = (value: any, name: string) => {
   return [value, name];
 };
 
+// Enhanced tooltip formatter with date - for time series charts
+export const currencyTooltipFormatterWithDate = (value: any, name: string, props: any) => {
+  const formattedValue = typeof value === 'number' ? formatCurrency(value) : value;
+  
+  // Extract date from the data point
+  if (props && props.payload) {
+    const dateKey = props.payload.date || props.payload.week || props.payload.month || props.payload.period;
+    if (dateKey) {
+      const formattedDate = formatDateForTooltip(dateKey);
+      return [formattedValue, `${name} (${formattedDate})`];
+    }
+  }
+  
+  return [formattedValue, name];
+};
+
 // Custom tooltip formatter for charts that display percentage values
 export const percentageTooltipFormatter = (value: any, name: string) => {
   if (typeof value === 'number') {
     return [formatPercentage(value), name];
   }
   return [value, name];
+};
+
+// Enhanced percentage tooltip formatter with date
+export const percentageTooltipFormatterWithDate = (value: any, name: string, props: any) => {
+  const formattedValue = typeof value === 'number' ? formatPercentage(value) : value;
+  
+  // Extract date from the data point
+  if (props && props.payload) {
+    const dateKey = props.payload.date || props.payload.week || props.payload.month || props.payload.period;
+    if (dateKey) {
+      const formattedDate = formatDateForTooltip(dateKey);
+      return [formattedValue, `${name} (${formattedDate})`];
+    }
+  }
+  
+  return [formattedValue, name];
 };
 
 // Custom Y-axis tick formatter for currency

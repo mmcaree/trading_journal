@@ -156,23 +156,14 @@ const TradeForm: React.FC = () => {
         
         // For options trades, skip risk calculations since they don't have stop losses
         let riskAmount = 0;
-        let calculatedTargetPrice = 0;
         
         if (!isOptionsInstrument(values.instrumentType)) {
           const entryPrice = parseFloat(values.entryPrice);
           const stopLoss = parseFloat(values.stopLoss);
-          const isLong = values.direction === 'Long';
           
           // Calculate actual risk amount
           const riskPerShare = Math.abs(entryPrice - stopLoss);
           riskAmount = userShares * riskPerShare;
-          
-          // Calculate suggested take profit (5R) based on user's actual shares
-          const rMultiple = 5;
-          const targetMove = riskPerShare * rMultiple;
-          calculatedTargetPrice = isLong 
-            ? entryPrice + targetMove
-            : entryPrice - targetMove;
         }
         
           // Prepare trade data, keeping any existing notes that don't contain risk info
@@ -192,7 +183,7 @@ const TradeForm: React.FC = () => {
             exitPrice: values.exitPrice,
             stopLoss: isOptionsInstrument(values.instrumentType) ? null : values.stopLoss,
             shares: values.shares, 
-            takeProfit: calculatedTargetPrice > 0 ? calculatedTargetPrice.toFixed(2) : values.takeProfit,
+            takeProfit: values.takeProfit, // Use the form value (auto-populated by useEffect)
             notes: cleanNotes,
             instrumentType: values.instrumentType,
             tags,
@@ -392,6 +383,33 @@ const TradeForm: React.FC = () => {
     
     return riskPercent.toFixed(2);
   };
+  // Auto-calculate and update take profit field when relevant values change
+  useEffect(() => {
+    const entryPrice = parseFloat(formik.values.entryPrice) || 0;
+    const stopLoss = parseFloat(formik.values.stopLoss) || 0;
+    const isLong = formik.values.direction === 'Long';
+    
+    // Only auto-update for non-options instruments and when we have valid entry and stop
+    if (!isOptionsInstrument(formik.values.instrumentType) && entryPrice > 0 && stopLoss > 0) {
+      const isValidTrade = isLong ? (entryPrice > stopLoss) : (stopLoss > entryPrice);
+      
+      if (isValidTrade) {
+        const riskPerShare = Math.abs(entryPrice - stopLoss);
+        const rMultiple = 5; // 5R target
+        const targetMove = riskPerShare * rMultiple;
+        const targetPrice = isLong ? entryPrice + targetMove : entryPrice - targetMove;
+        
+        // Only update if the current value is empty or different
+        const currentTakeProfit = parseFloat(formik.values.takeProfit) || 0;
+        const calculatedPrice = parseFloat(targetPrice.toFixed(2));
+        
+        if (currentTakeProfit !== calculatedPrice) {
+          formik.setFieldValue('takeProfit', calculatedPrice.toString());
+        }
+      }
+    }
+  }, [formik.values.entryPrice, formik.values.stopLoss, formik.values.direction, formik.values.instrumentType]);
+
   const calculateTakeProfitPrice = () => {
     const entryPrice = parseFloat(formik.values.entryPrice) || 0;
     const stopLoss = parseFloat(formik.values.stopLoss) || 0;
@@ -659,7 +677,7 @@ const TradeForm: React.FC = () => {
               <TextField
                 fullWidth
                 id="takeProfitPrice"
-                label="Suggested Take Profit Price (5R)"
+                label="Auto-Calculated Take Profit (5R)"
                 value={calculateTakeProfitPrice()}
                 InputProps={{
                   startAdornment: <InputAdornment position="start">$</InputAdornment>,
@@ -756,11 +774,14 @@ const TradeForm: React.FC = () => {
                 fullWidth
                 id="takeProfit"
                 name="takeProfit"
-                label="Target Price 1st Trim"
+                label="Target Price (5R)"
                 value={formik.values.takeProfit}
                 onChange={formik.handleChange}
                 error={formik.touched.takeProfit && Boolean(formik.errors.takeProfit)}
-                helperText={formik.touched.takeProfit && formik.errors.takeProfit}
+                helperText={
+                  formik.touched.takeProfit && formik.errors.takeProfit || 
+                  "Auto-calculated: Entry + 5x risk (5R = 5 times your risk amount)"
+                }
                 InputProps={{
                   startAdornment: <InputAdornment position="start">$</InputAdornment>,
                 }}

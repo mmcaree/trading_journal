@@ -502,7 +502,7 @@ export const fetchTrades = async (
         exitDate: trade.exit_date || null,
         entryPrice: trade.entry_price,
         exitPrice: trade.exit_price || null,
-        strategy: trade.timeframe || 'Unknown',
+        strategy: trade.strategy || 'Unknown',
         risk_percent: riskPercent ? parseFloat(riskPercent) : null,
         total_risk: trade.total_risk || null,
         status: trade.status?.toLowerCase() === 'closed' ? 'Closed' : 
@@ -561,7 +561,7 @@ export const fetchTrade = async (id: number): Promise<any> => {
       entryPrice: apiTrade.entry_price,
       exitPrice: apiTrade.exit_price,
       shares: apiTrade.position_size,
-      strategy: apiTrade.timeframe || 'Unknown',  // API timeframe maps to strategy in the UI
+      strategy: apiTrade.strategy || 'Unknown',
       setupType: apiTrade.setup_type || 'Unknown',
       timeframe: apiTrade.timeframe || 'Daily',
       status: apiTrade.status?.toLowerCase() === 'active' ? 'Open' : 

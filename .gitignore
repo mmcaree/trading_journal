@@ -132,3 +132,10 @@ WEEKLY_EMAIL_SYSTEM.md
 PRODUCTION_EMAIL_SETUP.md
 DNS_SETUP_GUIDE.md
 backend/app.db
+backend/simple_buy_check.py
+backend/simple_check.py
+backend/original_import.py
+backend/cleanup_open.py
+backend/calculate_total_bought.py
+backend/apply_correct_calculation.py
+IMPORT_FIX_EXPLANATION.md

@@ -6,7 +6,7 @@ import { useAuth } from '../context/AuthContext';
 import { fetchDashboardData } from '../services/tradeService';
 import { testApiConnection } from '../services/debugService';
 import { formatCurrency, formatPercentage, formatProfitLoss } from '../utils/formatters';
-import { currencyTooltipFormatter, currencyTickFormatter } from '../utils/chartFormatters';
+import { currencyTooltipFormatter, currencyTooltipFormatterWithDate, currencyTickFormatter } from '../utils/chartFormatters';
 import CurrencyDisplay from '../components/CurrencyDisplay';
 import {
   LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer,
@@ -272,7 +272,7 @@ const Dashboard: React.FC = () => {
                   tickFormatter={currencyTickFormatter}
                   tick={{ fontSize: 12 }}
                 />
-                <Tooltip formatter={currencyTooltipFormatter} />
+                <Tooltip formatter={currencyTooltipFormatterWithDate} />
                 <Legend />
                 <Line 
                   type="monotone" 

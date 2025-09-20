@@ -11,8 +11,9 @@ from typing import List, Dict, Any, Optional, Tuple
 from sqlalchemy.orm import Session
 from sqlalchemy import and_, desc
 
-from app.models import ImportedOrder, ImportBatch, Position, PositionOrder, OrderStatus, OrderSide, Trade, User, InstrumentType, OptionType
+from app.models import ImportedOrder, ImportBatch, Position, PositionOrder, OrderStatus, OrderSide, Trade, User, InstrumentType, OptionType, TradeEntry, PartialExit
 from app.services.trade_service import calculate_trade_metrics
+from app.utils.options_parser import parse_options_symbol
 from app.db.session import get_db
 from app.utils.options_parser import parse_options_symbol, convert_options_price
 
@@ -88,7 +89,7 @@ class TradeImportService:
                         orders_imported.append(order)
                         stats[order.status.lower()] += 1
                         if row_num <= 5 or row_num % 50 == 0:  # Log first 5 and every 50th order
-                            print(f"Processed order {row_num}: {order.symbol} {order.side} {order.quantity} @ {order.placed_time}")
+                            print(f"Processed order {row_num}: {order.symbol} {order.side} {order.filled_qty} @ {order.placed_time}")
                         
                 except Exception as e:
                     print(f"Error parsing row {row_num}: {e}")
@@ -267,22 +268,12 @@ class TradeImportService:
             if position.quantity is None:
                 position.quantity = 0
         
-        # Process orders chronologically
-        buy_queue = []  # FIFO queue for buy orders
+        # Process orders chronologically with sophisticated position tracking
+        trades_created = self._process_chronological_orders_simple(position, orders, account_size)
+        results["trades_created"] = trades_created
         
+        # Mark all orders as processed
         for order in orders:
-            if order.side == "Buy":
-                self._process_buy_order(position, order, buy_queue, orders)
-                
-            elif order.side == "Sell":
-                trades_created = self._process_sell_order(position, order, buy_queue, account_size)
-                results["trades_created"] += trades_created
-                
-            elif order.side == "Short":
-                # Handle short selling (future enhancement)
-                pass
-            
-            # Mark order as processed
             order.processed = True
             results["orders_processed"] += 1
         
@@ -398,8 +389,8 @@ class TradeImportService:
             if buy_orders:
                 # Use the buy order with closest time to trade entry date
                 closest_buy_order = min(buy_orders, 
-                    key=lambda x: abs((x.filled_time or x.placed_time - trade.entry_date).total_seconds())
-                    if x.filled_time or x.placed_time else float('inf'))
+                    key=lambda x: abs(((x.filled_time or x.placed_time) - trade.entry_date).total_seconds())
+                    if (x.filled_time or x.placed_time) else float('inf'))
                 
                 if closest_buy_order.placed_time or closest_buy_order.filled_time:
                     stop_loss_price = self._detect_stop_loss_price(closest_buy_order, all_orders)
@@ -587,8 +578,8 @@ class TradeImportService:
                     profit_loss=actual_pnl,
                     position_value=actual_position_value,
                     entry_notes=f"Auto-generated from import batch{' (Options)' if options_info['is_options'] else ''}",
-                    setup_type="imported",
-                    strategy="Other",  # Default strategy for imported trades
+                    setup_type="Flag",
+                    strategy="Breakout",  # Updated strategy for imported trades
                     timeframe=None,  # Not available from imported data
                     stop_loss=stop_loss_price,  # Use detected stop loss price
                     take_profit=None,  # Not available from imported data
@@ -694,8 +685,8 @@ class TradeImportService:
                         profit_loss=None,
                         position_value=actual_position_value,
                         entry_notes=f"Auto-generated open position from import batch (pending sell @ ${order.price or 'market'}){' (Options)' if options_info['is_options'] else ''}",
-                        setup_type="imported", 
-                        strategy="Other",  # Default strategy for imported trades
+                        setup_type="Flag", 
+                        strategy="Breakout",  # Updated strategy for imported trades
                         timeframe=None,
                         stop_loss=order.price if order.price else None,  # Use pending sell price as stop loss if available
                         take_profit=None,
@@ -865,3 +856,988 @@ class TradeImportService:
             "trades_updated": trades_updated,
             "total_trades_analyzed": len(trades_without_stop_loss)
         }
+
+    def _process_chronological_orders(self, position: Position, orders: List[ImportedOrder], account_size: float = 10000) -> int:
+        """
+        Process orders chronologically with sophisticated position tracking.
+        
+        Rules:
+        1. Track buy/sell/short orders chronologically
+        2. New trade_group_id when position goes to zero and opens again
+        3. Sub-positions (TradeEntry) for each add with individual stop losses
+        4. FIFO exits from highest stop loss sub-position first
+        5. Special case: sell immediately after add comes from that add
+        """
+        from app.models.models import Trade, TradeEntry, PartialExit
+        import uuid
+        
+        trades_created = 0
+        current_position = None  # Current active Trade record
+        sub_positions = []  # List of TradeEntry records for current position
+        current_trade_group_id = None
+        net_shares = 0  # Running total of shares (positive = long, negative = short)
+        
+        print(f"\n=== Processing {len(orders)} {position.symbol} orders chronologically ===")
+        
+        for i, order in enumerate(orders):
+            if not order.filled_qty or order.filled_qty <= 0:
+                continue
+                
+            print(f"\nOrder {i+1}: {order.side} {order.filled_qty} @ ${order.avg_price} on {order.filled_time}")
+            print(f"  Net shares before: {net_shares}")
+            
+            if order.side == "Buy":
+                if net_shares < 0:  # Covering a short position
+                    cover_qty = min(order.filled_qty, abs(net_shares))
+                    remaining_qty = order.filled_qty - cover_qty
+                    
+                    if cover_qty > 0:
+                        # Cover short position
+                        self._process_short_cover(current_position, sub_positions, cover_qty, order, account_size)
+                        net_shares += cover_qty
+                        print(f"  Covered {cover_qty} short shares, net_shares now: {net_shares}")
+                    
+                    if remaining_qty > 0:
+                        # Remaining qty opens new long position
+                        if net_shares == 0:  # Position fully covered, start new long
+                            current_trade_group_id = str(uuid.uuid4())
+                            current_position, sub_positions = self._start_new_position(
+                                position, remaining_qty, order, current_trade_group_id, "LONG", account_size
+                            )
+                            trades_created += 1
+                        else:
+                            # Add to existing long position
+                            self._add_to_position(current_position, sub_positions, remaining_qty, order)
+                        
+                        net_shares += remaining_qty
+                        print(f"  Added {remaining_qty} long shares, net_shares now: {net_shares}")
+                        
+                else:  # Adding to long position or starting new long
+                    if net_shares == 0:  # Starting new long position
+                        current_trade_group_id = str(uuid.uuid4())
+                        current_position, sub_positions = self._start_new_position(
+                            position, order.filled_qty, order, current_trade_group_id, "LONG", account_size
+                        )
+                        trades_created += 1
+                    else:
+                        # Add to existing long position
+                        self._add_to_position(current_position, sub_positions, order.filled_qty, order)
+                    
+                    net_shares += order.filled_qty
+                    print(f"  Added {order.filled_qty} long shares, net_shares now: {net_shares}")
+            
+            elif order.side == "Sell":
+                if net_shares > 0:  # Selling from long position
+                    sell_qty = min(order.filled_qty, net_shares)
+                    remaining_qty = order.filled_qty - sell_qty
+                    
+                    if sell_qty > 0:
+                        # Check if this sell is immediately after an add (special case)
+                        is_immediate_after_add = (i > 0 and 
+                                                orders[i-1].side == "Buy" and 
+                                                order.filled_time and orders[i-1].filled_time and
+                                                (order.filled_time - orders[i-1].filled_time).total_seconds() < 300)  # 5 min window
+                        
+                        self._process_long_sell(current_position, sub_positions, sell_qty, order, account_size, is_immediate_after_add)
+                        net_shares -= sell_qty
+                        print(f"  Sold {sell_qty} long shares, net_shares now: {net_shares}")
+                    
+                    if remaining_qty > 0 and net_shares == 0:
+                        # Remaining qty opens new short position
+                        current_trade_group_id = str(uuid.uuid4())
+                        current_position, sub_positions = self._start_new_position(
+                            position, remaining_qty, order, current_trade_group_id, "SHORT", account_size
+                        )
+                        trades_created += 1
+                        net_shares -= remaining_qty
+                        print(f"  Opened {remaining_qty} short shares, net_shares now: {net_shares}")
+                        
+                else:  # Adding to short position or starting new short
+                    if net_shares == 0:  # Starting new short position
+                        current_trade_group_id = str(uuid.uuid4())
+                        current_position, sub_positions = self._start_new_position(
+                            position, order.filled_qty, order, current_trade_group_id, "SHORT", account_size
+                        )
+                        trades_created += 1
+                    else:
+                        # Add to existing short position
+                        self._add_to_position(current_position, sub_positions, order.filled_qty, order)
+                    
+                    net_shares -= order.filled_qty
+                    print(f"  Added {order.filled_qty} short shares, net_shares now: {net_shares}")
+            
+            elif order.side == "Short":
+                # Handle short selling
+                if net_shares > 0:  # Selling from long position first
+                    sell_qty = min(order.filled_qty, net_shares)
+                    remaining_qty = order.filled_qty - sell_qty
+                    
+                    if sell_qty > 0:
+                        self._process_long_sell(current_position, sub_positions, sell_qty, order, account_size, False)
+                        net_shares -= sell_qty
+                        print(f"  Sold {sell_qty} long shares via short, net_shares now: {net_shares}")
+                    
+                    if remaining_qty > 0:
+                        # Remaining qty opens new short position
+                        current_trade_group_id = str(uuid.uuid4())
+                        current_position, sub_positions = self._start_new_position(
+                            position, remaining_qty, order, current_trade_group_id, "SHORT", account_size
+                        )
+                        trades_created += 1
+                        net_shares -= remaining_qty
+                        print(f"  Opened {remaining_qty} short shares, net_shares now: {net_shares}")
+                        
+                else:  # Adding to short position or starting new short
+                    if net_shares == 0:  # Starting new short position
+                        current_trade_group_id = str(uuid.uuid4())
+                        current_position, sub_positions = self._start_new_position(
+                            position, order.filled_qty, order, current_trade_group_id, "SHORT", account_size
+                        )
+                        trades_created += 1
+                    else:
+                        # Add to existing short position
+                        self._add_to_position(current_position, sub_positions, order.filled_qty, order)
+                    
+                    net_shares -= order.filled_qty
+                    print(f"  Added {order.filled_qty} short shares, net_shares now: {net_shares}")
+        
+        # Close position if net_shares is 0, otherwise mark as active
+        if net_shares == 0 and current_position:
+            current_position.status = "CLOSED"
+            # Calculate final profit from all partial exits
+            partial_exits = self.db.query(PartialExit).filter(PartialExit.trade_id == current_position.id).all()
+            if partial_exits:
+                current_position.profit_loss = sum(exit.profit_loss for exit in partial_exits if exit.profit_loss)
+                if current_position.position_value:
+                    current_position.profit_loss_percent = (current_position.profit_loss / current_position.position_value) * 100
+            print(f"  ✅ Position closed, final P&L: ${current_position.profit_loss}")
+        elif current_position:
+            current_position.status = "ACTIVE"
+            print(f"  📈 Position remains active with {net_shares} net shares")
+        
+        self.db.commit()
+        print(f"=== Completed processing, created {trades_created} trades ===\n")
+        
+        return trades_created
+
+    def _start_new_position(self, position: Position, qty: int, order: ImportedOrder, trade_group_id: str, 
+                           direction: str, account_size: float) -> tuple:
+        """Start a new position with the first sub-position"""
+        from app.models.models import Trade, TradeEntry
+        
+        # Parse options info
+        options_info = parse_options_symbol(position.symbol)
+        
+        # Detect stop loss
+        stop_loss_price = self._detect_stop_loss_price(order, [order])  # Pass single order for now
+        
+        # Calculate metrics
+        metrics = self._calculate_imported_trade_metrics(
+            entry_price=order.avg_price,
+            exit_price=None,
+            stop_loss=stop_loss_price,
+            take_profit=None,
+            position_size=qty,
+            trade_type=direction,
+            account_size=account_size
+        )
+        
+        # Create main trade record
+        trade = Trade(
+            user_id=position.user_id,
+            ticker=options_info['ticker'] if options_info['is_options'] else position.symbol,
+            trade_type=direction,
+            status="ACTIVE",
+            trade_group_id=trade_group_id,
+            
+            # Options fields
+            instrument_type=InstrumentType.OPTIONS if options_info['is_options'] else InstrumentType.STOCK,
+            strike_price=options_info['strike_price'] if options_info['is_options'] else None,
+            expiration_date=options_info['expiration_date'] if options_info['is_options'] else None,
+            option_type=OptionType.CALL if options_info['option_type'] == 'call' else OptionType.PUT if options_info['option_type'] == 'put' else None,
+            
+            position_size=qty,
+            entry_price=order.avg_price,
+            entry_date=order.filled_time or order.placed_time,
+            position_value=metrics["position_value"],
+            setup_type="imported",
+            strategy="Breakout",
+            stop_loss=stop_loss_price,
+            risk_per_share=metrics["risk_per_share"],
+            total_risk=metrics["total_risk"],
+            risk_reward_ratio=metrics["risk_reward_ratio"],
+            account_balance_snapshot=account_size,
+            imported_order_id=order.id
+        )
+        
+        self.db.add(trade)
+        self.db.flush()  # Get trade ID
+        
+        # Create first sub-position (TradeEntry)
+        trade_entry = TradeEntry(
+            trade_id=trade.id,
+            shares=qty,
+            entry_price=order.avg_price,
+            entry_date=order.filled_time or order.placed_time,
+            stop_loss=stop_loss_price,
+            notes=f"Initial position: {direction} {qty} @ ${order.avg_price}"
+        )
+        
+        self.db.add(trade_entry)
+        self.db.flush()
+        
+        sub_positions = [trade_entry]
+        
+        print(f"  🆕 Started new {direction} position: Trade ID {trade.id}, Group {trade_group_id[:8]}")
+        print(f"     Sub-position: {qty} @ ${order.avg_price}, Stop: ${stop_loss_price or 'None'}")
+        
+        return trade, sub_positions
+
+    def _add_to_position(self, trade: 'Trade', sub_positions: list, qty: int, order: ImportedOrder):
+        """Add to existing position with new sub-position"""
+        from app.models.models import TradeEntry
+        
+        # Detect stop loss for this add
+        stop_loss_price = self._detect_stop_loss_price(order, [order])
+        
+        # Create new sub-position
+        trade_entry = TradeEntry(
+            trade_id=trade.id,
+            shares=qty,
+            entry_price=order.avg_price,
+            entry_date=order.filled_time or order.placed_time,
+            stop_loss=stop_loss_price,
+            notes=f"Add to position: {qty} @ ${order.avg_price}"
+        )
+        
+        self.db.add(trade_entry)
+        self.db.flush()
+        
+        sub_positions.append(trade_entry)
+        
+        # Update main trade record
+        old_total_qty = trade.position_size
+        old_total_value = trade.position_value or 0
+        
+        new_total_qty = old_total_qty + qty
+        new_add_value = qty * order.avg_price
+        new_total_value = old_total_value + new_add_value
+        
+        # Update weighted average entry price
+        trade.entry_price = new_total_value / new_total_qty
+        trade.position_size = new_total_qty
+        trade.position_value = new_total_value
+        
+        print(f"  ➕ Added to position: +{qty} @ ${order.avg_price}, Stop: ${stop_loss_price or 'None'}")
+        print(f"     Total position: {new_total_qty} @ avg ${trade.entry_price:.4f}")
+
+    def _process_long_sell(self, trade: 'Trade', sub_positions: list, qty: int, order: ImportedOrder, 
+                          account_size: float, is_immediate_after_add: bool):
+        """Process selling from long position using FIFO with highest stop loss first"""
+        from app.models.models import PartialExit
+        
+        remaining_to_sell = qty
+        
+        if is_immediate_after_add and sub_positions:
+            # Special case: sell immediately after add comes from that add (last sub-position)
+            last_sub = sub_positions[-1]
+            if last_sub.shares >= remaining_to_sell:
+                print(f"    🎯 Immediate sell after add: {remaining_to_sell} from last add @ ${last_sub.entry_price}")
+                self._process_sub_position_exit(trade, last_sub, remaining_to_sell, order, account_size)
+                remaining_to_sell = 0
+            else:
+                # Sell all from last add, then continue with FIFO
+                print(f"    🎯 Immediate sell after add: {last_sub.shares} from last add @ ${last_sub.entry_price}")
+                self._process_sub_position_exit(trade, last_sub, last_sub.shares, order, account_size)
+                remaining_to_sell -= last_sub.shares
+        
+        # Continue with FIFO from highest stop loss
+        while remaining_to_sell > 0 and sub_positions:
+            # Sort by stop loss descending (highest first), then by entry date
+            sub_positions.sort(key=lambda x: (x.stop_loss or 0, x.entry_date), reverse=True)
+            
+            # Find first sub-position with shares > 0
+            active_sub_positions = [sp for sp in sub_positions if sp.shares > 0]
+            if not active_sub_positions:
+                print(f"    ⚠️  No active sub-positions with shares > 0, breaking FIFO loop")
+                break
+                
+            sub_pos = active_sub_positions[0]
+            exit_qty = min(remaining_to_sell, sub_pos.shares)
+            
+            print(f"    📤 FIFO exit: {exit_qty} from sub-position @ ${sub_pos.entry_price}, Stop: ${sub_pos.stop_loss or 'None'}")
+            
+            self._process_sub_position_exit(trade, sub_pos, exit_qty, order, account_size)
+            remaining_to_sell -= exit_qty
+            
+            # Remove empty sub-positions from tracking list
+            sub_positions[:] = [sp for sp in sub_positions if sp.shares > 0]
+
+    def _process_short_cover(self, trade: 'Trade', sub_positions: list, qty: int, order: ImportedOrder, 
+                            account_size: float):
+        """Process covering short position using FIFO"""
+        from app.models.models import PartialExit
+        
+        remaining_to_cover = qty
+        
+        # Use FIFO for short covering (oldest first)
+        while remaining_to_cover > 0 and sub_positions:
+            sub_positions.sort(key=lambda x: x.entry_date)  # Oldest first
+            
+            # Find first sub-position with shares > 0
+            active_sub_positions = [sp for sp in sub_positions if sp.shares > 0]
+            if not active_sub_positions:
+                print(f"    ⚠️  No active sub-positions with shares > 0, breaking cover loop")
+                break
+                
+            sub_pos = active_sub_positions[0]
+            cover_qty = min(remaining_to_cover, sub_pos.shares)
+            
+            print(f"    📤 Cover short: {cover_qty} from sub-position @ ${sub_pos.entry_price}")
+            
+            self._process_sub_position_exit(trade, sub_pos, cover_qty, order, account_size)
+            remaining_to_cover -= cover_qty
+            
+            # Remove empty sub-positions from tracking list
+            sub_positions[:] = [sp for sp in sub_positions if sp.shares > 0]
+
+    def _process_sub_position_exit(self, trade: 'Trade', sub_position: 'TradeEntry', exit_qty: int, 
+                                  order: ImportedOrder, account_size: float):
+        """Process exit from a specific sub-position"""
+        from app.models.models import PartialExit
+        
+        # Calculate P&L for this partial exit
+        entry_price = sub_position.entry_price
+        exit_price = order.avg_price
+        
+        # For long positions: profit = (exit_price - entry_price) * qty
+        # For short positions: profit = (entry_price - exit_price) * qty
+        if trade.trade_type == "LONG":
+            raw_pnl = (exit_price - entry_price) * exit_qty
+        else:  # SHORT
+            raw_pnl = (entry_price - exit_price) * exit_qty
+        
+        # Handle options multiplier
+        options_info = parse_options_symbol(trade.ticker) if hasattr(trade, 'ticker') else {'is_options': False}
+        actual_pnl = raw_pnl * 100 if options_info['is_options'] else raw_pnl
+        
+        # Create partial exit record
+        partial_exit = PartialExit(
+            trade_id=trade.id,
+            exit_date=order.filled_time or order.placed_time,
+            shares_sold=exit_qty,
+            exit_price=exit_price,
+            profit_loss=actual_pnl,
+            notes=f"Partial exit from sub-position @ ${entry_price}"
+        )
+        
+        self.db.add(partial_exit)
+        
+        # Update sub-position
+        sub_position.shares -= exit_qty
+        if sub_position.shares <= 0:
+            # Remove empty sub-position
+            # Note: We don't delete from DB, just remove from tracking list
+            sub_position.shares = 0  # Mark as fully exited
+        
+        # Update main trade
+        trade.position_size -= exit_qty
+        
+        print(f"      💰 Partial exit P&L: ${actual_pnl:.2f} ({exit_qty} × ${exit_price - entry_price:.4f})")
+        
+        return actual_pnl
+
+    def _process_chronological_orders_simple(self, position: Position, orders: List[ImportedOrder], account_size: float = 10000) -> int:
+        """
+        Simple chronological processing: match buy-sell pairs for closed trades, track remaining as open positions.
+        
+        Logic:
+        1. Process ticker chronologically (oldest to newest)
+        2. Buy + Sell of same qty = closed trade
+        3. Short + Buy of same qty = closed trade  
+        4. Partial sells/adds = track remaining position
+        5. Pending orders = sub-positions with individual stop losses
+        """
+        from app.models.models import Trade, TradeEntry, PartialExit
+        import uuid
+        
+        # Filter out cancelled orders and sort chronologically
+        active_orders = [o for o in orders if o.status.lower() != 'cancelled' and o.filled_qty and o.filled_qty > 0]
+        active_orders.sort(key=lambda x: x.filled_time or x.placed_time)
+        
+        print(f"\n=== Simple Processing {len(active_orders)} {position.symbol} orders ===")
+        
+        trades_created = 0
+        position_stack = []  # Track current position: [(qty, price, date, order), ...]
+        
+        i = 0
+        while i < len(active_orders):
+            order = active_orders[i]
+            
+            print(f"Processing order {i+1}: {order.side} {order.filled_qty} @ ${order.avg_price}")
+            
+            if order.side == "Buy":
+                # Try exact matching with the immediate next order only for efficiency
+                immediate_sell = None
+                if i + 1 < len(active_orders):
+                    next_order = active_orders[i + 1]
+                    if (next_order.side == "Sell" and 
+                        next_order.filled_qty == order.filled_qty):
+                        immediate_sell = {'order': next_order, 'index': i + 1}
+                
+                if immediate_sell:
+                    # Create closed trade for immediate exact match
+                    trade = self._create_closed_trade(position, order, immediate_sell['order'], account_size)
+                    trades_created += 1
+                    # Mark sell as processed by removing it
+                    active_orders.pop(immediate_sell['index'])
+                    print(f"  ✅ Immediate exact match: {order.filled_qty} shares closed trade")
+                else:
+                    # Add to position stack for partial sell processing
+                    position_stack.append({
+                        'type': 'buy',
+                        'qty': order.filled_qty,
+                        'price': order.avg_price,
+                        'date': order.filled_time or order.placed_time,
+                        'order': order,
+                        'partial_exits': []  # Track partial exits from this buy
+                    })
+                    print(f"  📈 Added to position stack: {order.filled_qty} shares")
+                    
+            elif order.side == "Short":
+                # Try exact matching with the immediate next order only for efficiency
+                immediate_buy = None
+                if i + 1 < len(active_orders):
+                    next_order = active_orders[i + 1]
+                    if (next_order.side == "Buy" and 
+                        next_order.filled_qty == order.filled_qty):
+                        immediate_buy = {'order': next_order, 'index': i + 1}
+                
+                if immediate_buy:
+                    # Create closed short trade for immediate exact match
+                    trade = self._create_closed_short_trade(position, order, immediate_buy['order'], account_size)
+                    trades_created += 1
+                    # Mark buy as processed by removing it
+                    active_orders.pop(immediate_buy['index'])
+                    print(f"  ✅ Immediate exact match: {order.filled_qty} shares closed short trade")
+                else:
+                    # Add to position stack for partial cover processing
+                    position_stack.append({
+                        'type': 'short',
+                        'qty': order.filled_qty,
+                        'price': order.avg_price,
+                        'date': order.filled_time or order.placed_time,
+                        'order': order,
+                        'partial_exits': []  # Track partial exits from this short
+                    })
+                    print(f"  📉 Added to short position stack: {order.filled_qty} shares")
+                    
+            elif order.side == "Sell":
+                # Process sell against position stack (FIFO)
+                remaining_to_sell = order.filled_qty
+                
+                while remaining_to_sell > 0 and position_stack:
+                    # Find next buy position to sell from (FIFO)
+                    buy_positions = [p for p in position_stack if p['type'] == 'buy' and p['qty'] > 0]
+                    if not buy_positions:
+                        break
+                        
+                    buy_pos = buy_positions[0]  # FIFO: oldest first
+                    sell_qty = min(remaining_to_sell, buy_pos['qty'])
+                    
+                    # Always track as partial exit for comprehensive P&L
+                    buy_pos['qty'] -= sell_qty
+                    
+                    # Store the partial sell info for later PartialExit creation
+                    if 'partial_exits' not in buy_pos:
+                        buy_pos['partial_exits'] = []
+                    buy_pos['partial_exits'].append({
+                        'qty': sell_qty,
+                        'price': order.avg_price,
+                        'date': order.filled_time or order.placed_time,
+                        'order': order
+                    })
+                    
+                    if buy_pos['qty'] == 0:
+                        print(f"  ✅ Fully sold position: {sell_qty} shares (last partial)")
+                        # Position fully sold - will be handled in comprehensive closed trade creation
+                    else:
+                        print(f"  📤 Partial sell: {sell_qty} shares, {buy_pos['qty']} remaining")
+                    
+                    remaining_to_sell -= sell_qty
+                
+                if remaining_to_sell > 0:
+                    print(f"  ⚠️  Oversell: {remaining_to_sell} shares could not be matched")
+            
+            i += 1
+        
+        # Create comprehensive closed trades for fully sold positions
+        closed_trades = self._create_comprehensive_closed_trades(position, position_stack, orders, account_size)
+        trades_created += closed_trades
+        
+        # Remove fully sold positions from stack
+        position_stack[:] = [p for p in position_stack if p['qty'] > 0]
+        
+        # Handle remaining position stack + pending orders as open position
+        if position_stack or self._has_pending_orders(orders):
+            open_trade = self._create_open_position(position, position_stack, orders, account_size)
+            if open_trade:
+                trades_created += 1
+                print(f"  📈 Created open position with {open_trade.position_size} shares")
+        
+        # Update position table
+        self._update_position_table(position, position_stack, orders)
+        
+        print(f"=== Completed: {trades_created} trades created ===\n")
+        return trades_created
+
+    def _create_comprehensive_closed_trades(self, position: Position, position_stack: List[Dict], orders: List[ImportedOrder], account_size: float) -> int:
+        """Create comprehensive closed trades for positions that are fully sold (qty = 0)"""
+        from app.models.models import Trade, PartialExit
+        
+        trades_created = 0
+        
+        # Find all positions that are fully sold (qty = 0) and have partial exits
+        fully_sold_positions = [p for p in position_stack if p['qty'] == 0 and p.get('partial_exits')]
+        
+        for pos in fully_sold_positions:
+            partial_exits = pos['partial_exits']
+            if not partial_exits:
+                continue
+                
+            # Calculate total quantities and weighted average prices
+            original_qty = pos['order'].filled_qty  # Original buy quantity
+            total_sold_qty = sum(pe['qty'] for pe in partial_exits)
+            entry_price = pos['price']
+            
+            # Calculate weighted average exit price
+            total_exit_value = sum(pe['qty'] * pe['price'] for pe in partial_exits)
+            avg_exit_price = total_exit_value / total_sold_qty if total_sold_qty > 0 else 0
+            
+            # Parse options info
+            options_info = parse_options_symbol(position.symbol)
+            
+            # Calculate comprehensive P&L
+            raw_pnl = (avg_exit_price - entry_price) * total_sold_qty
+            actual_pnl = raw_pnl * 100 if options_info['is_options'] else raw_pnl
+            
+            # Detect stop loss from cancelled orders placed after this buy order
+            stop_loss_price = self._detect_stop_loss_from_cancelled_orders(position, pos['order'], orders)
+            if not stop_loss_price:
+                stop_loss_price = self._detect_stop_loss_price(pos['order'], [pos['order']])
+            
+            # Calculate metrics
+            metrics = self._calculate_imported_trade_metrics(
+                entry_price=entry_price,
+                exit_price=avg_exit_price,
+                stop_loss=stop_loss_price,
+                take_profit=None,
+                position_size=total_sold_qty,
+                trade_type="LONG",
+                account_size=account_size
+            )
+            
+            # Create comprehensive closed trade
+            trade = Trade(
+                user_id=position.user_id,
+                ticker=options_info['ticker'] if options_info['is_options'] else position.symbol,
+                trade_type="LONG",
+                status="CLOSED",
+                trade_group_id=str(uuid.uuid4()),
+                
+                # Options fields
+                instrument_type=InstrumentType.OPTIONS if options_info['is_options'] else InstrumentType.STOCK,
+                strike_price=options_info['strike_price'] if options_info['is_options'] else None,
+                expiration_date=options_info['expiration_date'] if options_info['is_options'] else None,
+                option_type=OptionType.CALL if options_info['option_type'] == 'call' else OptionType.PUT if options_info['option_type'] == 'put' else None,
+                
+                position_size=total_sold_qty,
+                entry_price=entry_price,
+                exit_price=avg_exit_price,
+                entry_date=pos['date'],
+                exit_date=partial_exits[-1]['date'],  # Last exit date
+                profit_loss=actual_pnl,
+                position_value=total_sold_qty * entry_price,
+                setup_type="imported",
+                strategy="Breakout",
+                stop_loss=stop_loss_price,
+                risk_per_share=metrics["risk_per_share"],
+                total_risk=metrics["total_risk"],
+                risk_reward_ratio=metrics["risk_reward_ratio"],
+                account_balance_snapshot=account_size,
+                imported_order_id=pos['order'].id
+            )
+            
+            self.db.add(trade)
+            self.db.flush()  # Get trade ID
+            
+            # Create PartialExit records for each partial sell
+            for pe in partial_exits:
+                partial_exit_pnl = (pe['price'] - entry_price) * pe['qty']
+                if options_info['is_options']:
+                    partial_exit_pnl *= 100
+                    
+                partial_exit = PartialExit(
+                    trade_id=trade.id,
+                    exit_date=pe['date'],
+                    shares_sold=pe['qty'],
+                    exit_price=pe['price'],
+                    profit_loss=partial_exit_pnl,
+                    notes=f"Partial exit: {pe['qty']} @ ${pe['price']:.2f}"
+                )
+                self.db.add(partial_exit)
+            
+            trades_created += 1
+            print(f"  ✅ Created comprehensive closed trade: {total_sold_qty} shares, P&L: ${actual_pnl:.2f}")
+            print(f"     Entry: ${entry_price:.2f}, Avg Exit: ${avg_exit_price:.2f}, {len(partial_exits)} partial exits")
+        
+        # Close any existing ACTIVE trades for this symbol that shouldn't be active anymore
+        if fully_sold_positions:
+            self._close_orphaned_active_trades(position)
+        
+        return trades_created
+
+    def _detect_stop_loss_from_cancelled_orders(self, position: Position, buy_order: ImportedOrder, all_orders: List[ImportedOrder]) -> Optional[float]:
+        """Detect stop loss from cancelled sell orders placed chronologically closest after this specific buy order"""
+        if not buy_order.placed_time:
+            return None
+            
+        # Find cancelled sell orders placed after this buy order within a reasonable timeframe
+        time_window_hours = 24  # Look for stop losses placed within 24 hours of the buy
+        
+        cancelled_sells = self.db.query(ImportedOrder).filter(
+            ImportedOrder.symbol == position.symbol,
+            ImportedOrder.side == "Sell",
+            ImportedOrder.status.ilike("%cancelled%"),
+            ImportedOrder.placed_time > buy_order.placed_time,
+            ImportedOrder.placed_time <= buy_order.placed_time + timedelta(hours=time_window_hours),
+            ImportedOrder.price.isnot(None),
+            ImportedOrder.price < buy_order.avg_price  # Stop loss should be below buy price
+        ).order_by(ImportedOrder.placed_time.asc()).all()  # Closest in time first
+        
+        if cancelled_sells:
+            # Return the first (chronologically closest) cancelled sell after this buy
+            return cancelled_sells[0].price
+        
+        return None
+
+    def _calculate_weighted_stop_loss_for_position(self, position_stack_entry: Dict, all_orders: List[ImportedOrder]) -> Optional[float]:
+        """Calculate weighted average stop loss for a position with multiple adds"""
+        # For comprehensive closed trades, we need to consider all the partial exits
+        # and find the appropriate stop loss for the overall position
+        
+        # Get the buy order for this position entry
+        buy_order = position_stack_entry['order']
+        
+        # Find stop loss for this specific buy
+        stop_loss = self._detect_stop_loss_from_cancelled_orders(
+            self.db.query(Position).filter(Position.symbol == buy_order.symbol).first(),
+            buy_order, 
+            all_orders
+        )
+        
+        return stop_loss
+
+    def _close_orphaned_active_trades(self, position: Position):
+        """Close any ACTIVE trades for this symbol that should no longer be active"""
+        active_trades = self.db.query(Trade).filter(
+            Trade.ticker == position.symbol,
+            Trade.user_id == position.user_id,
+            Trade.status == "ACTIVE"
+        ).all()
+        
+        for trade in active_trades:
+            print(f"  🔒 Closing orphaned ACTIVE trade: {trade.id} ({trade.position_size} shares)")
+            trade.status = "CLOSED"
+            # Set exit details if not already set
+            if not trade.exit_price or not trade.profit_loss:
+                # Use the most recent market data or set to break-even
+                trade.exit_price = trade.entry_price
+                trade.profit_loss = 0.0
+                trade.exit_date = datetime.utcnow()
+
+    def _find_matching_sell(self, orders: List[ImportedOrder], start_idx: int, buy_qty: int) -> Optional[Dict]:
+        """Find the next sell order that matches the buy quantity"""
+        for i in range(start_idx, len(orders)):
+            order = orders[i]
+            if order.side == "Sell" and order.filled_qty == buy_qty:
+                return {'order': order, 'index': i}
+        return None
+
+    def _find_matching_buy(self, orders: List[ImportedOrder], start_idx: int, short_qty: int) -> Optional[Dict]:
+        """Find the next buy order that matches the short quantity"""
+        for i in range(start_idx, len(orders)):
+            order = orders[i]
+            if order.side == "Buy" and order.filled_qty == short_qty:
+                return {'order': order, 'index': i}
+        return None
+
+    def _create_closed_trade(self, position: Position, buy_order: ImportedOrder, sell_order: ImportedOrder, 
+                           account_size: float, qty: int = None) -> Trade:
+        """Create a closed trade from buy-sell pair"""
+        from app.models.models import Trade
+        
+        actual_qty = qty or buy_order.filled_qty
+        buy_price = buy_order.avg_price
+        sell_price = sell_order.avg_price
+        
+        # Parse options info
+        options_info = parse_options_symbol(position.symbol)
+        
+        # Calculate P&L
+        raw_pnl = (sell_price - buy_price) * actual_qty
+        actual_pnl = raw_pnl * 100 if options_info['is_options'] else raw_pnl
+        
+        # Detect stop loss
+        stop_loss_price = self._detect_stop_loss_price(buy_order, [buy_order, sell_order])
+        
+        # Calculate metrics
+        metrics = self._calculate_imported_trade_metrics(
+            entry_price=buy_price,
+            exit_price=sell_price,
+            stop_loss=stop_loss_price,
+            take_profit=None,
+            position_size=actual_qty,
+            trade_type="LONG",
+            account_size=account_size
+        )
+        
+        trade = Trade(
+            user_id=position.user_id,
+            ticker=options_info['ticker'] if options_info['is_options'] else position.symbol,
+            trade_type="LONG",
+            status="CLOSED",
+            trade_group_id=str(uuid.uuid4()),
+            
+            # Options fields
+            instrument_type=InstrumentType.OPTIONS if options_info['is_options'] else InstrumentType.STOCK,
+            strike_price=options_info['strike_price'] if options_info['is_options'] else None,
+            expiration_date=options_info['expiration_date'] if options_info['is_options'] else None,
+            option_type=OptionType.CALL if options_info['option_type'] == 'call' else OptionType.PUT if options_info['option_type'] == 'put' else None,
+            
+            position_size=actual_qty,
+            entry_price=buy_price,
+            exit_price=sell_price,
+            entry_date=buy_order.filled_time or buy_order.placed_time,
+            exit_date=sell_order.filled_time or sell_order.placed_time,
+            profit_loss=actual_pnl,
+            position_value=actual_qty * buy_price,
+            setup_type="imported",
+            strategy="Breakout",
+            stop_loss=stop_loss_price,
+            risk_per_share=metrics["risk_per_share"],
+            total_risk=metrics["total_risk"],
+            risk_reward_ratio=metrics["risk_reward_ratio"],
+            account_balance_snapshot=account_size
+        )
+        
+        self.db.add(trade)
+        self.db.flush()
+        return trade
+
+    def _create_closed_short_trade(self, position: Position, short_order: ImportedOrder, buy_order: ImportedOrder, 
+                                 account_size: float) -> Trade:
+        """Create a closed short trade from short-buy pair"""
+        from app.models.models import Trade
+        
+        qty = short_order.filled_qty
+        short_price = short_order.avg_price
+        cover_price = buy_order.avg_price
+        
+        # Parse options info
+        options_info = parse_options_symbol(position.symbol)
+        
+        # Calculate P&L (short profits when price goes down)
+        raw_pnl = (short_price - cover_price) * qty
+        actual_pnl = raw_pnl * 100 if options_info['is_options'] else raw_pnl
+        
+        trade = Trade(
+            user_id=position.user_id,
+            ticker=options_info['ticker'] if options_info['is_options'] else position.symbol,
+            trade_type="SHORT",
+            status="CLOSED",
+            trade_group_id=str(uuid.uuid4()),
+            
+            # Options fields
+            instrument_type=InstrumentType.OPTIONS if options_info['is_options'] else InstrumentType.STOCK,
+            strike_price=options_info['strike_price'] if options_info['is_options'] else None,
+            expiration_date=options_info['expiration_date'] if options_info['is_options'] else None,
+            option_type=OptionType.CALL if options_info['option_type'] == 'call' else OptionType.PUT if options_info['option_type'] == 'put' else None,
+            
+            position_size=qty,
+            entry_price=short_price,
+            exit_price=cover_price,
+            entry_date=short_order.filled_time or short_order.placed_time,
+            exit_date=buy_order.filled_time or buy_order.placed_time,
+            profit_loss=actual_pnl,
+            position_value=qty * short_price,
+            setup_type="imported",
+            strategy="Breakout",
+            account_balance_snapshot=account_size
+        )
+        
+        self.db.add(trade)
+        self.db.flush()
+        return trade
+
+    def _has_pending_orders(self, orders: List[ImportedOrder]) -> bool:
+        """Check if there are any pending orders for this symbol"""
+        return any(order.status.lower() in ['pending', 'open', 'working'] for order in orders)
+
+    def _create_open_position(self, position: Position, position_stack: List[Dict], 
+                            all_orders: List[ImportedOrder], account_size: float) -> Optional[Trade]:
+        """Create an open position from remaining position stack and pending orders"""
+        if not position_stack and not self._has_pending_orders(all_orders):
+            return None
+            
+        from app.models.models import Trade, TradeEntry
+        
+        # Calculate net position from stack
+        net_long_shares = sum(p['qty'] for p in position_stack if p['type'] == 'buy')
+        net_short_shares = sum(p['qty'] for p in position_stack if p['type'] == 'short')
+        
+        if net_long_shares == 0 and net_short_shares == 0:
+            return None
+            
+        # Determine position type and shares
+        if net_long_shares > 0:
+            trade_type = "LONG"
+            total_shares = net_long_shares
+            # Calculate weighted average entry price
+            total_value = sum(p['qty'] * p['price'] for p in position_stack if p['type'] == 'buy')
+            avg_entry_price = total_value / net_long_shares if net_long_shares > 0 else 0
+        else:
+            trade_type = "SHORT"
+            total_shares = net_short_shares
+            # Calculate weighted average entry price
+            total_value = sum(p['qty'] * p['price'] for p in position_stack if p['type'] == 'short')
+            avg_entry_price = total_value / net_short_shares if net_short_shares > 0 else 0
+        
+        # Parse options info
+        options_info = parse_options_symbol(position.symbol)
+        
+        # Create main trade record
+        trade = Trade(
+            user_id=position.user_id,
+            ticker=options_info['ticker'] if options_info['is_options'] else position.symbol,
+            trade_type=trade_type,
+            status="ACTIVE",
+            trade_group_id=str(uuid.uuid4()),
+            
+            # Options fields
+            instrument_type=InstrumentType.OPTIONS if options_info['is_options'] else InstrumentType.STOCK,
+            strike_price=options_info['strike_price'] if options_info['is_options'] else None,
+            expiration_date=options_info['expiration_date'] if options_info['is_options'] else None,
+            option_type=OptionType.CALL if options_info['option_type'] == 'call' else OptionType.PUT if options_info['option_type'] == 'put' else None,
+            
+            position_size=total_shares,
+            entry_price=avg_entry_price,
+            entry_date=min(p['date'] for p in position_stack) if position_stack else None,
+            position_value=total_shares * avg_entry_price,
+            setup_type="imported",
+            strategy="Breakout",
+            account_balance_snapshot=account_size
+        )
+        
+        self.db.add(trade)
+        self.db.flush()
+        
+        # Create TradeEntry records for each position in stack
+        for pos in position_stack:
+            if pos['qty'] > 0:
+                # Find pending sell orders that might be stop losses for this entry
+                stop_loss = self._find_stop_loss_for_entry(pos, all_orders)
+                
+                trade_entry = TradeEntry(
+                    trade_id=trade.id,
+                    shares=pos['qty'],
+                    entry_price=pos['price'],
+                    entry_date=pos['date'],
+                    stop_loss=stop_loss,
+                    notes=f"Open position: {pos['type']} {pos['qty']} @ ${pos['price']}"
+                )
+                self.db.add(trade_entry)
+                
+                # Create PartialExit records for any partial sells from this position
+                if 'partial_exits' in pos:
+                    for partial_exit in pos['partial_exits']:
+                        # Calculate P&L for this partial exit
+                        entry_price = pos['price']
+                        exit_price = partial_exit['price']
+                        exit_qty = partial_exit['qty']
+                        
+                        # Handle long vs short P&L calculation
+                        if trade_type == "LONG":
+                            raw_pnl = (exit_price - entry_price) * exit_qty
+                        else:  # SHORT
+                            raw_pnl = (entry_price - exit_price) * exit_qty
+                        
+                        # Handle options multiplier
+                        actual_pnl = raw_pnl * 100 if options_info['is_options'] else raw_pnl
+                        
+                        partial_exit_record = PartialExit(
+                            trade_id=trade.id,
+                            exit_date=partial_exit['date'],
+                            shares_sold=exit_qty,
+                            exit_price=exit_price,
+                            profit_loss=actual_pnl,
+                            notes=f"Partial exit from open position @ ${entry_price}"
+                        )
+                        self.db.add(partial_exit_record)
+                        
+                        print(f"    📤 Created PartialExit: {exit_qty} shares @ ${exit_price}, P&L: ${actual_pnl:.2f}")
+        
+        return trade
+
+    def _find_stop_loss_for_entry(self, position_entry: Dict, all_orders: List[ImportedOrder]) -> Optional[float]:
+        """Find pending sell orders that could be stop losses for this position entry"""
+        # Look for pending sell orders placed around the same time as the buy
+        for order in all_orders:
+            if (order.status.lower() in ['pending', 'open', 'working'] and 
+                order.side == "Sell" and 
+                order.price and order.price < position_entry['price']):
+                return order.price
+        return None
+
+    def _update_position_table(self, position: Position, position_stack: List[Dict], all_orders: List[ImportedOrder]):
+        """Update the Position table for the Positions page"""
+        
+        # Calculate net position
+        net_long_shares = sum(p['qty'] for p in position_stack if p['type'] == 'buy')
+        net_short_shares = sum(p['qty'] for p in position_stack if p['type'] == 'short')
+        
+        # Calculate total bought/sold for better position tracking
+        total_bought = sum(p['qty'] + sum(pe['qty'] for pe in p.get('partial_exits', [])) 
+                          for p in position_stack if p['type'] == 'buy')
+        total_sold = sum(sum(pe['qty'] for pe in p.get('partial_exits', [])) 
+                        for p in position_stack if p['type'] == 'buy')
+        
+        if net_long_shares > 0:
+            # Long position - calculate weighted average of remaining shares
+            remaining_positions = [p for p in position_stack if p['type'] == 'buy' and p['qty'] > 0]
+            if remaining_positions:
+                total_value = sum(p['qty'] * p['price'] for p in remaining_positions)
+                position.quantity = net_long_shares
+                position.avg_cost_basis = total_value / net_long_shares
+                position.total_cost = total_value
+                position.is_open = True
+                
+                print(f"    📊 Position summary: {total_bought} bought, {total_sold} sold, {net_long_shares} remaining")
+            
+        elif net_short_shares > 0:
+            # Short position  
+            remaining_positions = [p for p in position_stack if p['type'] == 'short' and p['qty'] > 0]
+            if remaining_positions:
+                total_value = sum(p['qty'] * p['price'] for p in remaining_positions)
+                position.quantity = -net_short_shares  # Negative for short
+                position.avg_cost_basis = total_value / net_short_shares
+                position.total_cost = total_value
+                position.is_open = True
+            
+        else:
+            # No open position
+            position.quantity = 0
+            position.is_open = False
+            position.closed_at = datetime.utcnow()
+        
+        position.last_updated = datetime.utcnow()

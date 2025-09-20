@@ -4,7 +4,7 @@ from sqlalchemy.orm import Session
 from app.api.deps import get_db, get_current_user
 from app.models.schemas import TradeCreate, TradeResponse, TradeUpdate, TradeEntryCreate, TradeEntryResponse, PartialExitCreate
 from app.services.trade_service import create_trade, get_trades, get_trade, update_trade, delete_trade, trade_to_response_dict, add_to_position, sell_from_position, get_trade_details, get_positions, sell_from_position_by_group
-from app.models.models import User, Trade, PartialExit
+from app.models.models import User, Trade, PartialExit, TradeEntry
 
 router = APIRouter()
 
@@ -101,13 +101,61 @@ def get_position_details(
         PartialExit.trade_id.in_(trade_ids)
     ).order_by(PartialExit.exit_date).all()
     
-    # Calculate aggregated data
-    total_shares_bought = sum(trade.position_size for trade in trades_in_group)
-    total_cost = sum(trade.position_size * trade.entry_price for trade in trades_in_group)
-    avg_entry_price = total_cost / total_shares_bought if total_shares_bought > 0 else 0
+    # Calculate aggregated data using the same logic as get_positions()
+    # For ACTIVE trades: total_bought = current_shares + total_sold
+    # For CLOSED trades: use position_size
     
     total_shares_sold = sum(exit.shares_sold for exit in partial_exits)
-    current_shares = total_shares_bought - total_shares_sold
+    
+    # Calculate current shares and total bought using the same logic as get_positions()
+    current_shares = 0
+    total_shares_bought = 0
+    
+    for trade in trades_in_group:
+        if trade.status.name == 'ACTIVE':
+            # Get current shares from active TradeEntry records
+            active_lots = db.query(TradeEntry).filter(
+                TradeEntry.trade_id == trade.id,
+                TradeEntry.is_active == True
+            ).all()
+            
+            trade_current_shares = sum(lot.shares for lot in active_lots if lot.shares > 0)
+            current_shares += trade_current_shares
+            
+            # Calculate total bought for this trade using the get_positions() logic
+            trade_partial_exits = [pe for pe in partial_exits if pe.trade_id == trade.id]
+            total_sold_for_trade = sum(pe.shares_sold for pe in trade_partial_exits)
+            total_bought_for_trade = trade_current_shares + total_sold_for_trade
+            total_shares_bought += total_bought_for_trade
+        else:
+            # For closed trades, position_size should be correct
+            current_shares += trade.position_size
+            total_shares_bought += trade.position_size
+    
+    # Create mapping of trade ID to original purchase amounts using same logic as get_positions()
+    trade_original_amounts = {}
+    
+    for trade in trades_in_group:
+        if trade.status.name == 'ACTIVE':
+            # For active trades, calculate original amount = current + sold
+            trade_partial_exits = [pe for pe in partial_exits if pe.trade_id == trade.id]
+            total_sold_for_trade = sum(pe.shares_sold for pe in trade_partial_exits)
+            
+            # Get current shares from TradeEntry records
+            active_lots = db.query(TradeEntry).filter(
+                TradeEntry.trade_id == trade.id,
+                TradeEntry.is_active == True
+            ).all()
+            trade_current_shares = sum(lot.shares for lot in active_lots if lot.shares > 0)
+            
+            trade_original_amounts[trade.id] = trade_current_shares + total_sold_for_trade
+        else:
+            # For closed trades, use position_size
+            trade_original_amounts[trade.id] = trade.position_size
+    
+    # Calculate correct total cost using original amounts
+    total_cost = sum(trade_original_amounts[trade.id] * trade.entry_price for trade in trades_in_group)
+    avg_entry_price = total_cost / total_shares_bought if total_shares_bought > 0 else 0
     
     total_realized_pnl = sum(exit.profit_loss for exit in partial_exits if exit.profit_loss)
     
@@ -119,10 +167,16 @@ def get_position_details(
                 "id": trade.id,
                 "entry_date": trade.entry_date,
                 "entry_price": trade.entry_price,
-                "shares": trade.position_size,
+                "shares": trade_original_amounts[trade.id],  # Use original amount
+                "current_shares": trade.position_size if trade.status.name != 'ACTIVE' else sum(
+                    lot.shares for lot in db.query(TradeEntry).filter(
+                        TradeEntry.trade_id == trade.id,
+                        TradeEntry.is_active == True
+                    ).all() if lot.shares > 0
+                ),  # Add current shares for reference
                 "stop_loss": trade.stop_loss,
                 "take_profit": trade.take_profit,
-                "cost": trade.position_size * trade.entry_price,
+                "cost": trade_original_amounts[trade.id] * trade.entry_price,  # Use original amount
                 "notes": trade.entry_notes
             }
             for trade in trades_in_group
