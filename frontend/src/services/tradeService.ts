@@ -509,6 +509,38 @@ export const fetchTrades = async (
                 trade.status?.toLowerCase() === 'active' ? 'Open' : 
                 trade.status ? trade.status.charAt(0).toUpperCase() + trade.status.slice(1) : '',
         result: trade.status?.toLowerCase() === 'closed' ? (trade.profit_loss || totalPL) : null,
+        resultAmount: trade.status?.toLowerCase() === 'closed' ? (trade.profit_loss || totalPL) : null,
+        // Add return on risk calculation (R multiple)
+        returnOnRisk: (() => {
+          if (trade.status?.toLowerCase() !== 'closed' || !trade.total_risk) return null;
+          
+          const isOptions = trade.instrument_type?.toLowerCase() === 'options';
+          
+          if (isOptions) {
+            // For options: risk = 100 × entry_price × contracts (expecting total loss)
+            const optionsRisk = 100 * trade.entry_price * trade.position_size;
+            return optionsRisk > 0 ? ((trade.profit_loss || totalPL) / optionsRisk) : null;
+          } else {
+            // For stocks: use calculated risk from stop loss
+            return ((trade.profit_loss || totalPL) / trade.total_risk);
+          }
+        })(),
+        // Add percentage gain on investment calculation  
+        percentageGain: (() => {
+          if (trade.status?.toLowerCase() !== 'closed' || !trade.entry_price || !trade.position_size) return null;
+          
+          const isOptions = trade.instrument_type?.toLowerCase() === 'options';
+          
+          if (isOptions) {
+            // For options: investment = 100 × entry_price × contracts, then divide result by 100
+            const optionsInvestment = 100 * trade.entry_price * trade.position_size;
+            const percentage = (((trade.profit_loss || totalPL) / optionsInvestment) * 100);
+            return percentage; // Divide by 100 for options
+          } else {
+            // For stocks: standard calculation
+            return (((trade.profit_loss || totalPL) / (trade.entry_price * trade.position_size)) * 100);
+          }
+        })(),
         notes: trade.entry_notes || '',
         // Keep original fields for metrics
         trade_type: trade.trade_type,
@@ -572,6 +604,36 @@ export const fetchTrade = async (id: number): Promise<any> => {
       accountBalanceSnapshot: apiTrade.account_balance_snapshot,
       result: apiTrade.profit_loss_percent || (apiTrade.profit_loss && risk ? ((apiTrade.profit_loss / risk) * 100) : null),
       resultAmount: apiTrade.profit_loss,
+      // Add separate calculations for display with options handling
+      returnOnRisk: (() => {
+        if (!apiTrade.profit_loss) return null;
+        
+        const isOptions = tradeInstrumentType?.toLowerCase() === 'options';
+        
+        if (isOptions) {
+          // For options: risk = 100 × entry_price × contracts (expecting total loss)
+          const optionsRisk = 100 * apiTrade.entry_price * apiTrade.position_size;
+          return optionsRisk > 0 ? (apiTrade.profit_loss / optionsRisk) : null;
+        } else {
+          // For stocks: use calculated risk from stop loss
+          return risk ? (apiTrade.profit_loss / risk) : null;
+        }
+      })(),
+      percentageGain: (() => {
+        if (!apiTrade.profit_loss || !apiTrade.entry_price || !apiTrade.position_size) return null;
+        
+        const isOptions = tradeInstrumentType?.toLowerCase() === 'options';
+        
+        if (isOptions) {
+          // For options: investment = 100 × entry_price × contracts, then divide result by 100
+          const optionsInvestment = 100 * apiTrade.entry_price * apiTrade.position_size;
+          const percentage = ((apiTrade.profit_loss / optionsInvestment) * 100);
+          return percentage; // Divide by 100 for options
+        } else {
+          // For stocks: standard calculation
+          return ((apiTrade.profit_loss / (apiTrade.entry_price * apiTrade.position_size)) * 100);
+        }
+      })(), // Investment %
       risk: risk,
       stopLoss: apiTrade.stop_loss,
       takeProfit: apiTrade.take_profit,

@@ -3,16 +3,35 @@ import { formatCurrency, formatPercentage } from './formatters';
 // Helper function to format date for tooltips
 const formatDateForTooltip = (dateStr: string): string => {
   try {
-    const date = new Date(dateStr);
-    if (isNaN(date.getTime())) {
-      return dateStr; // Return original if invalid
+    // Parse the date string more carefully to avoid timezone issues
+    if (dateStr.match(/^\d{4}-\d{2}-\d{2}$/)) {
+      // For YYYY-MM-DD format, parse as local date to avoid timezone shifts
+      const [year, month, day] = dateStr.split('-').map(num => parseInt(num));
+      const date = new Date(year, month - 1, day); // month is 0-indexed
+      
+      if (isNaN(date.getTime())) {
+        return dateStr; // Return original if invalid
+      }
+      
+      return date.toLocaleDateString('en-US', {
+        weekday: 'short',
+        year: 'numeric',
+        month: 'short',
+        day: 'numeric'
+      });
+    } else {
+      // For other formats, use normal Date parsing
+      const date = new Date(dateStr);
+      if (isNaN(date.getTime())) {
+        return dateStr; // Return original if invalid
+      }
+      return date.toLocaleDateString('en-US', {
+        weekday: 'short',
+        year: 'numeric',
+        month: 'short',
+        day: 'numeric'
+      });
     }
-    return date.toLocaleDateString('en-US', {
-      weekday: 'short',
-      year: 'numeric',
-      month: 'short',
-      day: 'numeric'
-    });
   } catch {
     return dateStr;
   }

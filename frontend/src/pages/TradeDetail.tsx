@@ -31,6 +31,7 @@ import {
 import { fetchTrade, updateTrade, getTradeDetails } from '../services/tradeService';
 import { imageService } from '../services/imageService';
 import { notesService } from '../services/notesService';
+import { useCurrency } from '../context/CurrencyContext';
 import TradeCandlestickChart from '../components/TradeCandlestickChart';
 import InlineNotesEditor from '../components/InlineNotesEditor';
 
@@ -60,6 +61,8 @@ interface Trade {
   partialExits: PartialExit[];
   result: number | null;
   resultAmount: number | null;
+  returnOnRisk: number | null;  // R multiple (profit/risk)
+  percentageGain: number | null;  // Investment percentage (profit/investment)
   risk: number;
   stopLoss: number;
   takeProfit: number;
@@ -81,6 +84,7 @@ const TradeDetail: React.FC = () => {
   const [trade, setTrade] = useState<Trade | null>(null);
   const [loading, setLoading] = useState(true);
   const [tabValue, setTabValue] = useState(0);
+  const { currentCurrency } = useCurrency();
 
   // Function to handle back navigation
   const handleBackToTrades = () => {
@@ -344,20 +348,47 @@ const TradeDetail: React.FC = () => {
               
               {trade.status === 'Closed' ? (
                 <>
-                  <Typography variant="h3" 
-                    color={trade.result && trade.result >= 0 ? 'success.main' : 'error.main'}
-                    align="center"
-                    sx={{ mb: 2 }}
-                  >
-                    {trade.result && trade.result >= 0 ? '+' : ''}{trade.result?.toFixed(2)}%
-                  </Typography>
+                  {/* Return on Risk (R multiple) */}
+                  <Box sx={{ mb: 2 }}>
+                    <Typography variant="body2" color="text.secondary" sx={{ mb: 0.5 }}>
+                      Return on Risk:
+                    </Typography>
+                    <Typography variant="h6" 
+                      color={trade.returnOnRisk && trade.returnOnRisk >= 0 ? 'success.main' : 'error.main'}
+                      sx={{ fontWeight: 'bold' }}
+                    >
+                      {trade.returnOnRisk && trade.returnOnRisk >= 0 ? '+' : ''}
+                      {trade.returnOnRisk?.toFixed(2)}R
+                    </Typography>
+                  </Box>
                   
-                  <Typography variant="h5" 
-                    color={trade.resultAmount && trade.resultAmount >= 0 ? 'success.main' : 'error.main'}
-                    align="center"
-                  >
-                    {trade.resultAmount && trade.resultAmount >= 0 ? '+' : ''}${trade.resultAmount?.toFixed(2)}
-                  </Typography>
+                  {/* Percentage Gain on Investment */}
+                  <Box sx={{ mb: 2 }}>
+                    <Typography variant="body2" color="text.secondary" sx={{ mb: 0.5 }}>
+                      % Return:
+                    </Typography>
+                    <Typography variant="h6" 
+                      color={trade.percentageGain && trade.percentageGain >= 0 ? 'success.main' : 'error.main'}
+                      sx={{ fontWeight: 'bold' }}
+                    >
+                      {trade.percentageGain && trade.percentageGain >= 0 ? '+' : ''}
+                      {trade.percentageGain?.toFixed(2)}%
+                    </Typography>
+                  </Box>
+                  
+                  {/* Dollar Amount */}
+                  <Box>
+                    <Typography variant="body2" color="text.secondary" sx={{ mb: 0.5 }}>
+                      {currentCurrency?.symbol || '$'} Return:
+                    </Typography>
+                    <Typography variant="h6" 
+                      color={trade.resultAmount && trade.resultAmount >= 0 ? 'success.main' : 'error.main'}
+                      sx={{ fontWeight: 'bold' }}
+                    >
+                      {trade.resultAmount && trade.resultAmount >= 0 ? '+' : ''}
+                      {currentCurrency?.symbol || '$'}{trade.resultAmount?.toFixed(2)}
+                    </Typography>
+                  </Box>
                 </>
               ) : (
                 <Typography variant="body1" align="center" sx={{ py: 3 }}>

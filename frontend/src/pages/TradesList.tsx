@@ -38,6 +38,7 @@ import {
 } from '@mui/icons-material';
 import { fetchTrades, deleteTrade, Trade as ServiceTrade } from '../services/tradeService';
 import { testApiConnection } from '../services/debugService';
+import { useCurrency } from '../context/CurrencyContext';
 
 // TODo: this is a mess, should just use the main Trade interface
 // TODO: cleanup later
@@ -53,6 +54,9 @@ interface Trade {
   total_risk?: number;
   status: 'Open' | 'Closed';
   result: number | null;
+  resultAmount?: number | null;
+  returnOnRisk?: number | null;  // R multiple (profit/risk)
+  percentageGain?: number | null;  // Investment percentage (profit/investment)
   notes: string;
   setup_type?: string;
 }
@@ -60,6 +64,7 @@ interface Trade {
 const TradesList: React.FC = () => {
   const location = useLocation();
   const navigate = useNavigate();
+  const { currentCurrency } = useCurrency();
   
   const [trades, setTrades] = useState<Trade[]>([]);
   const [loading, setLoading] = useState(true);
@@ -553,16 +558,29 @@ const TradesList: React.FC = () => {
                       size="small" 
                     />
                   </TableCell>                  <TableCell>
-                    {trade.result !== null && trade.result !== undefined ? (
-                      <Typography 
-                        color={trade.result >= 0 ? 'success.main' : 'error.main'}
-                        fontWeight="bold"
-                      >
-                        {trade.result >= 0 ? '+' : ''}
-                        $
-                        {Number(trade.result).toFixed(2)}
+                    {trade.status === 'Closed' && trade.resultAmount !== null && trade.resultAmount !== undefined ? (
+                      <Box sx={{ textAlign: 'left' }}>
+                        <Typography variant="body2" color="text.secondary" sx={{ fontSize: '0.75rem' }}>
+                          {currentCurrency?.symbol || '$'} Return:
+                        </Typography>
+                        <Typography 
+                          color={trade.resultAmount >= 0 ? 'success.main' : 'error.main'}
+                          variant="body1"
+                          fontWeight="bold"
+                        >
+                          {trade.resultAmount >= 0 ? '+' : ''}
+                          {currentCurrency?.symbol || '$'}{Number(trade.resultAmount).toFixed(2)}
+                        </Typography>
+                      </Box>
+                    ) : trade.status === 'Closed' ? (
+                      <Typography variant="body2" color="text.secondary">
+                        No data
                       </Typography>
-                    ) : '-'}
+                    ) : (
+                      <Typography variant="body2" color="text.secondary">
+                        -
+                      </Typography>
+                    )}
                   </TableCell>
                   <TableCell>
                     <IconButton 
