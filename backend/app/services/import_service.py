@@ -169,7 +169,7 @@ class TradeImportService:
         batch_info = None
         is_options_import = False
         if batch_id:
-            batch_info = self.db.query(ImportBatch).filter(ImportBatch.id == batch_id).first()
+            batch_info = self.db.query(ImportBatch).filter(ImportBatch.batch_id == batch_id).first()
             if batch_info and batch_info.filename:
                 is_options_import = 'options' in batch_info.filename.lower()
         
