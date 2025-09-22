@@ -165,7 +165,7 @@ class TradeEntry(Base):
     trade_id = Column(Integer, ForeignKey("trades.id"))
     entry_price = Column(Float)
     entry_date = Column(DateTime)
-    shares = Column(Integer)
+    shares = Column(Integer)  # Current remaining shares (modified by partial exits)
     stop_loss = Column(Float)
     notes = Column(Text, nullable=True)
     created_at = Column(DateTime, default=datetime.utcnow)

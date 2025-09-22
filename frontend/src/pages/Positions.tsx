@@ -34,7 +34,7 @@ import {
   Add as AddIcon,
   Remove as RemoveIcon
 } from '@mui/icons-material';
-import { fetchTrades, updateTrade, Trade, addToPositionGroup, sellFromPositionGroup, TradeEntryData, PartialExitData, getPositions } from '../services/tradeService';
+import { fetchTrades, updateTrade, Trade, addToPositionGroup, sellFromPositionGroup, TradeEntryData, PartialExitData, getPositions, getActiveEntries, updatePositionStopLoss, getPositionDetails } from '../services/tradeService';
 import { testApiConnection } from '../services/debugService';
 import { accountService } from '../services/accountService';
 import PositionDetailsModal from '../components/PositionDetails';
@@ -51,12 +51,17 @@ interface AddToPositionData {
   entryPrice: number;
   stopLoss: number;
   notes?: string;
+  sharesInput?: string;
+  entryPriceInput?: string;
+  stopLossInput?: string;
 }
 
 interface SellPositionData {
   shares: number;
   exitPrice: number;
   notes?: string;
+  sharesInput?: string;
+  exitPriceInput?: string;
 }
 
 const Positions: React.FC = () => {
@@ -69,12 +74,27 @@ const Positions: React.FC = () => {
   const [selectedPosition, setSelectedPosition] = useState<Trade | null>(null);
   const [detailsOpen, setDetailsOpen] = useState(false);
   const [positionDetailsOpen, setPositionDetailsOpen] = useState(false);
+  const [positionDetailsRefresh, setPositionDetailsRefresh] = useState<(() => Promise<void>) | null>(null);
   const [editingPosition, setEditingPosition] = useState<EditingPosition | null>(null);
   const [updateError, setUpdateError] = useState<string | null>(null);
   const [editMode, setEditMode] = useState<'edit' | 'add' | 'sell'>('edit');
   const [tabValue, setTabValue] = useState(0);
-  const [addPositionData, setAddPositionData] = useState<AddToPositionData>({ shares: 0, entryPrice: 0, stopLoss: 0 });
-  const [sellPositionData, setSellPositionData] = useState<SellPositionData>({ shares: 0, exitPrice: 0 });
+  const [addPositionData, setAddPositionData] = useState<AddToPositionData>({ 
+    shares: 0, 
+    entryPrice: 0, 
+    stopLoss: 0,
+    sharesInput: '',
+    entryPriceInput: '',
+    stopLossInput: ''
+  });
+  const [sellPositionData, setSellPositionData] = useState<SellPositionData>({ 
+    shares: 0, 
+    exitPrice: 0,
+    sharesInput: '',
+    exitPriceInput: ''
+  });
+  const [positionDetails, setPositionDetails] = useState<any>(null);
+  const [loadingDetails, setLoadingDetails] = useState(false);
 
   useEffect(() => {
     loadPositions();
@@ -88,7 +108,7 @@ const Positions: React.FC = () => {
       // Test API connection first
       await testApiConnection();
       
-      // Use the new positions endpoint that returns aggregated trade groups
+      // Use aggregated positions (grouped by trade_group_id)
       const positionsData = await getPositions();
       setPositions(positionsData);
     } catch (err) {
@@ -101,6 +121,22 @@ const Positions: React.FC = () => {
   const handlePositionClick = (position: Trade) => {
     setSelectedPosition(position);
     setPositionDetailsOpen(true);
+    loadPositionDetails(position);
+  };
+
+  const loadPositionDetails = async (position: Trade) => {
+    if (!(position as any).trade_group_id) return;
+    
+    try {
+      setLoadingDetails(true);
+      const details = await getPositionDetails((position as any).trade_group_id);
+      setPositionDetails(details);
+    } catch (error) {
+      console.error('Error loading position details:', error);
+      setPositionDetails(null);
+    } finally {
+      setLoadingDetails(false);
+    }
   };
 
   const handleOpenTradingActions = () => {
@@ -111,17 +147,34 @@ const Positions: React.FC = () => {
       takeProfit: selectedPosition?.take_profit || 0,
       shares: selectedPosition?.position_size || 0
     });
+    
+    // Reset form data when opening modal
+    setAddPositionData({ 
+      shares: 0, 
+      entryPrice: 0, 
+      stopLoss: 0,
+      sharesInput: '',
+      entryPriceInput: '',
+      stopLossInput: ''
+    });
+    setSellPositionData({ 
+      shares: 0, 
+      exitPrice: 0,
+      sharesInput: '',
+      exitPriceInput: ''
+    });
+    
     setDetailsOpen(true);
     setUpdateError(null);
   };
 
   const handleOpenAddPosition = () => {
-    setTabValue(1); // Add to Position tab
+    setTabValue(1);
     handleOpenTradingActions();
   };
 
   const handleOpenSellPosition = () => {
-    setTabValue(2); // Sell Position tab
+    setTabValue(2);
     handleOpenTradingActions();
   };
 
@@ -133,7 +186,12 @@ const Positions: React.FC = () => {
     setEditMode('edit');
     setTabValue(0);
     setAddPositionData({ shares: 0, entryPrice: 0, stopLoss: 0 });
-    setSellPositionData({ shares: 0, exitPrice: 0 });
+    setSellPositionData({ 
+      shares: 0, 
+      exitPrice: 0,
+      sharesInput: '',
+      exitPriceInput: ''
+    });
   };
 
   const handleSaveChanges = async () => {
@@ -142,28 +200,46 @@ const Positions: React.FC = () => {
     try {
       setUpdateError(null);
       
-      // Prevent operations on closed/cancelled positions - REMOVED since positions are always open
-      
       if (tabValue === 0) {
         // Edit Position
         if (!editingPosition) return;
         
-        const updateData = {
-          id: editingPosition.id,
-          stopLoss: editingPosition.stopLoss.toString(),
-          takeProfit: editingPosition.takeProfit?.toString() || '',
-          shares: editingPosition.shares.toString(),
-          // Keep other fields the same
-          ticker: selectedPosition.ticker,
-          direction: selectedPosition.displayDirection || selectedPosition.trade_type,
-          entryPrice: ((selectedPosition as any).entryPrice || selectedPosition.entry_price).toString(),
-          strategy: selectedPosition.strategy,
-          setupType: selectedPosition.setup_type,
-          timeframe: selectedPosition.timeframe || '',
-          entryDate: (selectedPosition as any).entryDate || selectedPosition.entry_date
-        };
+        // Check if only stop loss changed - use position-level API
+        const originalStopLoss = selectedPosition.stop_loss;
+        const newStopLoss = editingPosition.stopLoss;
+        const originalShares = selectedPosition.position_size;
+        const newShares = editingPosition.shares;
+        const originalTakeProfit = selectedPosition.take_profit;
+        const newTakeProfit = editingPosition.takeProfit;
+        
+        const onlyStopLossChanged = (
+          newStopLoss !== originalStopLoss &&
+          newShares === originalShares &&
+          newTakeProfit === originalTakeProfit
+        );
+        
+        if (onlyStopLossChanged) {
+          // Use position-level stop loss update API
+          await updatePositionStopLoss((selectedPosition as any).trade_group_id || selectedPosition.id, newStopLoss);
+        } else {
+          // Use traditional trade update for other changes
+          const updateData = {
+            id: editingPosition.id,
+            stopLoss: editingPosition.stopLoss.toString(),
+            takeProfit: editingPosition.takeProfit?.toString() || '',
+            shares: editingPosition.shares.toString(),
+            // Keep other fields the same
+            ticker: selectedPosition.ticker,
+            direction: selectedPosition.displayDirection || selectedPosition.trade_type,
+            entryPrice: ((selectedPosition as any).entryPrice || selectedPosition.entry_price).toString(),
+            strategy: selectedPosition.strategy,
+            setupType: selectedPosition.setup_type,
+            timeframe: selectedPosition.timeframe || '',
+            entryDate: (selectedPosition as any).entryDate || selectedPosition.entry_date
+          };
 
-        await updateTrade(updateData);
+          await updateTrade(updateData);
+        }
         
       } else if (tabValue === 1) {
         // Add to Position
@@ -197,6 +273,11 @@ const Positions: React.FC = () => {
       
       // Refresh positions list
       await loadPositions();
+      
+      // Trigger Position Details modal refresh (if it's open)
+      if (positionDetailsOpen && positionDetailsRefresh) {
+        await positionDetailsRefresh();
+      }
       
       // Close modal
       handleCloseDetails();
@@ -300,9 +381,9 @@ const Positions: React.FC = () => {
                 <TableCell>Ticker</TableCell>
                 <TableCell>Entry Price</TableCell>
                 <TableCell>Shares</TableCell>
-                <TableCell>Stop Loss</TableCell>
-                <TableCell>Take Profit</TableCell>
-                <TableCell>Risk %</TableCell>
+                <TableCell>Stop Loss (Average)</TableCell>
+                <TableCell>Open Risk %</TableCell>
+                <TableCell>Original Risk %</TableCell>
                 <TableCell>Realized P&L</TableCell>
               </TableRow>
             </TableHead>
@@ -320,12 +401,37 @@ const Positions: React.FC = () => {
                     </Typography>
                   </TableCell>
                   <TableCell>{formatCurrency((position as any).entryPrice || position.entry_price)}</TableCell>
-                  <TableCell>{position.position_size}</TableCell>
-                  <TableCell>{formatCurrency(position.stop_loss)}</TableCell>
-                  <TableCell>{formatCurrency(position.take_profit)}</TableCell>
+                  <TableCell>{(position as any).current_shares || position.position_size}</TableCell>
+                  <TableCell>
+                    {position.stop_loss ? (
+                      <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+                        {formatCurrency(position.stop_loss)}
+                        {(position as any).total_shares_bought > position.position_size && (
+                          <Chip 
+                            label="Avg" 
+                            size="small" 
+                            variant="outlined" 
+                            color="primary"
+                            sx={{ fontSize: '0.75rem', height: '20px' }}
+                          />
+                        )}
+                      </Box>
+                    ) : (
+                      <Typography variant="body2" color="error">
+                        No Stop
+                      </Typography>
+                    )}
+                  </TableCell>
                   <TableCell>
                     {accountService.calculateRiskPercent(
                       position.position_size || 0,
+                      ((position as any).entryPrice || position.entry_price) || 0,
+                      position.stop_loss || 0
+                    ).toFixed(2)}%
+                  </TableCell>
+                  <TableCell>
+                    {accountService.calculateOriginalRiskPercent(
+                      (position as any).total_shares_bought || position.position_size || 0,
                       ((position as any).entryPrice || position.entry_price) || 0,
                       position.stop_loss || 0
                     ).toFixed(2)}%
@@ -449,17 +555,6 @@ const Positions: React.FC = () => {
                           fullWidth
                           helperText="Can be set above entry price for protective stops"
                         />
-                        <TextField
-                          label="Take Profit (Optional)"
-                          type="number"
-                          inputProps={{ step: "0.01" }}
-                          value={editingPosition.takeProfit || ''}
-                          onChange={(e) => setEditingPosition({
-                            ...editingPosition,
-                            takeProfit: e.target.value ? parseFloat(e.target.value) : undefined
-                          })}
-                          fullWidth
-                        />
                       </Box>
                     </Paper>
                   )}
@@ -471,35 +566,49 @@ const Positions: React.FC = () => {
                         <TextField
                           label="Additional Shares"
                           type="number"
-                          value={addPositionData.shares}
-                          onChange={(e) => setAddPositionData({
-                            ...addPositionData,
-                            shares: parseFloat(e.target.value) || 0
-                          })}
+                          value={addPositionData.sharesInput}
+                          onChange={(e) => {
+                            const inputValue = e.target.value;
+                            setAddPositionData({
+                              ...addPositionData,
+                              sharesInput: inputValue,
+                              shares: parseFloat(inputValue) || 0
+                            });
+                          }}
+                          onFocus={(e) => e.target.select()}
                           fullWidth
                         />
                         <TextField
                           label="Entry Price"
                           type="number"
                           inputProps={{ step: "0.01" }}
-                          value={addPositionData.entryPrice}
-                          onChange={(e) => setAddPositionData({
-                            ...addPositionData,
-                            entryPrice: parseFloat(e.target.value) || 0
-                          })}
+                          value={addPositionData.entryPriceInput}
+                          onChange={(e) => {
+                            const inputValue = e.target.value;
+                            setAddPositionData({
+                              ...addPositionData,
+                              entryPriceInput: inputValue,
+                              entryPrice: parseFloat(inputValue) || 0
+                            });
+                          }}
+                          onFocus={(e) => e.target.select()}
                           fullWidth
                         />
                         <TextField
-                          label="New Stop Loss"
+                          label="Stop Loss"
                           type="number"
                           inputProps={{ step: "0.01" }}
-                          value={addPositionData.stopLoss}
-                          onChange={(e) => setAddPositionData({
-                            ...addPositionData,
-                            stopLoss: parseFloat(e.target.value) || 0
-                          })}
+                          value={addPositionData.stopLossInput}
+                          onChange={(e) => {
+                            const inputValue = e.target.value;
+                            setAddPositionData({
+                              ...addPositionData,
+                              stopLossInput: inputValue,
+                              stopLoss: parseFloat(inputValue) || 0
+                            });
+                          }}
+                          onFocus={(e) => e.target.select()}
                           fullWidth
-                          helperText="Stop loss for the entire position"
                         />
                         <TextField
                           label="Notes (Optional)"
@@ -523,9 +632,10 @@ const Positions: React.FC = () => {
                         <TextField
                           label="Shares to Sell"
                           type="number"
-                          value={sellPositionData.shares}
+                          value={sellPositionData.sharesInput}
                           onChange={(e) => setSellPositionData({
                             ...sellPositionData,
+                            sharesInput: e.target.value,
                             shares: parseFloat(e.target.value) || 0
                           })}
                           fullWidth
@@ -535,9 +645,10 @@ const Positions: React.FC = () => {
                           label="Exit Price"
                           type="number"
                           inputProps={{ step: "0.01" }}
-                          value={sellPositionData.exitPrice}
+                          value={sellPositionData.exitPriceInput}
                           onChange={(e) => setSellPositionData({
                             ...sellPositionData,
+                            exitPriceInput: e.target.value,
                             exitPrice: parseFloat(e.target.value) || 0
                           })}
                           fullWidth
@@ -563,29 +674,39 @@ const Positions: React.FC = () => {
                 <Paper sx={{ p: 2 }}>
                   <Typography variant="subtitle1" gutterBottom>Risk Analysis</Typography>
                   <Grid container spacing={2}>
-                    <Grid item xs={3}>
+                    <Grid item xs={6} sm={3}>
                       <Typography variant="body2" color="text.secondary">Initial Position Value</Typography>
                       <Typography variant="h6">
                         {formatCurrency((editingPosition.shares || 0) * (((selectedPosition as any).entryPrice || selectedPosition.entry_price) || 0))}
                       </Typography>
                     </Grid>
-                    <Grid item xs={3}>
+                    <Grid item xs={6} sm={3}>
                       <Typography variant="body2" color="text.secondary">Risk per Share</Typography>
                       <Typography variant="h6">
                         {formatCurrency(Math.abs((((selectedPosition as any).entryPrice || selectedPosition.entry_price) || 0) - (editingPosition.stopLoss || 0)))}
                       </Typography>
                     </Grid>
-                    <Grid item xs={3}>
+                    <Grid item xs={6} sm={3}>
                       <Typography variant="body2" color="text.secondary">Total Risk</Typography>
                       <Typography variant="h6" color="error">
                         {formatCurrency((editingPosition.shares || 0) * Math.abs((((selectedPosition as any).entryPrice || selectedPosition.entry_price) || 0) - (editingPosition.stopLoss || 0)))}
                       </Typography>
                     </Grid>
-                    <Grid item xs={3}>
-                      <Typography variant="body2" color="text.secondary">Account Risk %</Typography>
+                    <Grid item xs={6} sm={3}>
+                      <Typography variant="body2" color="text.secondary">Open Risk %</Typography>
                       <Typography variant="h6">
                         {accountService.calculateRiskPercent(
                           editingPosition.shares || 0,
+                          ((selectedPosition as any).entryPrice || selectedPosition.entry_price) || 0,
+                          editingPosition.stopLoss || 0
+                        ).toFixed(2)}%
+                      </Typography>
+                    </Grid>
+                    <Grid item xs={6} sm={3}>
+                      <Typography variant="body2" color="text.secondary">Original Risk %</Typography>
+                      <Typography variant="h6" color="warning.main">
+                        {accountService.calculateOriginalRiskPercent(
+                          (selectedPosition as any).total_shares_bought || selectedPosition.position_size || 0,
                           ((selectedPosition as any).entryPrice || selectedPosition.entry_price) || 0,
                           editingPosition.stopLoss || 0
                         ).toFixed(2)}%
@@ -600,6 +721,9 @@ const Positions: React.FC = () => {
                     </Typography>
                     <Typography variant="caption" color="text.secondary">
                       Risk calculations based on current account size. Update in Settings if needed.
+                    </Typography>
+                    <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mt: 1 }}>
+                      <strong>Open Risk %:</strong> Risk based on current remaining shares • <strong>Original Risk %:</strong> Risk based on total shares initially purchased
                     </Typography>
                   </Box>
                 </Paper>
@@ -630,11 +754,14 @@ const Positions: React.FC = () => {
         onClose={() => {
           setPositionDetailsOpen(false);
           setSelectedPosition(null);
+          setPositionDetailsRefresh(null); // Clear the refresh callback
         }}
         tradeGroupId={(selectedPosition as any)?.trade_group_id || ''}
         ticker={selectedPosition?.ticker || ''}
         onAddToPosition={handleOpenAddPosition}
         onSellPosition={handleOpenSellPosition}
+        onPositionUpdated={loadPositions} // Add refresh callback
+        onRefreshReady={(refreshFn) => setPositionDetailsRefresh(() => refreshFn)} // Pass refresh function setter
       />
     </Box>
   );

@@ -82,6 +82,7 @@ const TradeDetail: React.FC = () => {
   const navigate = useNavigate();
   const location = useLocation();
   const [trade, setTrade] = useState<Trade | null>(null);
+  const [tradeEntries, setTradeEntries] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [tabValue, setTabValue] = useState(0);
   const { currentCurrency } = useCurrency();
@@ -122,6 +123,11 @@ const TradeDetail: React.FC = () => {
               profitLoss: exit.profit_loss,
               notes: exit.notes
             })) : [];
+            
+            // Store trade positions (remaining lots) and entries (purchase history)
+            setTradeEntries(tradeDetails.positions || []);  // Use positions for current lots
+            
+            // TODO: Add state for original entries if needed to show purchase history
             
             // Update remaining shares from calculated data
             fetchedTrade.remainingShares = tradeDetails.calculated.current_shares;
@@ -295,12 +301,8 @@ const TradeDetail: React.FC = () => {
                   <Typography variant="body1">${(trade.stopLoss || 0).toFixed(2)}</Typography>
                 </Grid>
                 <Grid item xs={6}>
-                  <Typography variant="body2" color="text.secondary">Take Profit (Target)</Typography>
-                  <Typography variant="body1">${(trade.takeProfit || 0).toFixed(2)}</Typography>
-                </Grid>
-                <Grid item xs={6}>
                   <Typography variant="body2" color="text.secondary">{getPositionLabel(trade.instrumentType)}</Typography>
-                  <Typography variant="body1">{trade.shares}</Typography>
+                  <Typography variant="body1">{trade.remainingShares || trade.shares}</Typography>
                 </Grid>
                 <Grid item xs={6}>
                   <Typography variant="body2" color="text.secondary">Risk</Typography>
@@ -456,13 +458,13 @@ const TradeDetail: React.FC = () => {
           <Card>
             <CardContent>
               <Typography variant="h6" gutterBottom>
-                Exits & Take Profits
+                Adds and Exits
               </Typography>
               <Divider sx={{ mb: 2 }} />
               
-              {/* Partial Exits */}
+              {/* Exits */}
               <Typography variant="subtitle1" gutterBottom>
-                Partial Exits
+                Exits
               </Typography>
               {trade.partialExits && trade.partialExits.length > 0 ? (
                 <TableContainer>
@@ -495,33 +497,38 @@ const TradeDetail: React.FC = () => {
                 </TableContainer>
               ) : (
                 <Typography variant="body2" color="text.secondary">
-                  No partial exits recorded
+                  No exits recorded
                 </Typography>
               )}
 
               <Divider sx={{ my: 2 }} />
 
-              {/* Take Profit Targets */}
+              {/* Current Positions */}
               <Typography variant="subtitle1" gutterBottom>
-                Take Profit Targets
+                Positions
               </Typography>
-              {trade.takeProfitTargets && trade.takeProfitTargets.length > 0 ? (
+              <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
+                Current remaining lots with stop losses
+              </Typography>
+              {tradeEntries && tradeEntries.length > 0 ? (
                 <TableContainer>
                   <Table size="small">
                     <TableHead>
                       <TableRow>
-                        <TableCell>Target Price</TableCell>
+                        <TableCell>Date</TableCell>
+                        <TableCell>Price</TableCell>
                         <TableCell>{getPositionLabel(trade.instrumentType)}</TableCell>
-                        <TableCell>% of Position</TableCell>
+                        <TableCell>Stop Loss</TableCell>
                       </TableRow>
                     </TableHead>
                     <TableBody>
-                      {trade.takeProfitTargets.map((target, index) => (
+                      {tradeEntries.map((entry, index) => (
                         <TableRow key={index}>
-                          <TableCell>${target.price.toFixed(2)}</TableCell>
-                          <TableCell>{target.shares}</TableCell>
+                          <TableCell>{new Date(entry.entry_date).toLocaleDateString()}</TableCell>
+                          <TableCell>${entry.entry_price.toFixed(2)}</TableCell>
+                          <TableCell>{entry.shares}</TableCell>
                           <TableCell>
-                            {((target.shares / trade.shares) * 100).toFixed(1)}%
+                            ${entry.stop_loss ? entry.stop_loss.toFixed(2) : '-'}
                           </TableCell>
                         </TableRow>
                       ))}
@@ -530,7 +537,7 @@ const TradeDetail: React.FC = () => {
                 </TableContainer>
               ) : (
                 <Typography variant="body2" color="text.secondary">
-                  No take profit targets set
+                  No position adds recorded
                 </Typography>
               )}
 
@@ -542,16 +549,15 @@ const TradeDetail: React.FC = () => {
                     Current Position
                   </Typography>
                   <Typography variant="body2" color="text.secondary">
-                    Remaining {getPositionLabel(trade.instrumentType)}: {trade.remainingShares}
+                    Remaining {getPositionLabel(trade.instrumentType)}: {trade.remainingShares || 0}
                   </Typography>
-                  <Typography variant="body2" color="text.secondary">
-                    Average Exit Price: $
-                    {trade.partialExits && trade.partialExits.length > 0
-                      ? (trade.partialExits.reduce((sum, exit) => sum + (exit.exitPrice * exit.sharesSold), 0) / 
-                         trade.partialExits.reduce((sum, exit) => sum + exit.sharesSold, 0)).toFixed(2)
-                      : '-'
-                    }
-                  </Typography>
+                  {trade.partialExits && trade.partialExits.length > 0 && (
+                    <Typography variant="body2" color="text.secondary">
+                      Average Exit Price: $
+                      {(trade.partialExits.reduce((sum, exit) => sum + (exit.exitPrice * exit.sharesSold), 0) / 
+                        trade.partialExits.reduce((sum, exit) => sum + exit.sharesSold, 0)).toFixed(2)}
+                    </Typography>
+                  )}
                 </>
               )}
             </CardContent>

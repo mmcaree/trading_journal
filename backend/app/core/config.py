@@ -15,7 +15,8 @@ class Settings(BaseSettings):
     ALGORITHM: str = "HS256"
     
     # Database - Railway provides DATABASE_URL automatically
-    DATABASE_URL: str = os.getenv("DATABASE_URL", "sqlite:///./trade_journal.db")
+    # For local development, ensure we use app.db in the backend directory
+    DATABASE_URL: str = os.getenv("DATABASE_URL", "sqlite:///./app.db")
     
     # Redis cache
     REDIS_URL: str = os.getenv("REDIS_URL", "redis://localhost:6379/0")

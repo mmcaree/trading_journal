@@ -139,3 +139,8 @@ backend/cleanup_open.py
 backend/calculate_total_bought.py
 backend/apply_correct_calculation.py
 IMPORT_FIX_EXPLANATION.md
+backend\migrations\add_account_balance_tracking.py
+backend\migrations\add_options_support.py
+backend\migrations\add_timezone_column.py
+backend\migrations\add_trade_entries.py
+backend\migrations\add_trade_groups.py

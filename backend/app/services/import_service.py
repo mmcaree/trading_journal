@@ -13,9 +13,47 @@ from sqlalchemy import and_, desc
 
 from app.models import ImportedOrder, ImportBatch, Position, PositionOrder, OrderStatus, OrderSide, Trade, User, InstrumentType, OptionType, TradeEntry, PartialExit
 from app.services.trade_service import calculate_trade_metrics
-from app.utils.options_parser import parse_options_symbol
 from app.db.session import get_db
-from app.utils.options_parser import parse_options_symbol, convert_options_price
+
+# Inline options parsing functions (moved from deleted utils module)
+def parse_options_symbol(symbol: str) -> Dict[str, Any]:
+    """Parse options symbol to extract underlying, expiration, strike, and type"""
+    if not symbol or len(symbol) < 6:
+        return {'is_options': False}
+    
+    # Check for options patterns like AAPL250117C00150000
+    try:
+        # Basic options pattern: UNDERLYING + DATE + C/P + STRIKE
+        import re
+        pattern = r'^([A-Z]+)(\d{6})([CP])(\d{8})$'
+        match = re.match(pattern, symbol)
+        
+        if match:
+            underlying, date_str, option_type, strike_str = match.groups()
+            
+            # Parse expiration date (YYMMDD format)
+            year = int('20' + date_str[:2])
+            month = int(date_str[2:4])
+            day = int(date_str[4:6])
+            
+            # Parse strike price (8 digits with 3 decimal places)
+            strike = float(strike_str) / 1000
+            
+            return {
+                'is_options': True,
+                'underlying': underlying,
+                'expiration_date': f"{year}-{month:02d}-{day:02d}",
+                'option_type': 'call' if option_type == 'C' else 'put',
+                'strike_price': strike
+            }
+    except:
+        pass
+    
+    return {'is_options': False}
+
+def convert_options_price(price: float, contract_multiplier: int = 100) -> float:
+    """Convert options price to total value"""
+    return price * contract_multiplier
 
 class TradeImportService:
     

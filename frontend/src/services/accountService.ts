@@ -123,6 +123,21 @@ export const accountService = {
   },
 
   /**
+   * Calculate original risk percentage based on total shares bought (before any sells)
+   * @param totalSharesBought - Total shares originally purchased
+   * @param entryPrice - Entry price per share  
+   * @param stopLoss - Stop loss price per share
+   * @returns Original risk percentage of account
+   */
+  calculateOriginalRiskPercent(totalSharesBought: number, entryPrice: number, stopLoss: number): number {
+    const accountBalance = this.getCurrentBalance();
+    const riskPerShare = Math.abs(entryPrice - stopLoss);
+    const originalTotalRisk = totalSharesBought * riskPerShare;
+    
+    return accountBalance > 0 ? (originalTotalRisk / accountBalance) * 100 : 0;
+  },
+
+  /**
    * Get account growth statistics
    */
   getAccountGrowth() {

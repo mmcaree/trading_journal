@@ -90,33 +90,38 @@ const Dashboard: React.FC = () => {
     
     console.log('Original equity curve data:', dashboardData.equityCurve);
     
-    if (timeRange === 'ALL') {
-      return dashboardData.equityCurve;
+    let filteredData = dashboardData.equityCurve;
+    
+    if (timeRange !== 'ALL') {
+      const now = new Date();
+      let startDate: Date;
+      
+      switch (timeRange) {
+        case '1M':
+          startDate = new Date(now.getFullYear(), now.getMonth() - 1, now.getDate());
+          break;
+        case '3M':
+          startDate = new Date(now.getFullYear(), now.getMonth() - 3, now.getDate());
+          break;
+        case '6M':
+          startDate = new Date(now.getFullYear(), now.getMonth() - 6, now.getDate());
+          break;
+        case 'YTD':
+          startDate = new Date(now.getFullYear(), 0, 1);
+          break;
+        default:
+          return filteredData;
+      }
+      
+      filteredData = dashboardData.equityCurve.filter(item => new Date(item.date) >= startDate);
+      console.log('Filtered data length:', filteredData.length, 'from', dashboardData.equityCurve.length);
     }
     
-    const now = new Date();
-    let startDate: Date;
+    // Ensure data is sorted by date (should already be sorted from backend)
+    const sortedData = [...filteredData].sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime());
+    console.log('Final sorted equity curve data for chart:', sortedData);
     
-    switch (timeRange) {
-      case '1M':
-        startDate = new Date(now.getFullYear(), now.getMonth() - 1, now.getDate());
-        break;
-      case '3M':
-        startDate = new Date(now.getFullYear(), now.getMonth() - 3, now.getDate());
-        break;
-      case '6M':
-        startDate = new Date(now.getFullYear(), now.getMonth() - 6, now.getDate());
-        break;
-      case 'YTD':
-        startDate = new Date(now.getFullYear(), 0, 1);
-        break;
-      default:
-        return dashboardData.equityCurve;
-    }
-    
-    const filtered = dashboardData.equityCurve.filter(item => new Date(item.date) >= startDate);
-    console.log('Filtered data length:', filtered.length, 'from', dashboardData.equityCurve.length);
-    return filtered;
+    return sortedData;
   };
 
   const handleTimeRangeChange = (event: React.MouseEvent<HTMLElement>, newRange: string) => {

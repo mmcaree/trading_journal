@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import {
   Dialog,
   DialogTitle,
@@ -18,16 +18,23 @@ import {
   Divider,
   Grid,
   Card,
-  CardContent
+  CardContent,
+  TextField,
+  IconButton
 } from '@mui/material';
 import { 
   TrendingUp as TrendingUpIcon,
   TrendingDown as TrendingDownIcon,
   MonetizationOn as MoneyIcon,
   Add as AddIcon,
-  Remove as RemoveIcon
+  Remove as RemoveIcon,
+  Edit as EditIcon,
+  Save as SaveIcon,
+  Cancel as CancelIcon,
+  Check as CheckIcon,
+  Close as CloseIcon
 } from '@mui/icons-material';
-import { getPositionDetails, PositionDetails, PositionEntry, PositionExit } from '../services/tradeService';
+import { getPositionDetails, PositionDetails, PositionEntry, PositionExit, OpenOrderGroup, updateTradeEntryStopLoss, updateTradeEntryNotes, updatePositionGroupStopLoss } from '../services/tradeService';
 
 interface PositionDetailsModalProps {
   open: boolean;
@@ -36,6 +43,8 @@ interface PositionDetailsModalProps {
   ticker: string;
   onAddToPosition?: () => void;
   onSellPosition?: () => void;
+  onPositionUpdated?: () => void; // Add callback for when position is updated
+  onRefreshReady?: (refreshFn: () => Promise<void>) => void; // Callback to provide refresh function
 }
 
 const PositionDetailsModal: React.FC<PositionDetailsModalProps> = ({
@@ -44,19 +53,21 @@ const PositionDetailsModal: React.FC<PositionDetailsModalProps> = ({
   tradeGroupId,
   ticker,
   onAddToPosition,
-  onSellPosition
+  onSellPosition,
+  onPositionUpdated,
+  onRefreshReady
 }) => {
   const [details, setDetails] = useState<PositionDetails | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  
+  // State for editing
+  const [editingStopLoss, setEditingStopLoss] = useState<string | null>(null);
+  const [editingNotes, setEditingNotes] = useState<number | null>(null);
+  const [tempStopLoss, setTempStopLoss] = useState<string>('');
+  const [tempNotes, setTempNotes] = useState<string>('');
 
-  useEffect(() => {
-    if (open && tradeGroupId) {
-      loadPositionDetails();
-    }
-  }, [open, tradeGroupId]);
-
-  const loadPositionDetails = async () => {
+  const loadPositionDetails = useCallback(async () => {
     setLoading(true);
     setError(null);
     try {
@@ -68,7 +79,20 @@ const PositionDetailsModal: React.FC<PositionDetailsModalProps> = ({
     } finally {
       setLoading(false);
     }
-  };
+  }, [tradeGroupId]);
+
+  useEffect(() => {
+    if (open && tradeGroupId) {
+      loadPositionDetails();
+    }
+  }, [open, tradeGroupId, loadPositionDetails]);
+
+  // Separate effect for providing the refresh function to avoid infinite loops
+  useEffect(() => {
+    if (open && onRefreshReady) {
+      onRefreshReady(loadPositionDetails);
+    }
+  }, [open, onRefreshReady, loadPositionDetails]);
 
   const formatCurrency = (value: number) => {
     return new Intl.NumberFormat('en-US', {
@@ -83,6 +107,77 @@ const PositionDetailsModal: React.FC<PositionDetailsModalProps> = ({
       month: 'short',
       day: 'numeric'
     });
+  };
+
+  const handleEditStopLoss = (orderId: string, currentValue: number) => {
+    setEditingStopLoss(orderId);
+    setTempStopLoss(currentValue.toString());
+  };
+
+  const handleSaveStopLoss = async (orderId: string) => {
+    try {
+      // Find the order to get current stop loss
+      const order = details?.open_orders?.find(o => o.id === orderId);
+      if (!order) {
+        throw new Error('Order not found');
+      }
+      
+      const currentStopLoss = order.stop_loss;
+      const newStopLoss = parseFloat(tempStopLoss);
+      
+      if (!details?.trade_group_id) {
+        throw new Error('Trade group ID not found');
+      }
+      
+      // Call the API to update the position group stop loss
+      await updatePositionGroupStopLoss(details.trade_group_id, currentStopLoss, newStopLoss);
+      
+      setEditingStopLoss(null);
+      setTempStopLoss('');
+      
+      // Reload details after save
+      await loadPositionDetails();
+      
+      // Trigger refresh of main positions page
+      if (onPositionUpdated) {
+        onPositionUpdated();
+      }
+    } catch (error) {
+      console.error('Error saving stop loss:', error);
+      alert(`Error updating stop loss: ${error instanceof Error ? error.message : 'Unknown error'}`);
+    }
+  };
+
+  const handleCancelStopLoss = () => {
+    setEditingStopLoss(null);
+    setTempStopLoss('');
+  };
+
+  const handleEditNotes = (entryId: number, currentValue: string) => {
+    setEditingNotes(entryId);
+    setTempNotes(currentValue);
+  };
+
+  const handleSaveNotes = async (entryId: number) => {
+    try {
+      await updateTradeEntryNotes(entryId, tempNotes);
+      setEditingNotes(null);
+      setTempNotes('');
+      // Reload details after save
+      await loadPositionDetails();
+      // Trigger refresh of main positions page
+      if (onPositionUpdated) {
+        onPositionUpdated();
+      }
+    } catch (error) {
+      console.error('Error saving notes:', error);
+      // You might want to show an error message to the user here
+    }
+  };
+
+  const handleCancelNotes = () => {
+    setEditingNotes(null);
+    setTempNotes('');
   };
 
   if (loading) {
@@ -200,38 +295,71 @@ const PositionDetailsModal: React.FC<PositionDetailsModalProps> = ({
               </Grid>
             </Grid>
 
-            {/* Entries Table */}
+            {/* Positions Table - What we have LEFT */}
             <Box sx={{ mb: 3 }}>
               <Typography variant="h6" sx={{ mb: 2 }}>
-                Entry Positions ({details.entries.length})
+                Positions ({(details.open_orders || []).length})
+              </Typography>
+              <Typography variant="body2" color="textSecondary" sx={{ mb: 2 }}>
+                Current remaining lots with stop losses
               </Typography>
               <TableContainer component={Paper}>
                 <Table size="small">
                   <TableHead>
                     <TableRow>
-                      <TableCell>Date</TableCell>
-                      <TableCell align="right">Price</TableCell>
-                      <TableCell align="right">Shares</TableCell>
-                      <TableCell align="right">Cost</TableCell>
-                      <TableCell align="right">Stop Loss</TableCell>
-                      <TableCell align="right">Take Profit</TableCell>
+                      <TableCell>Price</TableCell>
+                      <TableCell>Shares</TableCell>
+                      <TableCell>Stop Loss</TableCell>
                       <TableCell>Notes</TableCell>
                     </TableRow>
                   </TableHead>
                   <TableBody>
-                    {details.entries.map((entry: PositionEntry) => (
-                      <TableRow key={entry.id}>
-                        <TableCell>{formatDate(entry.entry_date)}</TableCell>
-                        <TableCell align="right">{formatCurrency(entry.entry_price)}</TableCell>
-                        <TableCell align="right">{entry.shares}</TableCell>
-                        <TableCell align="right">{formatCurrency(entry.cost)}</TableCell>
-                        <TableCell align="right">
-                          {entry.stop_loss ? formatCurrency(entry.stop_loss) : '-'}
+                    {(details.open_orders || []).map((order: any) => (
+                      <TableRow key={order.id}>
+                        <TableCell>{formatCurrency(order.avg_entry_price)}</TableCell>
+                        <TableCell>{order.shares}</TableCell>
+                        <TableCell>
+                          {editingStopLoss === order.id ? (
+                            <Box sx={{ display: 'flex', gap: 1, alignItems: 'center' }}>
+                              <TextField
+                                size="small"
+                                value={tempStopLoss}
+                                onChange={(e) => setTempStopLoss(e.target.value)}
+                                type="number"
+                                inputProps={{ step: "0.01" }}
+                                sx={{ width: 80 }}
+                              />
+                              <IconButton
+                                size="small"
+                                onClick={() => handleSaveStopLoss(order.id)}
+                                color="primary"
+                              >
+                                <CheckIcon />
+                              </IconButton>
+                              <IconButton
+                                size="small"
+                                onClick={handleCancelStopLoss}
+                                color="secondary"
+                              >
+                                <CloseIcon />
+                              </IconButton>
+                            </Box>
+                          ) : (
+                            <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+                              <span>{order.stop_loss ? formatCurrency(order.stop_loss) : '-'}</span>
+                              <IconButton
+                                size="small"
+                                onClick={() => handleEditStopLoss(order.id, order.stop_loss || 0)}
+                                sx={{ ml: 1 }}
+                              >
+                                <EditIcon />
+                              </IconButton>
+                            </Box>
+                          )}
                         </TableCell>
-                        <TableCell align="right">
-                          {entry.take_profit ? formatCurrency(entry.take_profit) : '-'}
+                        <TableCell>
+                          {order.notes || `Open order @ ${formatCurrency(order.stop_loss || 0)}`}
                         </TableCell>
-                        <TableCell>{entry.notes || '-'}</TableCell>
                       </TableRow>
                     ))}
                   </TableBody>
@@ -239,11 +367,51 @@ const PositionDetailsModal: React.FC<PositionDetailsModalProps> = ({
               </TableContainer>
             </Box>
 
+            {/* Entries Table - Original Purchase History */}
+            <Box sx={{ mb: 3 }}>
+              <Typography variant="h6" sx={{ mb: 2 }}>
+                Entries ({details.entries?.length || 0})
+              </Typography>
+              <Typography variant="body2" color="textSecondary" sx={{ mb: 2 }}>
+                Original purchase history (full amounts before any exits)
+              </Typography>
+              {details.entries && details.entries.length > 0 ? (
+                <TableContainer component={Paper}>
+                  <Table size="small">
+                    <TableHead>
+                      <TableRow>
+                        <TableCell>Date</TableCell>
+                        <TableCell align="right">Price</TableCell>
+                        <TableCell align="right">Shares</TableCell>
+                        <TableCell>Notes</TableCell>
+                      </TableRow>
+                    </TableHead>
+                    <TableBody>
+                      {(details.entries || []).map((entry: PositionEntry) => (
+                        <TableRow key={`entry-${entry.id}`}>
+                          <TableCell>{formatDate(entry.entry_date)}</TableCell>
+                          <TableCell align="right">{formatCurrency(entry.entry_price)}</TableCell>
+                          <TableCell align="right">{entry.shares}</TableCell>
+                          <TableCell>
+                            {entry.notes || `Purchase @ ${formatCurrency(entry.entry_price)}`}
+                          </TableCell>
+                        </TableRow>
+                      ))}
+                    </TableBody>
+                  </Table>
+                </TableContainer>
+              ) : (
+                <Typography variant="body2" color="text.secondary">
+                  No purchase history available
+                </Typography>
+              )}
+            </Box>
+
             {/* Exits Table */}
-            {details.exits.length > 0 && (
+            {details.exits && details.exits.length > 0 && (
               <Box>
                 <Typography variant="h6" sx={{ mb: 2 }}>
-                  Exit Positions ({details.exits.length})
+                  Exits ({details.exits.length})
                 </Typography>
                 <TableContainer component={Paper}>
                   <Table size="small">
@@ -252,7 +420,6 @@ const PositionDetailsModal: React.FC<PositionDetailsModalProps> = ({
                         <TableCell>Date</TableCell>
                         <TableCell align="right">Price</TableCell>
                         <TableCell align="right">Shares</TableCell>
-                        <TableCell align="right">Proceeds</TableCell>
                         <TableCell align="right">P&L</TableCell>
                         <TableCell>Notes</TableCell>
                       </TableRow>
@@ -263,7 +430,6 @@ const PositionDetailsModal: React.FC<PositionDetailsModalProps> = ({
                           <TableCell>{formatDate(exit.exit_date)}</TableCell>
                           <TableCell align="right">{formatCurrency(exit.exit_price)}</TableCell>
                           <TableCell align="right">{exit.shares_sold}</TableCell>
-                          <TableCell align="right">{formatCurrency(exit.proceeds)}</TableCell>
                           <TableCell 
                             align="right"
                             sx={{ 

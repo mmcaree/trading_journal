@@ -13,11 +13,24 @@ export interface PositionEntry {
   id: number;
   entry_date: string;
   entry_price: number;
+  avg_entry_price?: number;  // For grouped positions
   shares: number;
   stop_loss: number;
-  take_profit: number;
-  cost: number;
   notes?: string;
+  entry_ids?: number[];      // For grouped positions
+  entry_type?: string;       // 'original' or 'add'
+}
+
+export interface OpenOrderGroup {
+  id: string;              // String ID like "order_8.77_pending"
+  entry_date?: string;
+  entry_price?: number;
+  avg_entry_price: number; 
+  shares: number;
+  stop_loss: number;
+  notes?: string;
+  ticker: string;
+  order_count: number;
 }
 
 export interface PositionExit {
@@ -26,14 +39,14 @@ export interface PositionExit {
   exit_price: number;
   shares_sold: number;
   profit_loss: number;
-  proceeds: number;
   notes?: string;
 }
 
 export interface PositionDetails {
   trade_group_id: string;
   ticker: string;
-  entries: PositionEntry[];
+  open_orders: OpenOrderGroup[];  // Current open orders grouped by stop loss
+  entries: PositionEntry[];    // Original purchase history
   exits: PositionExit[];
   summary: {
     total_shares_bought: number;
@@ -42,7 +55,8 @@ export interface PositionDetails {
     avg_entry_price: number;
     total_cost: number;
     total_realized_pnl: number;
-    entries_count: number;
+    open_orders_count: number;     // Count of open order groups
+    entries_count: number;       // Count of original purchases
     exits_count: number;
   };
 }
@@ -89,6 +103,16 @@ export async function getPositions(): Promise<any[]> {
     return response.data;
   } catch (error) {
     console.error('Error fetching positions:', error);
+    throw error;
+  }
+}
+
+export async function getActiveEntries(): Promise<any[]> {
+  try {
+    const response = await api.get('/api/trades/entries');
+    return response.data;
+  } catch (error) {
+    console.error('Error fetching active entries:', error);
     throw error;
   }
 }
@@ -334,55 +358,78 @@ const calculateEquityCurve = (trades: any[], startingBalance: number = 0): Array
       date: new Date().toISOString().split('T')[0],
       equity: startingBalance
     }];
-  }  // Sort trades by entry date
-  const sortedTrades = [...trades]
-    .sort((a, b) => new Date(a.entry_date).getTime() - new Date(b.entry_date).getTime())
-    .filter(trade => {
-      const isClosed = trade.status === 'closed' || trade.status === 'Closed' || trade.status === 'CLOSED';
-      const hasPartialExits = trade.partial_exits && trade.partial_exits.length > 0;
-      return (isClosed || hasPartialExits);
-    });
+  }
 
-  console.log('Sorted trades for equity curve:', sortedTrades);  
+  // Filter for closed trades and trades with partial exits
+  const relevantTrades = [...trades].filter(trade => {
+    const isClosed = trade.status === 'closed' || trade.status === 'Closed' || trade.status === 'CLOSED';
+    const hasPartialExits = trade.partial_exits && trade.partial_exits.length > 0;
+    return (isClosed || hasPartialExits);
+  });
+
+  console.log('Relevant trades for equity curve:', relevantTrades);  
   
-  let cumulativeEquity = startingBalance;
-  let lastEquity = startingBalance;
-  const equityCurve = sortedTrades.flatMap(trade => {
-    const points: Array<{ date: string; equity: number }> = [];
-    
-    // Add points for partial exits
+  // Create array to hold all equity curve events (including partial exits)
+  const equityEvents: Array<{ date: string; pnl: number; tradeId: number; ticker: string; type: string }> = [];
+  
+  relevantTrades.forEach(trade => {
+    // Add events for partial exits
     if (trade.partial_exits && Array.isArray(trade.partial_exits) && trade.partial_exits.length > 0) {
       trade.partial_exits.forEach((exit: PartialExit) => {
         const exitPL = exit.profit_loss || 0;
-        cumulativeEquity += exitPL;
-        console.log(`Adding partial exit PL ${exitPL} to curve, new equity: ${cumulativeEquity}`);
-        points.push({
+        equityEvents.push({
           date: exit.exit_date.split('T')[0],
-          equity: Number(cumulativeEquity.toFixed(2))
+          pnl: exitPL,
+          tradeId: trade.id,
+          ticker: trade.ticker,
+          type: 'partial_exit'
         });
       });
     }
 
-    // Add point for final exit
+    // Add event for final exit
     if (trade.status?.toLowerCase() === 'closed' && trade.profit_loss) {
       const finalPL = trade.profit_loss || 0;
-      cumulativeEquity += finalPL;
-      lastEquity = cumulativeEquity;
-      console.log(`Adding final PL ${finalPL} to curve, new equity: ${cumulativeEquity}`);
-      points.push({
+      equityEvents.push({
         date: (trade.exit_date || trade.entry_date).split('T')[0],
-        equity: Number(cumulativeEquity.toFixed(2))
+        pnl: finalPL,
+        tradeId: trade.id,
+        ticker: trade.ticker,
+        type: 'final_exit'
       });
     }
-
-    return points;
   });
 
-  // If no points, add current date with 0 equity
+  // Sort events by date chronologically
+  equityEvents.sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime());
+  
+  console.log('Sorted equity events:', equityEvents);
+  
+  // Group events by date and sum P&L for same dates
+  const dailyPnLMap = new Map<string, number>();
+  equityEvents.forEach(event => {
+    const currentPnL = dailyPnLMap.get(event.date) || 0;
+    dailyPnLMap.set(event.date, currentPnL + event.pnl);
+  });
+  
+  // Convert to array and create cumulative equity curve
+  let cumulativeEquity = startingBalance;
+  const equityCurve = Array.from(dailyPnLMap.entries())
+    .sort(([dateA], [dateB]) => new Date(dateA).getTime() - new Date(dateB).getTime())
+    .map(([date, dailyPnL]) => {
+      cumulativeEquity += dailyPnL;
+      console.log(`Date ${date}: Daily P&L ${dailyPnL}, Cumulative Equity: ${cumulativeEquity}`);
+      return {
+        date,
+        equity: Number(cumulativeEquity.toFixed(2))
+      };
+    });
+
+  // If no points, add current date with starting equity
   if (equityCurve.length === 0) {
     equityCurve.push({
       date: new Date().toISOString().split('T')[0],
-      equity: 0
+      equity: startingBalance
     });
   }
 
@@ -391,10 +438,11 @@ const calculateEquityCurve = (trades: any[], startingBalance: number = 0): Array
   if (equityCurve[equityCurve.length - 1].date !== today) {
     equityCurve.push({
       date: today,
-      equity: lastEquity
+      equity: cumulativeEquity
     });
   }
 
+  console.log('Final equity curve:', equityCurve);
   return equityCurve;
 };
 
@@ -766,7 +814,10 @@ export const updateTrade = async (tradeData: any): Promise<Trade> => {
     
     // Parse values with fallbacks
     const entryPrice = parseFloat(tradeData.entryPrice) || 0;
-    const stopLoss = parseFloat(tradeData.stopLoss) || 0;
+    const stopLossValue = tradeData.stopLoss;
+    const stopLoss = (stopLossValue !== null && stopLossValue !== undefined && stopLossValue !== '') 
+      ? parseFloat(stopLossValue) 
+      : null;
     const shares = parseFloat(tradeData.shares) || 0;
     
     // Skip validation for notes-only updates
@@ -775,8 +826,8 @@ export const updateTrade = async (tradeData: any): Promise<Trade> => {
       if (entryPrice <= 0) throw new Error('Entry price must be greater than 0');
       if (shares <= 0) throw new Error('Number of shares must be greater than 0');
       
-      // Only validate stop loss if it's provided
-      if (stopLoss > 0) {
+      // Only validate stop loss if it's provided and is a valid number
+      if (stopLoss !== null && !isNaN(stopLoss)) {
         // For trade updates, allow protective stops (breakeven or profitable stops)
         // This is more flexible than initial trade creation
         const isLong = tradeData.direction === 'Long';
@@ -814,7 +865,7 @@ export const updateTrade = async (tradeData: any): Promise<Trade> => {
       exit_price: tradeData.exitPrice ? parseFloat(tradeData.exitPrice) : null,
       exit_date: tradeData.exitDate,
       position_size: shares,
-      stop_loss: stopLoss > 0 ? stopLoss : null,
+      stop_loss: stopLoss,
       take_profit: tradeData.takeProfit ? parseFloat(tradeData.takeProfit) : null,
       strategy: tradeData.strategy,
       setup_type: tradeData.setupType,
@@ -942,13 +993,15 @@ export interface PartialExitData {
 
 export interface TradeDetailsResponse {
   trade: Trade;
-  entries: any[];
+  positions: any[];  // Remaining lots with stop losses
+  entries: any[];    // Original purchase history
   exits: any[];
   calculated: {
     current_shares: number;
     avg_entry_price: number;
     total_invested: number;
     total_risk: number;
+    positions_count: number;
     entries_count: number;
     exits_count: number;
   };
@@ -980,6 +1033,60 @@ export async function getTradeDetails(tradeId: number): Promise<TradeDetailsResp
     return response.data;
   } catch (error) {
     console.error('Error getting trade details:', error);
+    throw error;
+  }
+}
+
+// Position Stop Loss Management
+export async function updatePositionStopLoss(tradeGroupId: string, stopLoss: number): Promise<any> {
+  try {
+    const response = await api.put(`/api/trades/positions/${tradeGroupId}/stop-loss`, {
+      stop_loss: stopLoss
+    });
+    return response.data;
+  } catch (error) {
+    console.error('Error updating position stop loss:', error);
+    throw error;
+  }
+}
+
+// Trade Entry Updates
+export async function updateTradeEntryStopLoss(entryId: number, stopLoss: number): Promise<any> {
+  try {
+    const response = await api.put(`/api/trades/entries/${entryId}/stop-loss`, {
+      stop_loss: stopLoss
+    });
+    return response.data;
+  } catch (error) {
+    console.error('Error updating trade entry stop loss:', error);
+    throw error;
+  }
+}
+
+export async function updateTradeEntryNotes(entryId: number, notes: string): Promise<any> {
+  try {
+    const response = await api.put(`/api/trades/entries/${entryId}/notes`, {
+      notes: notes
+    });
+    return response.data;
+  } catch (error) {
+    console.error('Error updating trade entry notes:', error);
+    throw error;
+  }
+}
+
+export async function updatePositionGroupStopLoss(
+  tradeGroupId: string, 
+  currentStopLoss: number, 
+  newStopLoss: number
+): Promise<any> {
+  try {
+    const response = await api.put(
+      `/api/trades/positions/${tradeGroupId}/stop-loss-group?current_stop_loss=${currentStopLoss}&new_stop_loss=${newStopLoss}`
+    );
+    return response.data;
+  } catch (error) {
+    console.error('Error updating position group stop loss:', error);
     throw error;
   }
 }

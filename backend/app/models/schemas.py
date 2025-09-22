@@ -361,3 +361,27 @@ class PartialExitResponse(PartialExitBase):
     
     class Config:
         from_attributes = True
+
+# Position Stop Loss Management schemas
+class PositionStopLossUpdate(BaseModel):
+    stop_loss: float
+    
+class PositionStopLossResponse(BaseModel):
+    trade_group_id: str
+    new_stop_loss: float
+    weighted_stop_loss: Optional[float]
+    entries_updated: int
+    trades_updated: int
+    success: bool
+
+# Trade Entry Update schemas
+class TradeEntryStopLossUpdate(BaseModel):
+    stop_loss: float
+
+class TradeEntryNotesUpdate(BaseModel):
+    notes: str
+
+class TradeEntryUpdateResponse(BaseModel):
+    id: int
+    success: bool
+    message: str
