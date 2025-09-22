@@ -15,6 +15,20 @@ from app.models import ImportedOrder, ImportBatch, Position, PositionOrder, Orde
 from app.services.trade_service import calculate_trade_metrics
 from app.db.session import get_db
 
+# Helper function to safely get option type
+def get_safe_option_type(options_info: Dict[str, Any]) -> Optional[OptionType]:
+    """Safely get OptionType from options_info dict, handling None values"""
+    if not options_info or not options_info.get('option_type'):
+        return None
+    
+    option_type_str = options_info.get('option_type')
+    if option_type_str == 'call':
+        return OptionType.CALL
+    elif option_type_str == 'put':
+        return OptionType.PUT
+    else:
+        return None
+
 # Inline options parsing functions (moved from deleted utils module)
 def parse_options_symbol(symbol: str) -> Dict[str, Any]:
     """Parse options symbol to extract underlying, expiration, strike, and type"""
@@ -606,7 +620,7 @@ class TradeImportService:
                     instrument_type=InstrumentType.OPTIONS if options_info['is_options'] else InstrumentType.STOCK,
                     strike_price=options_info['strike_price'] if options_info['is_options'] else None,
                     expiration_date=options_info['expiration_date'] if options_info['is_options'] else None,
-                    option_type=OptionType.CALL if options_info['option_type'] == 'call' else OptionType.PUT if options_info['option_type'] == 'put' else None,
+                    option_type=get_safe_option_type(options_info),
                     
                     position_size=sell_qty,
                     entry_price=actual_buy_price,
@@ -713,7 +727,7 @@ class TradeImportService:
                         instrument_type=InstrumentType.OPTIONS if options_info['is_options'] else InstrumentType.STOCK,
                         strike_price=options_info['strike_price'] if options_info['is_options'] else None,
                         expiration_date=options_info['expiration_date'] if options_info['is_options'] else None,
-                        option_type=OptionType.CALL if options_info['option_type'] == 'call' else OptionType.PUT if options_info['option_type'] == 'put' else None,
+                        option_type=get_safe_option_type(options_info),
                         
                         position_size=entry["quantity"],
                         entry_price=actual_entry_price,
@@ -1083,16 +1097,16 @@ class TradeImportService:
         # Create main trade record
         trade = Trade(
             user_id=position.user_id,
-            ticker=options_info['ticker'] if options_info['is_options'] else position.symbol,
+            ticker=options_info['ticker'] if options_info and options_info['is_options'] else position.symbol,
             trade_type=direction,
             status="ACTIVE",
             trade_group_id=trade_group_id,
             
             # Options fields
-            instrument_type=InstrumentType.OPTIONS if options_info['is_options'] else InstrumentType.STOCK,
-            strike_price=options_info['strike_price'] if options_info['is_options'] else None,
-            expiration_date=options_info['expiration_date'] if options_info['is_options'] else None,
-            option_type=OptionType.CALL if options_info['option_type'] == 'call' else OptionType.PUT if options_info['option_type'] == 'put' else None,
+            instrument_type=InstrumentType.OPTIONS if options_info and options_info['is_options'] else InstrumentType.STOCK,
+            strike_price=options_info['strike_price'] if options_info and options_info['is_options'] else None,
+            expiration_date=options_info['expiration_date'] if options_info and options_info['is_options'] else None,
+            option_type=get_safe_option_type(options_info),
             
             position_size=qty,
             entry_price=order.avg_price,
@@ -1484,10 +1498,10 @@ class TradeImportService:
                 trade_group_id=str(uuid.uuid4()),
                 
                 # Options fields
-                instrument_type=InstrumentType.OPTIONS if options_info['is_options'] else InstrumentType.STOCK,
-                strike_price=options_info['strike_price'] if options_info['is_options'] else None,
-                expiration_date=options_info['expiration_date'] if options_info['is_options'] else None,
-                option_type=OptionType.CALL if options_info['option_type'] == 'call' else OptionType.PUT if options_info['option_type'] == 'put' else None,
+                instrument_type=InstrumentType.OPTIONS if options_info and options_info['is_options'] else InstrumentType.STOCK,
+                strike_price=options_info['strike_price'] if options_info and options_info['is_options'] else None,
+                expiration_date=options_info['expiration_date'] if options_info and options_info['is_options'] else None,
+                option_type=get_safe_option_type(options_info),
                 
                 position_size=total_sold_qty,
                 entry_price=entry_price,
@@ -1642,16 +1656,16 @@ class TradeImportService:
         
         trade = Trade(
             user_id=position.user_id,
-            ticker=options_info['ticker'] if options_info['is_options'] else position.symbol,
+            ticker=options_info['ticker'] if options_info and options_info['is_options'] else position.symbol,
             trade_type="LONG",
             status="CLOSED",
             trade_group_id=str(uuid.uuid4()),
             
             # Options fields
-            instrument_type=InstrumentType.OPTIONS if options_info['is_options'] else InstrumentType.STOCK,
-            strike_price=options_info['strike_price'] if options_info['is_options'] else None,
-            expiration_date=options_info['expiration_date'] if options_info['is_options'] else None,
-            option_type=OptionType.CALL if options_info['option_type'] == 'call' else OptionType.PUT if options_info['option_type'] == 'put' else None,
+            instrument_type=InstrumentType.OPTIONS if options_info and options_info['is_options'] else InstrumentType.STOCK,
+            strike_price=options_info['strike_price'] if options_info and options_info['is_options'] else None,
+            expiration_date=options_info['expiration_date'] if options_info and options_info['is_options'] else None,
+            option_type=get_safe_option_type(options_info),
             
             position_size=actual_qty,
             entry_price=buy_price,
@@ -1691,16 +1705,16 @@ class TradeImportService:
         
         trade = Trade(
             user_id=position.user_id,
-            ticker=options_info['ticker'] if options_info['is_options'] else position.symbol,
+            ticker=options_info['ticker'] if options_info and options_info['is_options'] else position.symbol,
             trade_type="SHORT",
             status="CLOSED",
             trade_group_id=str(uuid.uuid4()),
             
             # Options fields
-            instrument_type=InstrumentType.OPTIONS if options_info['is_options'] else InstrumentType.STOCK,
-            strike_price=options_info['strike_price'] if options_info['is_options'] else None,
-            expiration_date=options_info['expiration_date'] if options_info['is_options'] else None,
-            option_type=OptionType.CALL if options_info['option_type'] == 'call' else OptionType.PUT if options_info['option_type'] == 'put' else None,
+            instrument_type=InstrumentType.OPTIONS if options_info and options_info['is_options'] else InstrumentType.STOCK,
+            strike_price=options_info['strike_price'] if options_info and options_info['is_options'] else None,
+            expiration_date=options_info['expiration_date'] if options_info and options_info['is_options'] else None,
+            option_type=get_safe_option_type(options_info),
             
             position_size=qty,
             entry_price=short_price,
@@ -1757,16 +1771,16 @@ class TradeImportService:
         # Create main trade record
         trade = Trade(
             user_id=position.user_id,
-            ticker=options_info['ticker'] if options_info['is_options'] else position.symbol,
+            ticker=options_info['ticker'] if options_info and options_info['is_options'] else position.symbol,
             trade_type=trade_type,
             status="ACTIVE",
             trade_group_id=str(uuid.uuid4()),
             
             # Options fields
-            instrument_type=InstrumentType.OPTIONS if options_info['is_options'] else InstrumentType.STOCK,
-            strike_price=options_info['strike_price'] if options_info['is_options'] else None,
-            expiration_date=options_info['expiration_date'] if options_info['is_options'] else None,
-            option_type=OptionType.CALL if options_info['option_type'] == 'call' else OptionType.PUT if options_info['option_type'] == 'put' else None,
+            instrument_type=InstrumentType.OPTIONS if options_info and options_info['is_options'] else InstrumentType.STOCK,
+            strike_price=options_info['strike_price'] if options_info and options_info['is_options'] else None,
+            expiration_date=options_info['expiration_date'] if options_info and options_info['is_options'] else None,
+            option_type=get_safe_option_type(options_info),
             
             position_size=total_shares,
             entry_price=avg_entry_price,

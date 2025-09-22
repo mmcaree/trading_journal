@@ -45,6 +45,7 @@ class TradeEntryBase(BaseModel):
     entry_date: datetime
     shares: int
     stop_loss: float
+    original_stop_loss: Optional[float] = None  # Stop loss at time of entry creation
     notes: Optional[str] = None
 
 class TradeEntryCreate(TradeEntryBase):

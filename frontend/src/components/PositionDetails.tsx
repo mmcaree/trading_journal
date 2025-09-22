@@ -373,7 +373,7 @@ const PositionDetailsModal: React.FC<PositionDetailsModalProps> = ({
                 Entries ({details.entries?.length || 0})
               </Typography>
               <Typography variant="body2" color="textSecondary" sx={{ mb: 2 }}>
-                Original purchase history (full amounts before any exits)
+                Original purchase history with stop losses at time of entry (before any exits)
               </Typography>
               {details.entries && details.entries.length > 0 ? (
                 <TableContainer component={Paper}>
@@ -383,6 +383,7 @@ const PositionDetailsModal: React.FC<PositionDetailsModalProps> = ({
                         <TableCell>Date</TableCell>
                         <TableCell align="right">Price</TableCell>
                         <TableCell align="right">Shares</TableCell>
+                        <TableCell align="center">Original Stop</TableCell>
                         <TableCell>Notes</TableCell>
                       </TableRow>
                     </TableHead>
@@ -392,6 +393,15 @@ const PositionDetailsModal: React.FC<PositionDetailsModalProps> = ({
                           <TableCell>{formatDate(entry.entry_date)}</TableCell>
                           <TableCell align="right">{formatCurrency(entry.entry_price)}</TableCell>
                           <TableCell align="right">{entry.shares}</TableCell>
+                          <TableCell align="center">
+                            {entry.original_stop_loss ? (
+                              formatCurrency(entry.original_stop_loss)
+                            ) : (
+                              <Typography variant="body2" color="text.secondary">
+                                N/A
+                              </Typography>
+                            )}
+                          </TableCell>
                           <TableCell>
                             {entry.notes || `Purchase @ ${formatCurrency(entry.entry_price)}`}
                           </TableCell>

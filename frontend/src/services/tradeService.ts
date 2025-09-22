@@ -16,6 +16,7 @@ export interface PositionEntry {
   avg_entry_price?: number;  // For grouped positions
   shares: number;
   stop_loss: number;
+  original_stop_loss?: number;  // Original stop loss at time of entry
   notes?: string;
   entry_ids?: number[];      // For grouped positions
   entry_type?: string;       // 'original' or 'add'
@@ -980,6 +981,7 @@ export interface TradeEntryData {
   entry_date: string;
   shares: number;
   stop_loss: number;
+  original_stop_loss?: number;  // Optional original stop loss
   notes?: string;
 }
 

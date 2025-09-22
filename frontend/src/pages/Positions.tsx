@@ -50,10 +50,12 @@ interface AddToPositionData {
   shares: number;
   entryPrice: number;
   stopLoss: number;
+  originalStopLoss?: number;  // New field for tracking original stop loss
   notes?: string;
   sharesInput?: string;
   entryPriceInput?: string;
   stopLossInput?: string;
+  originalStopLossInput?: string;  // Input string for original stop loss
 }
 
 interface SellPositionData {
@@ -83,9 +85,11 @@ const Positions: React.FC = () => {
     shares: 0, 
     entryPrice: 0, 
     stopLoss: 0,
+    originalStopLoss: 0,  // Initialize original stop loss
     sharesInput: '',
     entryPriceInput: '',
-    stopLossInput: ''
+    stopLossInput: '',
+    originalStopLossInput: ''  // Initialize original stop loss input
   });
   const [sellPositionData, setSellPositionData] = useState<SellPositionData>({ 
     shares: 0, 
@@ -153,9 +157,11 @@ const Positions: React.FC = () => {
       shares: 0, 
       entryPrice: 0, 
       stopLoss: 0,
+      originalStopLoss: 0,  // Reset original stop loss
       sharesInput: '',
       entryPriceInput: '',
-      stopLossInput: ''
+      stopLossInput: '',
+      originalStopLossInput: ''  // Reset original stop loss input
     });
     setSellPositionData({ 
       shares: 0, 
@@ -185,7 +191,16 @@ const Positions: React.FC = () => {
     setUpdateError(null);
     setEditMode('edit');
     setTabValue(0);
-    setAddPositionData({ shares: 0, entryPrice: 0, stopLoss: 0 });
+    setAddPositionData({ 
+      shares: 0, 
+      entryPrice: 0, 
+      stopLoss: 0,
+      originalStopLoss: 0,  // Reset original stop loss
+      sharesInput: '',
+      entryPriceInput: '',
+      stopLossInput: '',
+      originalStopLossInput: ''  // Reset original stop loss input
+    });
     setSellPositionData({ 
       shares: 0, 
       exitPrice: 0,
@@ -253,6 +268,7 @@ const Positions: React.FC = () => {
           entry_date: new Date().toISOString(),
           shares: addPositionData.shares,
           stop_loss: addPositionData.stopLoss,
+          original_stop_loss: addPositionData.originalStopLoss,  // Include original stop loss
           notes: finalNotes
         };
 
@@ -423,18 +439,20 @@ const Positions: React.FC = () => {
                     )}
                   </TableCell>
                   <TableCell>
-                    {accountService.calculateRiskPercent(
-                      position.position_size || 0,
-                      ((position as any).entryPrice || position.entry_price) || 0,
-                      position.stop_loss || 0
-                    ).toFixed(2)}%
+                    {(position as any).current_risk_percent !== undefined 
+                      ? `${(position as any).current_risk_percent.toFixed(2)}%`
+                      : '-'
+                    }
                   </TableCell>
                   <TableCell>
-                    {accountService.calculateOriginalRiskPercent(
-                      (position as any).total_shares_bought || position.position_size || 0,
-                      ((position as any).entryPrice || position.entry_price) || 0,
-                      position.stop_loss || 0
-                    ).toFixed(2)}%
+                    {(position as any).original_risk_percent !== undefined 
+                      ? `${(position as any).original_risk_percent.toFixed(2)}%`
+                      : `${accountService.calculateOriginalRiskPercent(
+                          (position as any).total_shares_bought || position.position_size || 0,
+                          ((position as any).entryPrice || position.entry_price) || 0,
+                          position.stop_loss || 0
+                        ).toFixed(2)}%`
+                    }
                   </TableCell>
                   <TableCell>
                     <Typography 
@@ -611,6 +629,23 @@ const Positions: React.FC = () => {
                           fullWidth
                         />
                         <TextField
+                          label="Original Stop Loss"
+                          type="number"
+                          inputProps={{ step: "0.01" }}
+                          value={addPositionData.originalStopLossInput}
+                          onChange={(e) => {
+                            const inputValue = e.target.value;
+                            setAddPositionData({
+                              ...addPositionData,
+                              originalStopLossInput: inputValue,
+                              originalStopLoss: parseFloat(inputValue) || 0
+                            });
+                          }}
+                          onFocus={(e) => e.target.select()}
+                          helperText="Original stop loss when this entry was made (for risk calculation)"
+                          fullWidth
+                        />
+                        <TextField
                           label="Notes (Optional)"
                           multiline
                           rows={2}
@@ -639,7 +674,7 @@ const Positions: React.FC = () => {
                             shares: parseFloat(e.target.value) || 0
                           })}
                           fullWidth
-                          helperText={`Max: ${selectedPosition.position_size} shares`}
+                          helperText={`Max: ${(selectedPosition as any).current_shares} shares`}
                         />
                         <TextField
                           label="Exit Price"
@@ -667,66 +702,6 @@ const Positions: React.FC = () => {
                       </Box>
                     </Paper>
                   )}
-                </Grid>
-              
-              {/* Risk Calculations */}
-              <Grid item xs={12}>
-                <Paper sx={{ p: 2 }}>
-                  <Typography variant="subtitle1" gutterBottom>Risk Analysis</Typography>
-                  <Grid container spacing={2}>
-                    <Grid item xs={6} sm={3}>
-                      <Typography variant="body2" color="text.secondary">Initial Position Value</Typography>
-                      <Typography variant="h6">
-                        {formatCurrency((editingPosition.shares || 0) * (((selectedPosition as any).entryPrice || selectedPosition.entry_price) || 0))}
-                      </Typography>
-                    </Grid>
-                    <Grid item xs={6} sm={3}>
-                      <Typography variant="body2" color="text.secondary">Risk per Share</Typography>
-                      <Typography variant="h6">
-                        {formatCurrency(Math.abs((((selectedPosition as any).entryPrice || selectedPosition.entry_price) || 0) - (editingPosition.stopLoss || 0)))}
-                      </Typography>
-                    </Grid>
-                    <Grid item xs={6} sm={3}>
-                      <Typography variant="body2" color="text.secondary">Total Risk</Typography>
-                      <Typography variant="h6" color="error">
-                        {formatCurrency((editingPosition.shares || 0) * Math.abs((((selectedPosition as any).entryPrice || selectedPosition.entry_price) || 0) - (editingPosition.stopLoss || 0)))}
-                      </Typography>
-                    </Grid>
-                    <Grid item xs={6} sm={3}>
-                      <Typography variant="body2" color="text.secondary">Open Risk %</Typography>
-                      <Typography variant="h6">
-                        {accountService.calculateRiskPercent(
-                          editingPosition.shares || 0,
-                          ((selectedPosition as any).entryPrice || selectedPosition.entry_price) || 0,
-                          editingPosition.stopLoss || 0
-                        ).toFixed(2)}%
-                      </Typography>
-                    </Grid>
-                    <Grid item xs={6} sm={3}>
-                      <Typography variant="body2" color="text.secondary">Original Risk %</Typography>
-                      <Typography variant="h6" color="warning.main">
-                        {accountService.calculateOriginalRiskPercent(
-                          (selectedPosition as any).total_shares_bought || selectedPosition.position_size || 0,
-                          ((selectedPosition as any).entryPrice || selectedPosition.entry_price) || 0,
-                          editingPosition.stopLoss || 0
-                        ).toFixed(2)}%
-                      </Typography>
-                    </Grid>
-                  </Grid>
-                  
-                  {/* Account Balance Info */}
-                  <Box sx={{ mt: 2, p: 2, backgroundColor: 'background.default', borderRadius: 1 }}>
-                    <Typography variant="body2" color="text.secondary">
-                      Account Balance: {accountService.formatCurrency(accountService.getCurrentBalance())}
-                    </Typography>
-                    <Typography variant="caption" color="text.secondary">
-                      Risk calculations based on current account size. Update in Settings if needed.
-                    </Typography>
-                    <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mt: 1 }}>
-                      <strong>Open Risk %:</strong> Risk based on current remaining shares • <strong>Original Risk %:</strong> Risk based on total shares initially purchased
-                    </Typography>
-                  </Box>
-                </Paper>
                 </Grid>
               </Grid>
             </>

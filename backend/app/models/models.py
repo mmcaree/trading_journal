@@ -166,7 +166,9 @@ class TradeEntry(Base):
     entry_price = Column(Float)
     entry_date = Column(DateTime)
     shares = Column(Integer)  # Current remaining shares (modified by partial exits)
+    original_shares = Column(Integer, nullable=True)  # Original shares at time of entry creation (for risk calculations)
     stop_loss = Column(Float)
+    original_stop_loss = Column(Float, nullable=True)  # Stop loss at time of entry creation
     notes = Column(Text, nullable=True)
     created_at = Column(DateTime, default=datetime.utcnow)
     

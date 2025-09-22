@@ -125,6 +125,7 @@ def create_trade(db: Session, trade: TradeCreate, user_id: int) -> Trade:
             entry_price=db_trade.entry_price,
             shares=db_trade.position_size,
             stop_loss=db_trade.stop_loss,
+            original_stop_loss=db_trade.stop_loss,  # For new trades, original = current
             notes=db_trade.entry_notes,
             is_active=True if db_trade.status.upper() in ['ACTIVE', 'PLANNED'] else False
         )
@@ -444,7 +445,9 @@ def add_to_position(db: Session, trade_id: int, entry: TradeEntryCreate) -> Trad
         entry_price=entry.entry_price,
         entry_date=entry.entry_date,
         shares=entry.shares,
+        original_shares=entry.shares,  # Store original shares for risk calculation
         stop_loss=entry.stop_loss,
+        original_stop_loss=entry.original_stop_loss or entry.stop_loss,  # Use provided original or current
         notes=entry.notes,
         is_active=True
     )
@@ -671,7 +674,9 @@ def add_to_position(db: Session, trade_group_id: str, entry: TradeEntryCreate) -
         entry_date=entry.entry_date,
         entry_price=entry.entry_price,
         shares=entry.shares,
+        original_shares=entry.shares,  # Store original shares for risk calculation
         stop_loss=entry.stop_loss,
+        original_stop_loss=entry.original_stop_loss or entry.stop_loss,  # Save original stop loss for risk calculation
         notes=entry.notes,
         is_active=True
     )
@@ -1119,6 +1124,17 @@ def get_positions(db: Session, user_id: int, skip: int = 0, limit: int = 100) ->
             stop_losses = [sell.price for sell in pending_sells if sell.price]
             combined_stop_loss = max(stop_losses) if stop_losses else None
             
+            # Calculate original risk percentage using all entries
+            original_risk_percent = calculate_original_risk_percentage(
+                db, user_id, ticker, trade.trade_group_id
+            )
+            
+            # Calculate current risk percentage using current stop and remaining shares
+            current_risk_percent = calculate_current_risk_percentage(
+                db, user_id, ticker, trade.trade_group_id, 
+                total_current_shares, avg_entry_price, combined_stop_loss
+            ) if combined_stop_loss else 0.0
+            
             # Create ONE combined position for this ticker
             position = {
                 "id": f"{ticker}_combined",
@@ -1138,6 +1154,8 @@ def get_positions(db: Session, user_id: int, skip: int = 0, limit: int = 100) ->
                 "stop_loss": combined_stop_loss,
                 "take_profit": trade.take_profit,
                 "total_risk": trade.total_risk,
+                "current_risk_percent": round(current_risk_percent, 2),  # Current risk %
+                "original_risk_percent": round(original_risk_percent, 2),  # New original risk %
                 "realized_pnl": round(total_realized_pnl, 2),
                 "status": "active",
                 "last_updated": trade.created_at,
@@ -1151,14 +1169,39 @@ def get_positions(db: Session, user_id: int, skip: int = 0, limit: int = 100) ->
             # No pending sell orders - for manual trades, combine into ONE position per ticker
             print(f"No pending sell orders for {ticker} - combining manual entries into one position")
             
-            # Calculate total shares and weighted average entry price for all entries
-            total_shares = sum(e.shares for e in entries)
+            # Calculate total shares from original entries
+            total_original_shares = sum(e.shares for e in entries)
             total_cost = sum(e.shares * e.entry_price for e in entries)
-            avg_entry_price = total_cost / total_shares if total_shares > 0 else 0
+            avg_entry_price = total_cost / total_original_shares if total_original_shares > 0 else 0
+            
+            # Calculate realized P&L from partial exits for this trade
+            partial_exits = db.query(PartialExit).filter(
+                PartialExit.trade_id == trade.id
+            ).all()
+            
+            total_realized_pnl = sum(exit.profit_loss for exit in partial_exits if exit.profit_loss)
+            total_shares_sold = sum(exit.shares_sold for exit in partial_exits)
+            
+            # Calculate current remaining shares
+            current_shares = total_original_shares - total_shares_sold
             
             # Use the most restrictive stop loss (highest for long positions)
             stop_losses = [e.stop_loss for e in entries if e.stop_loss is not None]
             combined_stop_loss = max(stop_losses) if stop_losses else None
+            
+            # Calculate original risk percentage using all entries
+            original_risk_percent = calculate_original_risk_percentage(
+                db, user_id, ticker, trade.trade_group_id
+            )
+            
+            # Calculate current risk percentage using current stop and remaining shares
+            current_risk_percent = calculate_current_risk_percentage(
+                db, user_id, ticker, trade.trade_group_id, 
+                current_shares, avg_entry_price, combined_stop_loss
+            ) if combined_stop_loss else 0.0
+            
+            # Determine status based on remaining shares
+            status = "closed" if current_shares <= 0 else "active"
             
             # Create ONE combined position for this ticker
             position = {
@@ -1173,21 +1216,29 @@ def get_positions(db: Session, user_id: int, skip: int = 0, limit: int = 100) ->
                 "entry_date": min(e.entry_date for e in entries),
                 "entry_price": round(avg_entry_price, 2),
                 "avg_entry_price": round(avg_entry_price, 2),
-                "current_shares": total_shares,
-                "position_size": total_shares,
-                "total_position_size": total_shares,
+                "current_shares": current_shares,  # Remaining shares after partial exits
+                "position_size": total_original_shares,  # Original position size
+                "total_position_size": total_original_shares,
                 "stop_loss": combined_stop_loss,
                 "take_profit": trade.take_profit,
                 "total_risk": trade.total_risk,
-                "realized_pnl": 0.0,
-                "status": "active",
+                "current_risk_percent": round(current_risk_percent, 2),  # Current risk %
+                "original_risk_percent": round(original_risk_percent, 2),  # New original risk %
+                "realized_pnl": round(total_realized_pnl, 2),  # Actual realized P&L from exits
+                "status": status,  # closed if no shares remaining, active otherwise
                 "last_updated": trade.created_at,
                 "entry_ids": [e.id for e in entries],
                 "trade_ids": [trade.id],
                 "manual_entries_count": len(entries)
             }
             
-            final_positions.append(position)
+            # Only add to final positions if the position is still active (has remaining shares)
+            if current_shares > 0:
+                final_positions.append(position)
+            else:
+                # Position is fully closed - mark the underlying Trade as closed
+                trade.status = 'closed'
+                db.commit()
     
     # Sort by last_updated (most recent first)
     final_positions.sort(key=lambda x: x["last_updated"], reverse=True)
@@ -1266,26 +1317,14 @@ def sell_from_position_by_group(db: Session, trade_group_id: str, exit_data: Par
         TradeEntry.shares > 0
     ).order_by(TradeEntry.entry_date).all()
     
-    shares_to_sell = exit_data.shares_sold
-    
-    for entry in active_entries:
-        if shares_to_sell <= 0:
-            break
-            
-        if entry.shares <= shares_to_sell:
-            # This entry is completely sold
-            shares_to_sell -= entry.shares
-            entry.shares = 0
-            entry.is_active = False
-        else:
-            # Partial sale of this entry
-            entry.shares -= shares_to_sell
-            shares_to_sell = 0
+    # Don't modify the original TradeEntry.shares - keep original entry amounts intact
+    # The partial exit is tracked separately in the PartialExit record
+    # Current shares should be calculated dynamically from original entries minus exits
     
     # Check if position is fully closed
     remaining_shares = current_shares - exit_data.shares_sold
     if remaining_shares <= 0:
-        # Mark all trades in the group as closed and all entries as inactive
+        # Mark all trades in the group as closed but keep entry data intact
         for trade in trades_in_group:
             trade.status = 'closed'
             trade.exit_date = exit_data.exit_date
@@ -1513,3 +1552,307 @@ def get_position_size_for_ticker(db: Session, user_id: int, ticker: str, trade_g
         ).first()
         
         return int(trade.position_size) if trade else 0
+
+
+def calculate_original_risk_percentage(db: Session, user_id: int, ticker: str, trade_group_id: str) -> float:
+    """
+    Calculate the total original risk percentage using the EXACT same entries data
+    that appears in the Position Details modal Entries section.
+    """
+    from app.models.import_models import ImportedOrder
+    
+    # Get all trades in this group
+    trades_in_group = db.query(Trade).filter(
+        Trade.user_id == user_id,
+        Trade.ticker == ticker,
+        Trade.trade_group_id == trade_group_id
+    ).all()
+    
+    if not trades_in_group:
+        return 0.0
+    
+    # Get account balance snapshot
+    first_trade = min(trades_in_group, key=lambda t: t.entry_date or t.created_at)
+    account_balance = first_trade.account_balance_snapshot
+    
+    if not account_balance:
+        user = db.query(User).filter(User.id == user_id).first()
+        account_balance = (user.current_account_balance if user and user.current_account_balance 
+                          else user.default_account_size if user and user.default_account_size 
+                          else 10000.0)
+    
+    # Build entries list using EXACT same logic as Position Details API
+    entries = []
+    trade_ids = [trade.id for trade in trades_in_group]
+    all_trade_entries = db.query(TradeEntry).filter(
+        TradeEntry.trade_id.in_(trade_ids)
+    ).order_by(TradeEntry.entry_date).all() if trade_ids else []
+    
+    # 1. Check for imported orders (same logic as Position Details)
+    has_imported_orders = db.query(ImportedOrder).filter(
+        ImportedOrder.user_id == user_id,
+        ImportedOrder.symbol == ticker,
+        ImportedOrder.side == 'Buy',
+        ImportedOrder.status == 'Filled'
+    ).first() is not None
+    
+    if has_imported_orders:
+        # Get all orders to check position continuity (same logic as Position Details)
+        all_orders = db.query(ImportedOrder).filter(
+            ImportedOrder.user_id == user_id,
+            ImportedOrder.symbol == ticker,
+            ImportedOrder.status == 'Filled'
+        ).order_by(ImportedOrder.filled_time).all()
+        
+        # Track position to find when it went to zero
+        running_position = 0
+        last_zero_time = None
+        
+        for order in all_orders:
+            if order.side == 'Buy':
+                running_position += order.filled_qty
+            elif order.side in ['Sell', 'Short']:
+                running_position -= order.filled_qty
+                
+            if running_position == 0:
+                last_zero_time = order.filled_time
+        
+        if last_zero_time:
+            # Position went to zero - show only buy orders after the last zero
+            relevant_buys = db.query(ImportedOrder).filter(
+                ImportedOrder.user_id == user_id,
+                ImportedOrder.symbol == ticker,
+                ImportedOrder.side == 'Buy',
+                ImportedOrder.status == 'Filled',
+                ImportedOrder.filled_time > last_zero_time
+            ).order_by(ImportedOrder.filled_time).all()
+        else:
+            # Continuous position - show recent buy orders for context
+            relevant_buys = db.query(ImportedOrder).filter(
+                ImportedOrder.user_id == user_id,
+                ImportedOrder.symbol == ticker,
+                ImportedOrder.side == 'Buy',
+                ImportedOrder.status == 'Filled'
+            ).order_by(ImportedOrder.filled_time.desc()).limit(4).all()
+            relevant_buys.reverse()  # Chronological order
+        
+        # Add imported buy orders to entries (same logic as Position Details)
+        for buy_order in relevant_buys:
+            # Find associated sell order to get original stop loss
+            associated_sell = db.query(ImportedOrder).filter(
+                ImportedOrder.user_id == user_id,
+                ImportedOrder.symbol == ticker,
+                ImportedOrder.side == 'Sell',
+                ImportedOrder.placed_time >= buy_order.filled_time
+            ).order_by(ImportedOrder.placed_time).first()
+            
+            original_stop_loss = associated_sell.price if associated_sell else None
+            
+            entries.append({
+                "entry_price": buy_order.avg_price or buy_order.price,
+                "shares": buy_order.filled_qty,
+                "original_stop_loss": original_stop_loss,
+                "entry_type": "imported_buy"
+            })
+    
+    # 2. Add manual trade entries (same logic as Position Details)
+    for entry in all_trade_entries:
+        # Skip trade entries that were auto-created from imports
+        if entry.notes and any(phrase in entry.notes.lower() for phrase in ["import", "open position:"]):
+            continue
+        
+        entries.append({
+            "entry_price": entry.entry_price,
+            "shares": entry.shares,  # Use original shares (no longer modified by partial exits)
+            "original_stop_loss": entry.original_stop_loss,
+            "entry_type": "manual"
+        })
+    
+    # 3. Calculate total risk from these entries (same data as shown in modal)
+    total_original_risk = 0.0
+    
+    for entry in entries:
+        if entry["original_stop_loss"] is not None:
+            entry_price = entry["entry_price"]
+            original_stop = entry["original_stop_loss"]
+            shares = entry["shares"]
+            
+            risk_per_share = abs(entry_price - original_stop)
+            entry_risk = risk_per_share * shares
+            total_original_risk += entry_risk
+    
+    # Calculate percentage risk
+    if total_original_risk > 0 and account_balance > 0:
+        return (total_original_risk / account_balance) * 100
+    else:
+        return 0.0
+
+
+def calculate_current_risk_percentage(db: Session, user_id: int, ticker: str, trade_group_id: str, 
+                                     current_shares: int, avg_entry_price: float, current_stop_loss: float) -> float:
+    """
+    Calculate the current risk percentage using EXACT same logic as Position Details "Positions" section.
+    Ignores passed parameters and rebuilds data exactly like Position Details modal.
+    """
+    # 1. Get account balance snapshot from the trade group (for consistency with original risk)
+    trades_in_group = db.query(Trade).filter(
+        Trade.trade_group_id == trade_group_id
+    ).order_by(Trade.entry_date).all()
+    
+    if not trades_in_group:
+        return 0.0
+    
+    account_balance = None
+    if trades_in_group:
+        # Use account balance snapshot from the first trade in the group
+        first_trade = min(trades_in_group, key=lambda t: t.entry_date or t.created_at)
+        account_balance = first_trade.account_balance_snapshot
+    
+    # Fallback to user's current or default balance if no snapshot available
+    if not account_balance:
+        user = db.query(User).filter(User.id == user_id).first()
+        account_balance = (user.current_account_balance if user and user.current_account_balance 
+                          else user.default_account_size if user and user.default_account_size 
+                          else 10000.0)
+    
+    # 2. Build EXACT same "open_orders" data as Position Details modal returns
+    # This is the EXACT same logic from the Position Details API
+    from app.models.import_models import ImportedOrder
+    
+    open_orders_by_stop_loss = {}
+    
+    # Get all trade IDs in the group
+    trade_ids = [trade.id for trade in trades_in_group]
+    
+    # Get active trade entries (remaining positions) - EXACT same query as Position Details
+    active_trade_entries = db.query(TradeEntry).filter(
+        TradeEntry.trade_id.in_(trade_ids),
+        TradeEntry.is_active == True,
+        TradeEntry.shares > 0
+    ).order_by(TradeEntry.entry_date).all()
+    
+    # Get all partial exits for the group - EXACT same query as Position Details
+    partial_exits = db.query(PartialExit).filter(
+        PartialExit.trade_id.in_(trade_ids)
+    ).order_by(PartialExit.exit_date).all()
+    
+    # Check if this ticker has pending sell orders (imported trades)
+    pending_sells = db.query(ImportedOrder).filter(
+        ImportedOrder.user_id == user_id,
+        ImportedOrder.symbol == ticker,
+        ImportedOrder.status.in_(['Pending', 'Open', 'Working']),
+        ImportedOrder.side == 'Sell'
+    ).all()
+    
+    if pending_sells:
+        # Group pending sell orders by stop loss price
+        for sell_order in pending_sells:
+            stop_price = sell_order.price or 0  # Use 0 for market orders
+            
+            if stop_price in open_orders_by_stop_loss:
+                # Combine orders with same stop loss
+                open_orders_by_stop_loss[stop_price]["shares"] += sell_order.total_qty
+                open_orders_by_stop_loss[stop_price]["order_count"] += 1
+            else:
+                # Create new order group for this stop loss
+                open_orders_by_stop_loss[stop_price] = {
+                    "stop_loss": stop_price,
+                    "shares": sell_order.total_qty,
+                    "order_count": 1,
+                    "ticker": ticker
+                }
+    
+    # Always add manual trade entries to positions (even if we have pending sells)
+    for entry in active_trade_entries:
+        # Skip entries that look like they were auto-created from imports
+        if entry.notes and any(phrase in entry.notes.lower() for phrase in ["import", "open position:"]):
+            continue
+            
+        stop_loss = entry.stop_loss or 0  # Use 0 for None stop loss
+        
+        if stop_loss in open_orders_by_stop_loss:
+            # Combine with existing at same stop loss
+            open_orders_by_stop_loss[stop_loss]["shares"] += entry.shares
+            if "entry_ids" not in open_orders_by_stop_loss[stop_loss]:
+                open_orders_by_stop_loss[stop_loss]["entry_ids"] = []
+            open_orders_by_stop_loss[stop_loss]["entry_ids"].append(entry.id)
+            # Calculate weighted average entry price
+            current_shares_count = open_orders_by_stop_loss[stop_loss]["shares"] - entry.shares
+            current_cost = open_orders_by_stop_loss[stop_loss].get("avg_entry_price", 0) * current_shares_count
+            total_cost = current_cost + entry.entry_price * entry.shares
+            open_orders_by_stop_loss[stop_loss]["avg_entry_price"] = total_cost / open_orders_by_stop_loss[stop_loss]["shares"]
+        else:
+            # Create new order group for manual entry
+            open_orders_by_stop_loss[stop_loss] = {
+                "stop_loss": stop_loss,
+                "shares": entry.shares,
+                "avg_entry_price": entry.entry_price,
+                "entry_ids": [entry.id],
+                "ticker": ticker,
+                "order_count": 1
+            }
+    
+    # For imported trades with pending sells, calculate weighted average entry prices
+    if pending_sells:
+        for stop_loss, order_data in open_orders_by_stop_loss.items():
+            # Calculate weighted average entry price for these shares using FIFO from trade entries
+            shares_needed = order_data['shares']
+            allocated_shares = 0
+            total_cost = 0
+            
+            for entry in active_trade_entries:
+                if allocated_shares >= shares_needed:
+                    break
+                    
+                shares_from_this_entry = min(entry.shares, shares_needed - allocated_shares)
+                total_cost += shares_from_this_entry * entry.entry_price
+                allocated_shares += shares_from_this_entry
+            
+            order_data['avg_entry_price'] = total_cost / allocated_shares if allocated_shares > 0 else 0
+    
+    # Apply manual sells to reduce position shares (FIFO by highest stop loss first)  
+    manual_sells = []
+    for exit in partial_exits:
+        # Skip exits that look like they were auto-created from imports
+        if exit.notes and any(phrase in exit.notes.lower() for phrase in ["import", "partial exit from open position"]):
+            continue
+        manual_sells.append(exit)
+    
+    # Apply manual sells
+    for manual_exit in manual_sells:
+        remaining_to_sell = manual_exit.shares_sold
+        # Sort by highest stop loss first (exit order priority)
+        sorted_positions = sorted(open_orders_by_stop_loss.items(), key=lambda x: x[0], reverse=True)
+        
+        for stop_loss, order_data in sorted_positions:
+            if remaining_to_sell <= 0:
+                break
+                
+            shares_to_reduce = min(order_data["shares"], remaining_to_sell)
+            order_data["shares"] -= shares_to_reduce
+            remaining_to_sell -= shares_to_reduce
+            
+            # Remove position if shares go to 0
+            if order_data["shares"] <= 0:
+                del open_orders_by_stop_loss[stop_loss]
+    
+    # 3. Calculate risk using EXACT same open_orders format as Position Details modal shows
+    total_risk = 0.0
+    
+    # Convert to the same open_orders list format as Position Details API returns
+    for stop_loss, order_data in open_orders_by_stop_loss.items():
+        shares = order_data["shares"]
+        entry_price = order_data.get("avg_entry_price", 0)
+        
+        # Only calculate risk if we have a stop loss > 0 and shares > 0
+        # AND the stop loss is BELOW the entry price (if stop >= entry, it's moved into profit = no risk)
+        if shares > 0 and stop_loss > 0 and stop_loss < entry_price:
+            risk_per_share = abs(entry_price - stop_loss)
+            order_risk = risk_per_share * shares
+            total_risk += order_risk
+    
+    # Return risk percentage
+    if account_balance > 0:
+        return (total_risk / account_balance) * 100
+    else:
+        return 0.0

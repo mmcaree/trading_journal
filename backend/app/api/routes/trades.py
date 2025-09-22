@@ -347,12 +347,23 @@ def get_position_details(
         
         # Add imported buy orders to entries
         for buy_order in relevant_buys:
+            # Find associated sell order to get original stop loss
+            associated_sell = db.query(ImportedOrder).filter(
+                ImportedOrder.user_id == current_user.id,
+                ImportedOrder.symbol == ticker,
+                ImportedOrder.side == 'Sell',
+                ImportedOrder.placed_time >= buy_order.filled_time
+            ).order_by(ImportedOrder.placed_time).first()
+            
+            original_stop_loss = associated_sell.price if associated_sell else None
+            
             entries.append({
                 "id": f"import_{buy_order.id}",
                 "trade_id": None,  # This is from import, not a specific trade
                 "entry_date": buy_order.filled_time or buy_order.placed_time,
                 "entry_price": buy_order.avg_price or buy_order.price,
                 "shares": buy_order.filled_qty,  # Original purchase amount
+                "original_stop_loss": original_stop_loss,  # From associated sell order
                 "notes": f"Imported buy @ ${buy_order.avg_price or buy_order.price:.2f}",
                 "ticker": buy_order.symbol,
                 "entry_type": "imported_buy"
@@ -378,6 +389,7 @@ def get_position_details(
             "entry_date": entry.entry_date,
             "entry_price": entry.entry_price,
             "shares": entry.shares,  # Actual shares added, not calculated "original"
+            "original_stop_loss": entry.original_stop_loss,  # Include original stop loss
             "notes": entry.notes or f"Manual purchase @ ${entry.entry_price:.2f}",
             "ticker": trade.ticker,
             "entry_type": "manual"
@@ -484,6 +496,12 @@ def get_position_details(
                         "notes": f"Imported sell order @ ${sell.price}"
                     })
 
+    # Calculate overall original risk percentage for this position
+    from app.services.trade_service import calculate_original_risk_percentage
+    overall_original_risk_percent = calculate_original_risk_percentage(
+        db, current_user.id, trades_in_group[0].ticker if trades_in_group else "", trade_group_id
+    )
+
     return {
         "trade_group_id": trade_group_id,
         "ticker": trades_in_group[0].ticker if trades_in_group else "",
@@ -497,6 +515,7 @@ def get_position_details(
             "avg_entry_price": round(avg_entry_price, 2),
             "total_cost": round(total_cost, 2),
             "total_realized_pnl": round(total_realized_pnl, 2),
+            "original_risk_percent": round(overall_original_risk_percent, 2),  # New field
             "open_orders_count": len(open_orders),  # Count of open order groups (by stop loss)
             "entries_count": len(entries),      # Count of original purchases
             "exits_count": len(partial_exits)

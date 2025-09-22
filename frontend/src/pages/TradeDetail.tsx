@@ -505,10 +505,10 @@ const TradeDetail: React.FC = () => {
 
               {/* Current Positions */}
               <Typography variant="subtitle1" gutterBottom>
-                Positions
+                Entries
               </Typography>
               <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
-                Current remaining lots with stop losses
+                Historical entries to build current positions
               </Typography>
               {tradeEntries && tradeEntries.length > 0 ? (
                 <TableContainer>
@@ -539,26 +539,6 @@ const TradeDetail: React.FC = () => {
                 <Typography variant="body2" color="text.secondary">
                   No position adds recorded
                 </Typography>
-              )}
-
-              {/* Current Position Summary */}
-              {trade.status === 'Open' && (
-                <>
-                  <Divider sx={{ my: 2 }} />
-                  <Typography variant="subtitle1" gutterBottom>
-                    Current Position
-                  </Typography>
-                  <Typography variant="body2" color="text.secondary">
-                    Remaining {getPositionLabel(trade.instrumentType)}: {trade.remainingShares || 0}
-                  </Typography>
-                  {trade.partialExits && trade.partialExits.length > 0 && (
-                    <Typography variant="body2" color="text.secondary">
-                      Average Exit Price: $
-                      {(trade.partialExits.reduce((sum, exit) => sum + (exit.exitPrice * exit.sharesSold), 0) / 
-                        trade.partialExits.reduce((sum, exit) => sum + exit.sharesSold, 0)).toFixed(2)}
-                    </Typography>
-                  )}
-                </>
               )}
             </CardContent>
           </Card>
