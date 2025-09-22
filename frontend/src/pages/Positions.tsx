@@ -100,6 +100,50 @@ const Positions: React.FC = () => {
   const [positionDetails, setPositionDetails] = useState<any>(null);
   const [loadingDetails, setLoadingDetails] = useState(false);
 
+  // Helper function to get position unit label (shares vs contracts)
+  const getPositionUnitLabel = (position: Trade | null, plural: boolean = true): string => {
+    if (!position) return plural ? 'shares' : 'share';
+    const isOptions = (position as any).instrument_type?.toLowerCase() === 'options';
+    if (isOptions) {
+      return plural ? 'Contracts' : 'Contract';
+    }
+    return plural ? 'Shares' : 'Share';
+  };
+
+  // Helper function to calculate options-aware original risk percentage
+  const calculateOriginalRiskPercent = (position: Trade): string => {
+    const isOptions = (position as any).instrument_type?.toLowerCase() === 'options';
+    const totalShares = (position as any).total_shares_bought || position.position_size || 0;
+    const entryPrice = ((position as any).entryPrice || position.entry_price) || 0;
+    const stopLoss = position.stop_loss || 0;
+    
+    if (entryPrice <= 0 || stopLoss <= 0) return '0.00';
+    
+    // For options: multiply by 100 to account for contract multiplier
+    const multiplier = isOptions ? 100 : 1;
+    const totalInvestment = totalShares * entryPrice * multiplier;
+    const totalRisk = totalShares * Math.abs(entryPrice - stopLoss) * multiplier;
+    
+    return ((totalRisk / totalInvestment) * 100).toFixed(2);
+  };
+
+  // Helper function to calculate options-aware current risk percentage
+  const calculateCurrentRiskPercent = (position: Trade): string => {
+    const isOptions = (position as any).instrument_type?.toLowerCase() === 'options';
+    const currentShares = (position as any).current_shares || position.position_size || 0;
+    const entryPrice = ((position as any).entryPrice || position.entry_price) || 0;
+    const stopLoss = position.stop_loss || 0;
+    
+    if (entryPrice <= 0 || stopLoss <= 0 || currentShares <= 0) return '0.00';
+    
+    // For options: multiply by 100 to account for contract multiplier
+    const multiplier = isOptions ? 100 : 1;
+    const currentInvestment = currentShares * entryPrice * multiplier;
+    const currentRisk = currentShares * Math.abs(entryPrice - stopLoss) * multiplier;
+    
+    return ((currentRisk / currentInvestment) * 100).toFixed(2);
+  };
+
   useEffect(() => {
     loadPositions();
   }, []);
@@ -276,11 +320,18 @@ const Positions: React.FC = () => {
         
       } else if (tabValue === 2) {
         // Sell Position
+        const basePrice = ((selectedPosition as any).entryPrice || selectedPosition.entry_price) || 0;
+        const rawPnL = sellPositionData.shares * (sellPositionData.exitPrice - basePrice);
+        
+        // Check if this is an options position - multiply P&L by 100 for options
+        const isOptions = (selectedPosition as any).instrument_type?.toLowerCase() === 'options';
+        const finalPnL = isOptions ? rawPnL * 100 : rawPnL;
+        
         const exitData: PartialExitData = {
           exit_price: sellPositionData.exitPrice,
           exit_date: new Date().toISOString(),
           shares_sold: sellPositionData.shares,
-          profit_loss: sellPositionData.shares * (sellPositionData.exitPrice - (((selectedPosition as any).entryPrice || selectedPosition.entry_price) || 0)),
+          profit_loss: finalPnL,
           notes: sellPositionData.notes
         };
 
@@ -396,7 +447,7 @@ const Positions: React.FC = () => {
               <TableRow>
                 <TableCell>Ticker</TableCell>
                 <TableCell>Entry Price</TableCell>
-                <TableCell>Shares</TableCell>
+                <TableCell>Position</TableCell>
                 <TableCell>Stop Loss (Average)</TableCell>
                 <TableCell>Open Risk %</TableCell>
                 <TableCell>Original Risk %</TableCell>
@@ -417,7 +468,9 @@ const Positions: React.FC = () => {
                     </Typography>
                   </TableCell>
                   <TableCell>{formatCurrency((position as any).entryPrice || position.entry_price)}</TableCell>
-                  <TableCell>{(position as any).current_shares || position.position_size}</TableCell>
+                  <TableCell>
+                    {(position as any).current_shares || position.position_size} {getPositionUnitLabel(position, true)}
+                  </TableCell>
                   <TableCell>
                     {position.stop_loss ? (
                       <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
@@ -441,17 +494,13 @@ const Positions: React.FC = () => {
                   <TableCell>
                     {(position as any).current_risk_percent !== undefined 
                       ? `${(position as any).current_risk_percent.toFixed(2)}%`
-                      : '-'
+                      : `${calculateCurrentRiskPercent(position)}%`
                     }
                   </TableCell>
                   <TableCell>
                     {(position as any).original_risk_percent !== undefined 
                       ? `${(position as any).original_risk_percent.toFixed(2)}%`
-                      : `${accountService.calculateOriginalRiskPercent(
-                          (position as any).total_shares_bought || position.position_size || 0,
-                          ((position as any).entryPrice || position.entry_price) || 0,
-                          position.stop_loss || 0
-                        ).toFixed(2)}%`
+                      : `${calculateOriginalRiskPercent(position)}%`
                     }
                   </TableCell>
                   <TableCell>
@@ -530,7 +579,7 @@ const Positions: React.FC = () => {
                         <strong>Entry Price:</strong> {formatCurrency((selectedPosition as any).entryPrice || selectedPosition.entry_price)}
                       </Typography>
                       <Typography variant="body2">
-                        <strong>Current Shares:</strong> {selectedPosition.position_size}
+                        <strong>Current {getPositionUnitLabel(selectedPosition, true)}:</strong> {selectedPosition.position_size}
                       </Typography>
                       <Typography variant="body2">
                         <strong>Strategy:</strong> {selectedPosition.strategy}
@@ -552,7 +601,7 @@ const Positions: React.FC = () => {
                       <Typography variant="subtitle1" gutterBottom>Edit Position</Typography>
                       <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
                         <TextField
-                          label="Shares"
+                          label={getPositionUnitLabel(selectedPosition, true)}
                           type="number"
                           value={editingPosition.shares}
                           onChange={(e) => setEditingPosition({
@@ -582,7 +631,7 @@ const Positions: React.FC = () => {
                       <Typography variant="subtitle1" gutterBottom>Add to Position</Typography>
                       <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
                         <TextField
-                          label="Additional Shares"
+                          label={`Additional ${getPositionUnitLabel(selectedPosition, true)}`}
                           type="number"
                           value={addPositionData.sharesInput}
                           onChange={(e) => {
@@ -665,7 +714,7 @@ const Positions: React.FC = () => {
                       <Typography variant="subtitle1" gutterBottom>Sell Position</Typography>
                       <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
                         <TextField
-                          label="Shares to Sell"
+                          label={`${getPositionUnitLabel(selectedPosition, true)} to Sell`}
                           type="number"
                           value={sellPositionData.sharesInput}
                           onChange={(e) => setSellPositionData({
@@ -674,7 +723,7 @@ const Positions: React.FC = () => {
                             shares: parseFloat(e.target.value) || 0
                           })}
                           fullWidth
-                          helperText={`Max: ${(selectedPosition as any).current_shares} shares`}
+                          helperText={`Max: ${(selectedPosition as any).current_shares} ${getPositionUnitLabel(selectedPosition, true)}`}
                         />
                         <TextField
                           label="Exit Price"
@@ -733,6 +782,7 @@ const Positions: React.FC = () => {
         }}
         tradeGroupId={(selectedPosition as any)?.trade_group_id || ''}
         ticker={selectedPosition?.ticker || ''}
+        position={selectedPosition} // Pass the position data for instrument_type access
         onAddToPosition={handleOpenAddPosition}
         onSellPosition={handleOpenSellPosition}
         onPositionUpdated={loadPositions} // Add refresh callback

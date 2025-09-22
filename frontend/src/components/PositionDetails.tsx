@@ -41,6 +41,7 @@ interface PositionDetailsModalProps {
   onClose: () => void;
   tradeGroupId: string;
   ticker: string;
+  position?: any; // Add position data to access instrument_type
   onAddToPosition?: () => void;
   onSellPosition?: () => void;
   onPositionUpdated?: () => void; // Add callback for when position is updated
@@ -52,6 +53,7 @@ const PositionDetailsModal: React.FC<PositionDetailsModalProps> = ({
   onClose,
   tradeGroupId,
   ticker,
+  position,
   onAddToPosition,
   onSellPosition,
   onPositionUpdated,
@@ -66,6 +68,16 @@ const PositionDetailsModal: React.FC<PositionDetailsModalProps> = ({
   const [editingNotes, setEditingNotes] = useState<number | null>(null);
   const [tempStopLoss, setTempStopLoss] = useState<string>('');
   const [tempNotes, setTempNotes] = useState<string>('');
+
+  // Helper function to get position unit label (shares vs contracts)
+  const getPositionUnitLabel = (plural: boolean = true): string => {
+    if (!position) return plural ? 'shares' : 'share';
+    const isOptions = position.instrument_type?.toLowerCase() === 'options';
+    if (isOptions) {
+      return plural ? 'contracts' : 'contract';
+    }
+    return plural ? 'shares' : 'share';
+  };
 
   const loadPositionDetails = useCallback(async () => {
     setLoading(true);
@@ -99,6 +111,15 @@ const PositionDetailsModal: React.FC<PositionDetailsModalProps> = ({
       style: 'currency',
       currency: 'USD'
     }).format(value);
+  };
+
+  // Helper function to format currency with options contract multiplier
+  const formatInvestmentCurrency = (value: number): string => {
+    if (!position) return formatCurrency(value);
+    const isOptions = position.instrument_type?.toLowerCase() === 'options';
+    // For options, multiply by 100 to account for contract price
+    const adjustedValue = isOptions ? value * 100 : value;
+    return formatCurrency(adjustedValue);
   };
 
   const formatDate = (dateString: string) => {
@@ -228,7 +249,7 @@ const PositionDetailsModal: React.FC<PositionDetailsModalProps> = ({
                       Current Position
                     </Typography>
                     <Typography variant="h6">
-                      {details.summary.current_shares} shares
+                      {details.summary.current_shares} {getPositionUnitLabel(true)}
                     </Typography>
                     <Typography variant="body2" color="textSecondary">
                       Avg. Entry: {formatCurrency(details.summary.avg_entry_price)}
@@ -244,7 +265,7 @@ const PositionDetailsModal: React.FC<PositionDetailsModalProps> = ({
                       Total Investment
                     </Typography>
                     <Typography variant="h6">
-                      {formatCurrency(details.summary.total_cost)}
+                      {formatInvestmentCurrency(details.summary.total_cost)}
                     </Typography>
                     <Typography variant="body2" color="textSecondary">
                       {details.summary.entries_count} entries
@@ -282,7 +303,7 @@ const PositionDetailsModal: React.FC<PositionDetailsModalProps> = ({
                 <Card>
                   <CardContent>
                     <Typography color="textSecondary" gutterBottom>
-                      Shares Traded
+                      {getPositionUnitLabel(true)} Traded
                     </Typography>
                     <Typography variant="h6">
                       {details.summary.total_shares_sold} sold
@@ -308,7 +329,7 @@ const PositionDetailsModal: React.FC<PositionDetailsModalProps> = ({
                   <TableHead>
                     <TableRow>
                       <TableCell>Price</TableCell>
-                      <TableCell>Shares</TableCell>
+                      <TableCell>{getPositionUnitLabel(true)}</TableCell>
                       <TableCell>Stop Loss</TableCell>
                       <TableCell>Notes</TableCell>
                     </TableRow>
@@ -382,7 +403,7 @@ const PositionDetailsModal: React.FC<PositionDetailsModalProps> = ({
                       <TableRow>
                         <TableCell>Date</TableCell>
                         <TableCell align="right">Price</TableCell>
-                        <TableCell align="right">Shares</TableCell>
+                        <TableCell align="right">{getPositionUnitLabel(true)}</TableCell>
                         <TableCell align="center">Original Stop</TableCell>
                         <TableCell>Notes</TableCell>
                       </TableRow>
@@ -429,7 +450,7 @@ const PositionDetailsModal: React.FC<PositionDetailsModalProps> = ({
                       <TableRow>
                         <TableCell>Date</TableCell>
                         <TableCell align="right">Price</TableCell>
-                        <TableCell align="right">Shares</TableCell>
+                        <TableCell align="right">{getPositionUnitLabel(true)}</TableCell>
                         <TableCell align="right">P&L</TableCell>
                         <TableCell>Notes</TableCell>
                       </TableRow>

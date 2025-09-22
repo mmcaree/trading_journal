@@ -80,6 +80,10 @@ def create_trade(db: Session, trade: TradeCreate, user_id: int) -> Trade:
             ticker=trade.ticker,
             trade_type=trade.trade_type,
             status=trade.status,
+            instrument_type=trade.instrument_type,  # Add the missing instrument_type field
+            strike_price=trade.strike_price,  # Add options-related fields
+            expiration_date=trade.expiration_date,
+            option_type=trade.option_type,
             entry_price=trade.entry_price,
             entry_date=trade.entry_date or datetime.utcnow(),
             entry_notes=trade.entry_notes,
@@ -1145,6 +1149,7 @@ def get_positions(db: Session, user_id: int, skip: int = 0, limit: int = 100) ->
                 "strategy": trade.strategy,
                 "setup_type": trade.setup_type,
                 "timeframe": trade.timeframe,
+                "instrument_type": trade.instrument_type,  # Add instrument_type for options detection
                 "entry_date": min(e.entry_date for e in entries),
                 "entry_price": round(avg_entry_price, 2),
                 "avg_entry_price": round(avg_entry_price, 2),
@@ -1213,6 +1218,7 @@ def get_positions(db: Session, user_id: int, skip: int = 0, limit: int = 100) ->
                 "strategy": trade.strategy,
                 "setup_type": trade.setup_type,
                 "timeframe": trade.timeframe,
+                "instrument_type": trade.instrument_type,  # Add instrument_type for options detection
                 "entry_date": min(e.entry_date for e in entries),
                 "entry_price": round(avg_entry_price, 2),
                 "avg_entry_price": round(avg_entry_price, 2),

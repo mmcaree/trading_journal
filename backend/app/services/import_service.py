@@ -29,16 +29,23 @@ def get_safe_option_type(options_info: Dict[str, Any]) -> Optional[OptionType]:
     else:
         return None
 
+def safe_get_options_value(options_info: Dict[str, Any], key: str, default: Any = None) -> Any:
+    """Safely get a value from options_info dict with fallback"""
+    if not options_info or not isinstance(options_info, dict):
+        return default
+    return options_info.get(key, default)
+
 # Inline options parsing functions (moved from deleted utils module)
 def parse_options_symbol(symbol: str) -> Dict[str, Any]:
     """Parse options symbol to extract underlying, expiration, strike, and type"""
     if not symbol or len(symbol) < 6:
-        return {'is_options': False}
+        return {'is_options': False, 'underlying': symbol}
     
     # Check for options patterns like AAPL250117C00150000
     try:
         # Basic options pattern: UNDERLYING + DATE + C/P + STRIKE
         import re
+        from datetime import datetime
         pattern = r'^([A-Z]+)(\d{6})([CP])(\d{8})$'
         match = re.match(pattern, symbol)
         
@@ -53,17 +60,20 @@ def parse_options_symbol(symbol: str) -> Dict[str, Any]:
             # Parse strike price (8 digits with 3 decimal places)
             strike = float(strike_str) / 1000
             
+            # Create datetime object for expiration_date
+            expiration_datetime = datetime(year, month, day)
+            
             return {
                 'is_options': True,
                 'underlying': underlying,
-                'expiration_date': f"{year}-{month:02d}-{day:02d}",
+                'expiration_date': expiration_datetime,  # Now a datetime object
                 'option_type': 'call' if option_type == 'C' else 'put',
                 'strike_price': strike
             }
-    except:
-        pass
+    except Exception as e:
+        print(f"Warning: Failed to parse options symbol {symbol}: {e}")
     
-    return {'is_options': False}
+    return {'is_options': False, 'underlying': symbol}
 
 def convert_options_price(price: float, contract_multiplier: int = 100) -> float:
     """Convert options price to total value"""
@@ -580,10 +590,10 @@ class TradeImportService:
                 
                 # For options, P&L needs to be multiplied by 100 since prices are per contract
                 # but represent 100 shares worth of value
-                actual_pnl = raw_pnl * 100 if options_info['is_options'] else raw_pnl
+                actual_pnl = raw_pnl * 100 if safe_get_options_value(options_info, 'is_options', False) else raw_pnl
                 
                 print(f"Creating trade: {sell_qty} {position.symbol} @ Buy ${buy_price:.2f} -> Sell ${sell_price:.2f}")
-                if options_info['is_options']:
+                if safe_get_options_value(options_info, 'is_options', False):
                     print(f"  Options P&L: Raw ${raw_pnl:.2f} -> Actual ${actual_pnl:.2f} (×100)")
                 else:
                     print(f"  Stock P&L: ${actual_pnl:.2f}")
@@ -611,15 +621,15 @@ class TradeImportService:
                 # Create trade record
                 trade = Trade(
                     user_id=position.user_id,
-                    ticker=options_info['ticker'] if options_info['is_options'] else position.symbol,
+                    ticker=safe_get_options_value(options_info, 'underlying', position.symbol) if safe_get_options_value(options_info, 'is_options', False) else position.symbol,
                     trade_type="LONG",  # This represents the original position direction
                     status="CLOSED",
                     trade_group_id=str(uuid.uuid4()),  # Generate unique trade group ID
                     
                     # Options fields
-                    instrument_type=InstrumentType.OPTIONS if options_info['is_options'] else InstrumentType.STOCK,
-                    strike_price=options_info['strike_price'] if options_info['is_options'] else None,
-                    expiration_date=options_info['expiration_date'] if options_info['is_options'] else None,
+                    instrument_type=InstrumentType.OPTIONS if safe_get_options_value(options_info, 'is_options', False) else InstrumentType.STOCK,
+                    strike_price=safe_get_options_value(options_info, 'strike_price') if safe_get_options_value(options_info, 'is_options', False) else None,
+                    expiration_date=safe_get_options_value(options_info, 'expiration_date') if safe_get_options_value(options_info, 'is_options', False) else None,
                     option_type=get_safe_option_type(options_info),
                     
                     position_size=sell_qty,
@@ -629,7 +639,7 @@ class TradeImportService:
                     exit_date=order.filled_time or order.placed_time,
                     profit_loss=actual_pnl,
                     position_value=actual_position_value,
-                    entry_notes=f"Auto-generated from import batch{' (Options)' if options_info['is_options'] else ''}",
+                    entry_notes=f"Auto-generated from import batch{' (Options)' if safe_get_options_value(options_info, 'is_options', False) else ''}",
                     setup_type="Flag",
                     strategy="Breakout",  # Updated strategy for imported trades
                     timeframe=None,  # Not available from imported data
@@ -718,15 +728,15 @@ class TradeImportService:
                     
                     trade = Trade(
                         user_id=position.user_id,
-                        ticker=options_info['ticker'] if options_info['is_options'] else position.symbol,
+                        ticker=safe_get_options_value(options_info, 'underlying', position.symbol) if safe_get_options_value(options_info, 'is_options', False) else position.symbol,
                         trade_type="LONG",
                         status="ACTIVE",  # This is an open position
                         trade_group_id=str(uuid.uuid4()),  # Generate unique trade group ID
                         
                         # Options fields
-                        instrument_type=InstrumentType.OPTIONS if options_info['is_options'] else InstrumentType.STOCK,
-                        strike_price=options_info['strike_price'] if options_info['is_options'] else None,
-                        expiration_date=options_info['expiration_date'] if options_info['is_options'] else None,
+                        instrument_type=InstrumentType.OPTIONS if safe_get_options_value(options_info, 'is_options', False) else InstrumentType.STOCK,
+                        strike_price=safe_get_options_value(options_info, 'strike_price') if safe_get_options_value(options_info, 'is_options', False) else None,
+                        expiration_date=safe_get_options_value(options_info, 'expiration_date') if safe_get_options_value(options_info, 'is_options', False) else None,
                         option_type=get_safe_option_type(options_info),
                         
                         position_size=entry["quantity"],
@@ -736,7 +746,7 @@ class TradeImportService:
                         exit_date=None,
                         profit_loss=None,
                         position_value=actual_position_value,
-                        entry_notes=f"Auto-generated open position from import batch (pending sell @ ${order.price or 'market'}){' (Options)' if options_info['is_options'] else ''}",
+                        entry_notes=f"Auto-generated open position from import batch (pending sell @ ${order.price or 'market'}){' (Options)' if safe_get_options_value(options_info, 'is_options', False) else ''}",
                         setup_type="Flag", 
                         strategy="Breakout",  # Updated strategy for imported trades
                         timeframe=None,
@@ -1097,15 +1107,15 @@ class TradeImportService:
         # Create main trade record
         trade = Trade(
             user_id=position.user_id,
-            ticker=options_info['ticker'] if options_info and options_info['is_options'] else position.symbol,
+            ticker=options_info.get('underlying', position.symbol) if options_info and options_info['is_options'] else position.symbol,
             trade_type=direction,
             status="ACTIVE",
             trade_group_id=trade_group_id,
             
             # Options fields
-            instrument_type=InstrumentType.OPTIONS if options_info and options_info['is_options'] else InstrumentType.STOCK,
-            strike_price=options_info['strike_price'] if options_info and options_info['is_options'] else None,
-            expiration_date=options_info['expiration_date'] if options_info and options_info['is_options'] else None,
+            instrument_type=InstrumentType.OPTIONS if safe_get_options_value(options_info, 'is_options', False) else InstrumentType.STOCK,
+            strike_price=safe_get_options_value(options_info, 'strike_price') if safe_get_options_value(options_info, 'is_options', False) else None,
+            expiration_date=safe_get_options_value(options_info, 'expiration_date') if safe_get_options_value(options_info, 'is_options', False) else None,
             option_type=get_safe_option_type(options_info),
             
             position_size=qty,
@@ -1471,7 +1481,7 @@ class TradeImportService:
             
             # Calculate comprehensive P&L
             raw_pnl = (avg_exit_price - entry_price) * total_sold_qty
-            actual_pnl = raw_pnl * 100 if options_info['is_options'] else raw_pnl
+            actual_pnl = raw_pnl * 100 if safe_get_options_value(options_info, 'is_options', False) else raw_pnl
             
             # Detect stop loss from cancelled orders placed after this buy order
             stop_loss_price = self._detect_stop_loss_from_cancelled_orders(position, pos['order'], orders)
@@ -1492,15 +1502,15 @@ class TradeImportService:
             # Create comprehensive closed trade
             trade = Trade(
                 user_id=position.user_id,
-                ticker=options_info['ticker'] if options_info['is_options'] else position.symbol,
+                ticker=options_info.get('underlying', position.symbol) if options_info['is_options'] else position.symbol,
                 trade_type="LONG",
                 status="CLOSED",
                 trade_group_id=str(uuid.uuid4()),
                 
                 # Options fields
-                instrument_type=InstrumentType.OPTIONS if options_info and options_info['is_options'] else InstrumentType.STOCK,
-                strike_price=options_info['strike_price'] if options_info and options_info['is_options'] else None,
-                expiration_date=options_info['expiration_date'] if options_info and options_info['is_options'] else None,
+                instrument_type=InstrumentType.OPTIONS if safe_get_options_value(options_info, 'is_options', False) else InstrumentType.STOCK,
+                strike_price=safe_get_options_value(options_info, 'strike_price') if safe_get_options_value(options_info, 'is_options', False) else None,
+                expiration_date=safe_get_options_value(options_info, 'expiration_date') if safe_get_options_value(options_info, 'is_options', False) else None,
                 option_type=get_safe_option_type(options_info),
                 
                 position_size=total_sold_qty,
@@ -1656,7 +1666,7 @@ class TradeImportService:
         
         trade = Trade(
             user_id=position.user_id,
-            ticker=options_info['ticker'] if options_info and options_info['is_options'] else position.symbol,
+            ticker=options_info.get('underlying', position.symbol) if options_info and options_info['is_options'] else position.symbol,
             trade_type="LONG",
             status="CLOSED",
             trade_group_id=str(uuid.uuid4()),
@@ -1705,7 +1715,7 @@ class TradeImportService:
         
         trade = Trade(
             user_id=position.user_id,
-            ticker=options_info['ticker'] if options_info and options_info['is_options'] else position.symbol,
+            ticker=options_info.get('underlying', position.symbol) if options_info and options_info['is_options'] else position.symbol,
             trade_type="SHORT",
             status="CLOSED",
             trade_group_id=str(uuid.uuid4()),
@@ -1771,7 +1781,7 @@ class TradeImportService:
         # Create main trade record
         trade = Trade(
             user_id=position.user_id,
-            ticker=options_info['ticker'] if options_info and options_info['is_options'] else position.symbol,
+            ticker=options_info.get('underlying', position.symbol) if options_info and options_info['is_options'] else position.symbol,
             trade_type=trade_type,
             status="ACTIVE",
             trade_group_id=str(uuid.uuid4()),
@@ -1825,7 +1835,7 @@ class TradeImportService:
                             raw_pnl = (entry_price - exit_price) * exit_qty
                         
                         # Handle options multiplier
-                        actual_pnl = raw_pnl * 100 if options_info['is_options'] else raw_pnl
+                        actual_pnl = raw_pnl * 100 if safe_get_options_value(options_info, 'is_options', False) else raw_pnl
                         
                         partial_exit_record = PartialExit(
                             trade_id=trade.id,

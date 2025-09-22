@@ -11,13 +11,14 @@ Trade journal app for tracking swing trades. Built with React/FastAPI.
 
 ## To Do
 
-~~- Add options support~~
+- ~~- Add options support~~
 - Fix chart formatting issues  
 - Better historical data (yfinance sucks)
 - Performance optimization
 - Mobile responsive design
-~~- Actually implement email summaries, too lazy right now lmao~~
-~~- Discord alert copy-paste functionality~~
+- ~~- Actually implement email summaries, too lazy right now lmao~~
+- ~~- Discord alert copy-paste functionality~~
+- Correct Trade Results logic for options trades
 
 ## Setup
 
