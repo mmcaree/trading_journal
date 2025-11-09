@@ -105,7 +105,6 @@ add_password_reset_migration.py
 /example_import_records/
 /sample_data/
 *.csv
-Webull_Orders_Records.csv
 
 # Windows batch files
 *.bat
@@ -144,3 +143,7 @@ backend\migrations\add_options_support.py
 backend\migrations\add_timezone_column.py
 backend\migrations\add_trade_entries.py
 backend\migrations\add_trade_groups.py
+backend/make_instructor.py
+backend/assign_instructor_role.py
+INSTRUCTOR_SETUP.md
+backend/app/api/routes/admin.py

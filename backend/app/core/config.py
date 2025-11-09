@@ -7,7 +7,7 @@ load_dotenv()
 class Settings(BaseSettings):
     # API settings
     API_V1_STR: str = "/api/v1"
-    PROJECT_NAME: str = "TradeJournal"
+    PROJECT_NAME: str = "SAR Trading Journal"
     
     # Security
     SECRET_KEY: str = os.getenv("SECRET_KEY", "development_secret_key")
@@ -30,7 +30,7 @@ class Settings(BaseSettings):
     SMTP_USERNAME: str = os.getenv("SMTP_USERNAME", "")
     SMTP_PASSWORD: str = os.getenv("SMTP_PASSWORD", "")
     FROM_EMAIL: str = os.getenv("FROM_EMAIL", "noreply@tradejournal.trade")
-    FROM_NAME: str = os.getenv("FROM_NAME", "TradeJournal")
+    FROM_NAME: str = os.getenv("FROM_NAME", "SAR Trading Journal")
     
     # Transactional email service API keys
     SENDGRID_API_KEY: str = os.getenv("SENDGRID_API_KEY", "")
@@ -39,7 +39,7 @@ class Settings(BaseSettings):
     MAILGUN_DOMAIN: str = os.getenv("MAILGUN_DOMAIN", "")
     
     # App settings
-    APP_NAME: str = "TradeJournal"
+    APP_NAME: str = "SAR Trading Journal"
     FRONTEND_URL: str = os.getenv("FRONTEND_URL", "https://tradejournal.trade")
     
     # CORS - Read from environment variable for production

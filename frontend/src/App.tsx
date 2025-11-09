@@ -12,16 +12,19 @@ import DashboardLayout from './layouts/DashboardLayout';
 import Dashboard from './pages/Dashboard';
 import TradesList from './pages/TradesList';
 import Positions from './pages/Positions';
-import TradeDetail from './pages/TradeDetail';
-import TradeForm from './pages/TradeForm';
-import TradeImport from './pages/TradeImport';
+import PositionsServiceTest from './pages/PositionsServiceTest';
 import Analytics from './pages/Analytics';
 import Settings from './pages/Settings';
+import ImportData from './pages/ImportData';
 import Login from './pages/Login';
 import Register from './pages/Register';
 import ForgotPassword from './pages/ForgotPassword';
 import ResetPassword from './pages/ResetPassword';
 import NotFound from './pages/NotFound';
+
+// Admin Pages
+import AdminDashboard from './pages/AdminDashboard';
+import StudentDetailPage from './pages/StudentDetailPage';
 
 // Components
 import ApiDebugger from './components/ApiDebugger';
@@ -40,10 +43,13 @@ const theme = createTheme({
   palette: {
     mode: 'dark',
     primary: {
-      main: '#4caf50', // Green for profit
+      main: '#1da0f0', // Blue accent color
     },
     secondary: {
       main: '#f44336', // Red for loss
+    },
+    success: {
+      main: '#4caf50', // Green for profit
     },
     background: {
       default: '#121212',
@@ -102,14 +108,19 @@ function App() {
                 <Route path="/debug-console" element={<DebugConsole />} />
                 
                 <Route path="/" element={<ProtectedRoute><DashboardLayout /></ProtectedRoute>}>
-                  <Route index element={<Dashboard />} />                <Route path="trades" element={<TradesList />} />
+                  <Route index element={<Dashboard />} />
                   <Route path="positions" element={<Positions />} />
-                  <Route path="trades/new" element={<TradeForm />} />
-                  <Route path="trades/edit/:id" element={<TradeForm />} />
-                  <Route path="trades/:id" element={<TradeDetail />} />
-                  <Route path="import" element={<TradeImport />} />
+                  <Route path="trades" element={<TradesList />} />
+                  <Route path="positions-test" element={<PositionsServiceTest />} />
+                  {/* Position details, creation, and editing routes removed */}
+                  {/* These functionalities are now handled through modals in the Positions and Trades pages */}
                   <Route path="analytics" element={<Analytics />} />
+                  <Route path="import" element={<ImportData />} />
                   <Route path="settings" element={<Settings />} />
+                  
+                  {/* Admin Routes - Only accessible to instructors */}
+                  <Route path="admin" element={<AdminDashboard />} />
+                  <Route path="admin/student/:studentId" element={<StudentDetailPage />} />
                 </Route>
                 
                 <Route path="*" element={<NotFound />} />

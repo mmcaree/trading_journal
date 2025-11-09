@@ -117,6 +117,9 @@ class UserResponse(UserBase):
     # Trading settings
     default_account_size: Optional[float] = None
     
+    # Admin system
+    role: Optional[str] = None  # 'STUDENT' or 'INSTRUCTOR'
+    
     class Config:
         from_attributes = True
 

@@ -11,7 +11,7 @@ from sqlalchemy import func, and_, or_
 import pytz
 from statistics import mean, median
 
-from app.models.models import Trade, User, TradeStatus
+from app.models import Trade, User, TradeStatus
 from app.db.session import get_db
 
 

@@ -3,10 +3,9 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse
 from app.api.routes import router as api_router
-from app.api.imports import router as import_router
 from app.core.config import settings
-from app.models.models import Base
-from app.models import import_models  # Import to register the models
+from app.models.position_models import Base
+from app.models import models  # Import models to register deprecated ones if needed
 from app.db.session import engine
 import datetime
 import os
@@ -50,7 +49,15 @@ async def debug_endpoint():
 
 # Include API routers FIRST (before static files)
 app.include_router(api_router, prefix="/api")
-app.include_router(import_router)
+
+# Include new v2 position routes
+from app.api.routes.positions_v2 import router as positions_v2_router, journal_router
+app.include_router(positions_v2_router, prefix="/api/v2")
+app.include_router(journal_router, prefix="/api/v2")
+
+# Include admin routes
+from app.api.routes.admin import router as admin_router
+app.include_router(admin_router, prefix="/api/admin")
 
 # Serve static files (React build) in production
 static_path = os.path.join(os.path.dirname(__file__), "..", "static")

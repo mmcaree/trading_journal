@@ -6,7 +6,7 @@ from app.models.schemas import PerformanceMetrics, SetupPerformance
 from app.services.analytics_service import get_performance_metrics, get_setup_performance
 from app.services.weekly_analytics_service import get_weekly_analytics_service
 from app.services.email_service import email_service
-from app.models.models import User, PartialExit, Trade
+from app.models import User, PartialExit, Trade
 
 router = APIRouter()
 

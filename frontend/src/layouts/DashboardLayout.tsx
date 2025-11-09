@@ -28,7 +28,8 @@ import {
   Settings as SettingsIcon,
   ExitToApp as LogoutIcon,
   AccountCircle,
-  CloudUpload as ImportIcon
+  CloudUpload as ImportIcon,
+  AdminPanelSettings as AdminIcon
 } from '@mui/icons-material';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
@@ -97,16 +98,24 @@ const DashboardLayout = () => {
 
   const menuItems = [
     { text: 'Dashboard', icon: <DashboardIcon />, path: '/' },
-    { text: 'Trades', icon: <ShowChartIcon />, path: '/trades' },
     { text: 'Positions', icon: <PositionsIcon />, path: '/positions' },
+    { text: 'Trade History', icon: <ShowChartIcon />, path: '/trades' },
     { text: 'Import Data', icon: <ImportIcon />, path: '/import' },
     { text: 'Analytics', icon: <AssessmentIcon />, path: '/analytics' },
     { text: 'Settings', icon: <SettingsIcon />, path: '/settings' },
   ];
 
+  // Add admin menu items for instructors
+  const adminMenuItems = user?.role === 'INSTRUCTOR' ? [
+    { text: 'Admin Dashboard', icon: <AdminIcon />, path: '/admin' },
+  ] : [];
+
+  // Combine regular menu items with admin items
+  const allMenuItems = [...adminMenuItems, ...menuItems];
+
   return (
     <Box sx={{ display: 'flex' }}>
-      <AppBar position="fixed" sx={{ zIndex: (theme) => theme.zIndex.drawer + 1 }}>
+            <AppBar position="fixed" sx={{ zIndex: 1201, backgroundColor: 'primary.darkGrey' }}>
         <Toolbar>
           <IconButton
             color="inherit"
@@ -117,9 +126,17 @@ const DashboardLayout = () => {
           >
             <MenuIcon />
           </IconButton>
-          <Typography variant="h6" noWrap component="div" sx={{ flexGrow: 1 }}>
-            TradeJournal
-          </Typography>
+          <Box 
+            component="img"
+            src="/assets/sar-logo.png"
+            alt="SAR Trading Journal"
+            sx={{ 
+              width: 56, 
+              height: 32, 
+              mr: 2,
+              borderRadius: 1
+            }}
+          />
           <CurrencyToggle variant="icon" />
           <div>
             <IconButton
@@ -162,21 +179,46 @@ const DashboardLayout = () => {
           '& .MuiDrawer-paper': {
             width: drawerWidth,
             boxSizing: 'border-box',
+            backgroundColor: 'primary.main',
+            color: 'primary.white',
+            '& .MuiListItemText-primary': {
+              color: 'primary.white',
+            },
+            '& .MuiListItemIcon-root': {
+              color: 'primary.white',
+            },
+            '& .MuiDivider-root': {
+              borderColor: 'rgba(255, 255, 255, 0.2)',
+            },
+            '& .MuiListItemButton-root': {
+              '&:hover': {
+                backgroundColor: 'rgba(255, 255, 255, 0.1)',
+              },
+              '&.Mui-selected': {
+                backgroundColor: 'rgba(255, 255, 255, 0.2)',
+                '&:hover': {
+                  backgroundColor: 'rgba(255, 255, 255, 0.25)',
+                },
+              },
+            },
           },
         }}
       >
         <Toolbar />
         <Box sx={{ overflow: 'auto', mt: 2 }}>
           <Box sx={{ display: 'flex', flexDirection: 'column', alignItems: 'center', mb: 2 }}>
-            <Avatar sx={{ width: 64, height: 64, mb: 1 }}>
-              {getAvatarInitials()}
+            <Avatar 
+              sx={{ width: 64, height: 64, mb: 1 }}
+              src={user?.profile_picture_url ? `http://localhost:8000${user.profile_picture_url}` : undefined}
+            >
+              {!user?.profile_picture_url && getAvatarInitials()}
             </Avatar>
             <Typography variant="subtitle1">{getDisplayName()}</Typography>
             <Typography variant="body2" color="text.secondary">@{user?.username}</Typography>
           </Box>
           <Divider />
           <List>
-            {menuItems.map((item) => (
+            {allMenuItems.map((item) => (
               <ListItem key={item.text} disablePadding>
                 <ListItemButton onClick={() => navigate(item.path)}>
                   <ListItemIcon>

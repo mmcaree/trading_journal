@@ -1,37 +1,29 @@
 from sqlalchemy.orm import Session
-from app.models.models import Trade, Chart, PartialExit, TradeEntry
-from app.models.import_models import ImportedOrder, ImportBatch, Position, PositionOrder
+from app.models.position_models import TradingPosition, TradingPositionEvent, ImportedPendingOrder, TradingPositionJournalEntry, TradingPositionChart
 
 
 def clear_all_user_data(db: Session, user_id: int) -> None:
-    """Clear all user trading data while keeping the user account intact"""
+    """Clear ALL user trading data while keeping the user account intact"""
     
     try:
         # Delete in order to respect foreign key constraints
+        # Start with dependent tables first, then master tables
         
-        # 1. Delete charts (depend on trades)
-        trades = db.query(Trade).filter(Trade.user_id == user_id).all()
-        for trade in trades:
-            db.query(Chart).filter(Chart.trade_id == trade.id).delete()
-            db.query(PartialExit).filter(PartialExit.trade_id == trade.id).delete()
-            db.query(TradeEntry).filter(TradeEntry.trade_id == trade.id).delete()
+        # Delete current v2 API data (actively used)
+        trading_positions = db.query(TradingPosition).filter(TradingPosition.user_id == user_id).all()
+        for trading_position in trading_positions:
+            # Delete journal entries for this position
+            db.query(TradingPositionJournalEntry).filter(TradingPositionJournalEntry.position_id == trading_position.id).delete()
+            # Delete charts for this position
+            db.query(TradingPositionChart).filter(TradingPositionChart.position_id == trading_position.id).delete()
+            # Delete events for this position
+            db.query(TradingPositionEvent).filter(TradingPositionEvent.position_id == trading_position.id).delete()
         
-        # 2. Delete position orders (depend on positions and imported orders)
-        positions = db.query(Position).filter(Position.user_id == user_id).all()
-        for position in positions:
-            db.query(PositionOrder).filter(PositionOrder.position_id == position.id).delete()
+        # Delete trading positions (current system)
+        db.query(TradingPosition).filter(TradingPosition.user_id == user_id).delete()
         
-        # 3. Delete positions
-        db.query(Position).filter(Position.user_id == user_id).delete()
-        
-        # 4. Delete trades (now that charts and partial exits are gone)
-        db.query(Trade).filter(Trade.user_id == user_id).delete()
-        
-        # 5. Delete imported orders
-        db.query(ImportedOrder).filter(ImportedOrder.user_id == user_id).delete()
-        
-        # 6. Delete import batches
-        db.query(ImportBatch).filter(ImportBatch.user_id == user_id).delete()
+        # Delete imported pending orders
+        db.query(ImportedPendingOrder).filter(ImportedPendingOrder.user_id == user_id).delete()
         
         # Commit all changes
         db.commit()

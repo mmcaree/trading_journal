@@ -174,15 +174,15 @@ class EmailService:
             <style>
                 body { font-family: Arial, sans-serif; margin: 0; padding: 20px; background-color: #f5f5f5; }
                 .container { max-width: 600px; margin: 0 auto; background-color: white; padding: 30px; border-radius: 10px; box-shadow: 0 2px 10px rgba(0,0,0,0.1); }
-                .header { background-color: #1976d2; color: white; padding: 20px; margin: -30px -30px 30px; border-radius: 10px 10px 0 0; }
+                .header { background-color: #1da0f0; color: white; padding: 20px; margin: -30px -30px 30px; border-radius: 10px 10px 0 0; }
                 .stats { display: flex; justify-content: space-between; margin: 20px 0; }
                 .stat-box { text-align: center; padding: 15px; background-color: #f8f9fa; border-radius: 8px; flex: 1; margin: 0 5px; }
-                .stat-value { font-size: 24px; font-weight: bold; color: #1976d2; }
+                .stat-value { font-size: 24px; font-weight: bold; color: #1da0f0; }
                 .stat-label { font-size: 12px; color: #666; text-transform: uppercase; }
                 .positive { color: #4caf50; }
                 .negative { color: #f44336; }
                 .trades-list { margin-top: 20px; }
-                .trade-item { padding: 10px; border-left: 4px solid #1976d2; margin: 10px 0; background-color: #f8f9fa; }
+                .trade-item { padding: 10px; border-left: 4px solid #1da0f0; margin: 10px 0; background-color: #f8f9fa; }
                 .footer { margin-top: 30px; padding-top: 20px; border-top: 1px solid #eee; font-size: 12px; color: #666; text-align: center; }
             </style>
         </head>
@@ -253,19 +253,19 @@ class EmailService:
             <style>
                 body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; margin: 0; padding: 20px; background-color: #f5f7fa; }
                 .container { max-width: 650px; margin: 0 auto; background-color: white; border-radius: 12px; box-shadow: 0 4px 20px rgba(0,0,0,0.1); overflow: hidden; }
-                .header { background: linear-gradient(135deg, #1976d2 0%, #1565c0 100%); color: white; padding: 30px; text-align: center; }
+                .header { background: linear-gradient(135deg, #1da0f0 0%, #1565c0 100%); color: white; padding: 30px; text-align: center; }
                 .header h1 { margin: 0; font-size: 28px; font-weight: 600; }
                 .header p { margin: 10px 0 0; opacity: 0.9; font-size: 16px; }
                 
                 .overview { padding: 30px; background: linear-gradient(135deg, #f8f9fa 0%, #e9ecef 100%); }
-                .overview h2 { margin: 0 0 20px; color: #1976d2; font-size: 20px; }
+                .overview h2 { margin: 0 0 20px; color: #1da0f0; font-size: 20px; }
                 .main-stats { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; margin-bottom: 20px; }
                 .stat-card { background: white; padding: 20px; border-radius: 10px; text-align: center; box-shadow: 0 2px 10px rgba(0,0,0,0.05); }
                 .stat-value { font-size: 24px; font-weight: bold; margin-bottom: 5px; }
                 .stat-label { font-size: 13px; color: #666; text-transform: uppercase; letter-spacing: 0.5px; }
                 .positive { color: #4caf50; }
                 .negative { color: #f44336; }
-                .neutral { color: #1976d2; }
+                .neutral { color: #1da0f0; }
                 
                 .secondary-stats { display: grid; grid-template-columns: repeat(3, 1fr); gap: 15px; }
                 .secondary-stat { background: white; padding: 15px; border-radius: 8px; text-align: center; box-shadow: 0 2px 8px rgba(0,0,0,0.04); }

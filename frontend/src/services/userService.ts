@@ -85,3 +85,38 @@ export const clearAllUserData = async (): Promise<void> => {
     throw new Error('Failed to clear user data. Please try again.');
   }
 };
+
+// Upload profile picture
+export const uploadProfilePicture = async (file: File): Promise<{ profile_picture_url: string }> => {
+  try {
+    const formData = new FormData();
+    formData.append('file', file);
+
+    const response = await api.post('/api/users/me/profile-picture', formData, {
+      headers: {
+        'Content-Type': 'multipart/form-data',
+      },
+    });
+    
+    return response.data;
+  } catch (error: any) {
+    console.error('Upload profile picture error:', error);
+    if (error.response?.status === 400) {
+      throw new Error(error.response.data.detail || 'Failed to upload profile picture');
+    }
+    throw new Error('Failed to upload profile picture. Please try again.');
+  }
+};
+
+// Delete profile picture
+export const deleteProfilePicture = async (): Promise<void> => {
+  try {
+    await api.delete('/api/users/me/profile-picture');
+  } catch (error: any) {
+    console.error('Delete profile picture error:', error);
+    if (error.response?.status === 404) {
+      throw new Error('No profile picture to delete');
+    }
+    throw new Error('Failed to delete profile picture. Please try again.');
+  }
+};

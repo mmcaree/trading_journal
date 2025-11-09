@@ -1,9 +1,13 @@
+"""
+NEW Analytics Service using v2 Position Models
+Replaces analytics_service.py with TradingPosition + TradingPositionEvent based calculations
+"""
 from sqlalchemy.orm import Session
 from typing import List, Optional
 from datetime import datetime
-from sqlalchemy import func
+from sqlalchemy import func, and_
 
-from app.models.models import Trade
+from app.models.position_models import TradingPosition, TradingPositionEvent, PositionStatus, EventType
 from app.models.schemas import PerformanceMetrics, SetupPerformance
 
 def get_performance_metrics(
@@ -12,33 +16,33 @@ def get_performance_metrics(
     start_date: Optional[str] = None,
     end_date: Optional[str] = None
 ) -> PerformanceMetrics:
-    """Calculate performance metrics for the user"""
-    # Start with base query for the user's closed trades
-    query = db.query(Trade).filter(
-        Trade.user_id == user_id,
-        Trade.status == "closed"
+    """Calculate performance metrics for the user using v2 Position models"""
+    # Start with base query for the user's closed positions
+    query = db.query(TradingPosition).filter(
+        TradingPosition.user_id == user_id,
+        TradingPosition.status == PositionStatus.CLOSED
     )
     
-    # Apply date filters if provided
+    # Apply date filters if provided (filter on position close date)
     if start_date:
         try:
             start_date_obj = datetime.fromisoformat(start_date.replace('Z', '+00:00'))
-            query = query.filter(Trade.exit_date >= start_date_obj)
+            query = query.filter(TradingPosition.closed_at >= start_date_obj)
         except ValueError:
             pass
         
     if end_date:
         try:
             end_date_obj = datetime.fromisoformat(end_date.replace('Z', '+00:00'))
-            query = query.filter(Trade.exit_date <= end_date_obj)
+            query = query.filter(TradingPosition.closed_at <= end_date_obj)
         except ValueError:
             pass
     
-    # Get all closed trades
-    trades = query.all()
+    # Get all closed positions
+    positions = query.all()
     
     # Initialize metrics
-    total_trades = len(trades)
+    total_trades = len(positions)
     winning_trades = 0
     losing_trades = 0
     total_profit = 0.0
@@ -64,25 +68,29 @@ def get_performance_metrics(
             total_profit_loss_percent=0.0
         )
     
-    # Calculate metrics
-    for trade in trades:
-        # Skip trades with no profit/loss data
-        if trade.profit_loss is None:
-            continue
-            
-        # Calculate win/loss stats
-        if trade.profit_loss > 0:
-            winning_trades += 1
-            total_profit += trade.profit_loss
-            largest_win = max(largest_win, trade.profit_loss)
-        else:
-            losing_trades += 1
-            total_loss += abs(trade.profit_loss)
-            largest_loss = max(largest_loss, abs(trade.profit_loss))
+    # Calculate metrics from closed positions
+    total_investment = 0.0
+    
+    for position in positions:
+        # Use realized P&L from the position (calculated from SELL events)
+        realized_pnl = position.total_realized_pnl or 0.0
         
-        # Calculate holding time if entry and exit dates are available
-        if trade.entry_date and trade.exit_date:
-            holding_time = (trade.exit_date - trade.entry_date).total_seconds() / 86400  # Convert to days
+        # Track investment (total cost of position)
+        total_investment += position.total_cost or 0.0
+        
+        # Calculate win/loss stats
+        if realized_pnl > 0:
+            winning_trades += 1
+            total_profit += realized_pnl
+            largest_win = max(largest_win, realized_pnl)
+        elif realized_pnl < 0:
+            losing_trades += 1
+            total_loss += abs(realized_pnl)
+            largest_loss = max(largest_loss, abs(realized_pnl))
+        
+        # Calculate holding time if open and close dates are available
+        if position.opened_at and position.closed_at:
+            holding_time = (position.closed_at - position.opened_at).total_seconds() / 86400  # Convert to days
             total_holding_time += holding_time
     
     # Derived metrics
@@ -94,7 +102,6 @@ def get_performance_metrics(
     total_profit_loss = total_profit - total_loss
     
     # Calculate total profit/loss percent
-    total_investment = sum(trade.position_value for trade in trades if trade.position_value is not None)
     total_profit_loss_percent = (total_profit_loss / total_investment) * 100 if total_investment > 0 else 0
     
     return PerformanceMetrics(
@@ -112,67 +119,101 @@ def get_performance_metrics(
         total_profit_loss_percent=total_profit_loss_percent
     )
 
-
-def get_setup_performance(db: Session, user_id: int) -> List[SetupPerformance]:
-    """Get performance metrics by setup type"""
-    # Get all unique setup types for the user (case-insensitive grouping)
-    setup_types_query = db.query(Trade.setup_type).filter(
-        Trade.user_id == user_id,
-        Trade.status == "closed",
-        Trade.setup_type.isnot(None)
-    ).distinct()
+def get_setup_performance(
+    db: Session, 
+    user_id: int,
+    start_date: Optional[str] = None,
+    end_date: Optional[str] = None
+) -> List[SetupPerformance]:
+    """Calculate performance metrics by setup type using v2 Position models"""
+    # Start with base query for the user's closed positions
+    query = db.query(TradingPosition).filter(
+        TradingPosition.user_id == user_id,
+        TradingPosition.status == PositionStatus.CLOSED,
+        TradingPosition.setup_type.isnot(None)  # Only positions with setup types
+    )
     
-    # Group by lowercase setup type to handle case-insensitive matching
-    setup_groups = {}
-    for (setup_type,) in setup_types_query:
-        if setup_type:
-            key = setup_type.lower()
-            if key not in setup_groups:
-                setup_groups[key] = setup_type  # Keep first occurrence for display
+    # Apply date filters if provided
+    if start_date:
+        try:
+            start_date_obj = datetime.fromisoformat(start_date.replace('Z', '+00:00'))
+            query = query.filter(TradingPosition.closed_at >= start_date_obj)
+        except ValueError:
+            pass
+        
+    if end_date:
+        try:
+            end_date_obj = datetime.fromisoformat(end_date.replace('Z', '+00:00'))
+            query = query.filter(TradingPosition.closed_at <= end_date_obj)
+        except ValueError:
+            pass
     
-    result = []
+    # Get all closed positions
+    positions = query.all()
     
-    # Calculate metrics for each setup type group
-    for lowercase_setup, display_setup in setup_groups.items():
-        # Get all trades for this setup type (case-insensitive)
-        trades = db.query(Trade).filter(
-            Trade.user_id == user_id,
-            Trade.status == "closed",
-            func.lower(Trade.setup_type) == lowercase_setup
-        ).all()
+    # Group by setup type
+    setup_stats = {}
+    
+    for position in positions:
+        setup_type = position.setup_type
+        if not setup_type:
+            continue
+            
+        if setup_type not in setup_stats:
+            setup_stats[setup_type] = {
+                'total_trades': 0,
+                'winning_trades': 0,
+                'losing_trades': 0,
+                'total_profit': 0.0,
+                'total_loss': 0.0,
+                'largest_win': 0.0,
+                'largest_loss': 0.0,
+                'total_investment': 0.0
+            }
         
-        trade_count = len(trades)
-        winning_trades = sum(1 for t in trades if t.profit_loss and t.profit_loss > 0)
-        win_rate = (winning_trades / trade_count) * 100 if trade_count > 0 else 0
+        stats = setup_stats[setup_type]
+        stats['total_trades'] += 1
         
-        # Calculate profit/loss in percentages
-        total_profit_loss_percent = 0
-        trades_with_percent_data = 0
+        # Use realized P&L from position
+        realized_pnl = position.total_realized_pnl or 0.0
+        stats['total_investment'] += position.total_cost or 0.0
         
-        for trade in trades:
-            # Use profit_loss_percent if available, otherwise calculate from profit_loss/position_value
-            percent_return = 0
-            if trade.profit_loss_percent is not None:
-                percent_return = trade.profit_loss_percent
-            elif trade.profit_loss is not None and trade.position_value is not None and trade.position_value > 0:
-                percent_return = (trade.profit_loss / trade.position_value) * 100
-            else:
-                continue  # Skip trades where we can't calculate percentage
-                
-            total_profit_loss_percent += percent_return
-            trades_with_percent_data += 1
+        # Calculate win/loss
+        if realized_pnl > 0:
+            stats['winning_trades'] += 1
+            stats['total_profit'] += realized_pnl
+            stats['largest_win'] = max(stats['largest_win'], realized_pnl)
+        elif realized_pnl < 0:
+            stats['losing_trades'] += 1
+            stats['total_loss'] += abs(realized_pnl)
+            stats['largest_loss'] = max(stats['largest_loss'], abs(realized_pnl))
+    
+    # Convert to SetupPerformance objects
+    setup_performances = []
+    for setup_type, stats in setup_stats.items():
+        win_rate = (stats['winning_trades'] / stats['total_trades']) * 100 if stats['total_trades'] > 0 else 0
+        average_profit = stats['total_profit'] / stats['winning_trades'] if stats['winning_trades'] > 0 else 0
+        average_loss = stats['total_loss'] / stats['losing_trades'] if stats['losing_trades'] > 0 else 0
+        profit_factor = stats['total_profit'] / stats['total_loss'] if stats['total_loss'] > 0 else float('inf')
+        total_profit_loss = stats['total_profit'] - stats['total_loss']
+        total_profit_loss_percent = (total_profit_loss / stats['total_investment']) * 100 if stats['total_investment'] > 0 else 0
         
-        average_profit_loss = total_profit_loss_percent / trades_with_percent_data if trades_with_percent_data > 0 else 0
-        
-        result.append(SetupPerformance(
-            setup_type=display_setup,  # Use original case for display
-            trade_count=trade_count,
+        setup_performances.append(SetupPerformance(
+            setup_type=setup_type,
+            total_trades=stats['total_trades'],
+            winning_trades=stats['winning_trades'],
+            losing_trades=stats['losing_trades'],
             win_rate=win_rate,
-            average_profit_loss=average_profit_loss,
-            total_profit_loss=total_profit_loss_percent
+            average_profit=average_profit,
+            average_loss=average_loss,
+            profit_factor=profit_factor,
+            largest_win=stats['largest_win'],
+            largest_loss=stats['largest_loss'],
+            total_profit_loss=total_profit_loss,
+            total_profit_loss_percent=total_profit_loss_percent
         ))
     
-    # Sort by total profit/loss in descending order
-    result.sort(key=lambda x: x.total_profit_loss, reverse=True)
+    # Sort by total trades descending
+    setup_performances.sort(key=lambda x: x.total_trades, reverse=True)
     
-    return result
+    return setup_performances

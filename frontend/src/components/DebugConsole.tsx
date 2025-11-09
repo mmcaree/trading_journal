@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { Box, Button, Typography, Paper, TextField, Divider } from '@mui/material';
 import { testApiConnection, debugAnalyticsData } from '../services/debugService';
-import { fetchAnalyticsData } from '../services/analyticsService';
+import { getAllPositions } from '../services/positionsService';
 
 const DebugConsole: React.FC = () => {
   const [output, setOutput] = useState<string>('Debug output will appear here');
@@ -31,11 +31,11 @@ const DebugConsole: React.FC = () => {
     }
   };
 
-  const testAnalyticsService = async () => {
+  const testPositionsService = async () => {
     setIsLoading(true);
     try {
-      const result = await fetchAnalyticsData();
-      setOutput(JSON.stringify(result, null, 2));
+      const result = await getAllPositions({ limit: 10 });
+      setOutput(`Positions (v2 API):\n${JSON.stringify(result, null, 2)}`);
     } catch (error) {
       setOutput(`Error: ${JSON.stringify(error)}`);
     } finally {
@@ -68,10 +68,10 @@ const DebugConsole: React.FC = () => {
         
         <Button 
           variant="contained" 
-          onClick={testAnalyticsService}
+          onClick={testPositionsService}
           disabled={isLoading}
         >
-          Test Analytics Service
+          Test Positions API (v2)
         </Button>
       </Box>
       

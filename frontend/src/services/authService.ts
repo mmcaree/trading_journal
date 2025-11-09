@@ -27,6 +27,11 @@ export interface User {
   
   // Trading settings
   default_account_size?: number;
+  current_account_balance?: number;
+  initial_account_balance?: number;
+  
+  // Admin system
+  role?: string; // 'STUDENT' or 'INSTRUCTOR'
 }
 
 export interface LoginData {

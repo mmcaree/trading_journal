@@ -2,9 +2,14 @@ from sqlalchemy import Column, Integer, String, Float, DateTime, Boolean, Foreig
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import relationship
 import enum
+import json
 from datetime import datetime
 
+# Main Base for current models (User only)
 Base = declarative_base()
+
+# Deprecated Base for old models (Trade, Chart, etc.) - DO NOT USE FOR NEW TABLES
+DeprecatedBase = declarative_base()
 
 class TradeType(str, enum.Enum):
     LONG = "long"
@@ -24,52 +29,7 @@ class OptionType(str, enum.Enum):
     CALL = "call"
     PUT = "put"
 
-class User(Base):
-    __tablename__ = "users"
-    
-    id = Column(Integer, primary_key=True, index=True)
-    username = Column(String, unique=True, index=True)
-    email = Column(String, unique=True, index=True)
-    hashed_password = Column(String)
-    is_active = Column(Boolean, default=True)
-    created_at = Column(DateTime, default=datetime.utcnow)
-    
-    # Profile fields
-    first_name = Column(String, nullable=True)
-    last_name = Column(String, nullable=True)
-    display_name = Column(String, nullable=True)
-    bio = Column(Text, nullable=True)
-    profile_picture_url = Column(String, nullable=True)
-    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
-    
-    # Notification settings
-    email_notifications_enabled = Column(Boolean, default=True)
-    daily_email_enabled = Column(Boolean, default=False)
-    daily_email_time = Column(String, nullable=True)  # Format: "09:00"
-    weekly_email_enabled = Column(Boolean, default=False)
-    weekly_email_time = Column(String, nullable=True)  # Format: "09:00"
-    
-    # 2FA settings
-    two_factor_enabled = Column(Boolean, default=False)
-    two_factor_secret = Column(String, nullable=True)
-    backup_codes = Column(Text, nullable=True)  # JSON string of backup codes
-    
-    # Password reset fields
-    password_reset_token = Column(String, nullable=True, index=True)
-    password_reset_expires = Column(DateTime, nullable=True)
-    
-    # User preferences
-    timezone = Column(String, default='America/New_York')  # User's local timezone for email scheduling
-    
-    # Trading settings
-    current_account_balance = Column(Float, nullable=True)  # Current account balance (updated with P&L)
-    initial_account_balance = Column(Float, nullable=True)  # Starting balance for P&L tracking
-    
-    trades = relationship("Trade", back_populates="user")
-    imported_orders = relationship("ImportedOrder", back_populates="user")
-    import_batches = relationship("ImportBatch", back_populates="user")
-    
-class Trade(Base):
+class Trade(DeprecatedBase):
     __tablename__ = "trades"
     
     id = Column(Integer, primary_key=True, index=True)
@@ -121,17 +81,13 @@ class Trade(Base):
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
     
-    # Import tracking
-    imported_order_id = Column(Integer, ForeignKey("imported_orders.id"), nullable=True)
-    
     # Relationships
     user = relationship("User", back_populates="trades")
     charts = relationship("Chart", back_populates="trade")
     partial_exits = relationship("PartialExit", back_populates="trade")
     trade_entries = relationship("TradeEntry", back_populates="trade")
-    imported_order = relationship("ImportedOrder", back_populates="trades")
     
-class Chart(Base):
+class Chart(DeprecatedBase):
     __tablename__ = "charts"
     
     id = Column(Integer, primary_key=True, index=True)
@@ -144,7 +100,7 @@ class Chart(Base):
     
     trade = relationship("Trade", back_populates="charts")
     
-class PartialExit(Base):
+class PartialExit(DeprecatedBase):
     __tablename__ = "partial_exits"
     
     id = Column(Integer, primary_key=True, index=True)
@@ -158,7 +114,7 @@ class PartialExit(Base):
     
     trade = relationship("Trade", back_populates="partial_exits")
 
-class TradeEntry(Base):
+class TradeEntry(DeprecatedBase):
     __tablename__ = "trade_entries"
     
     id = Column(Integer, primary_key=True, index=True)

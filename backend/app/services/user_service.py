@@ -6,8 +6,9 @@ from passlib.context import CryptContext
 import secrets
 
 from app.core.config import settings
-from app.models.models import User
+from app.models import User
 from app.models.schemas import UserCreate, UserUpdate, NotificationSettings
+from app.utils.datetime_utils import utc_now
 
 # Password hashing
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
@@ -41,7 +42,7 @@ def create_user(db: Session, user: UserCreate) -> User:
         email=user.email,
         hashed_password=hashed_password,
         is_active=True,
-        created_at=datetime.utcnow()
+        created_at=utc_now()
     )
     
     db.add(db_user)
@@ -67,7 +68,7 @@ def update_user_profile(db: Session, user_id: int, user_update: UserUpdate) -> U
     for field, value in update_data.items():
         setattr(user, field, value)
     
-    user.updated_at = datetime.utcnow()
+    user.updated_at = utc_now()
     db.commit()
     db.refresh(user)
     return user
@@ -93,7 +94,7 @@ def update_notification_settings(db: Session, user_id: int, settings: Notificati
     user.weekly_email_enabled = settings.weekly_email_enabled
     user.weekly_email_time = settings.weekly_email_time
     
-    user.updated_at = datetime.utcnow()
+    user.updated_at = utc_now()
     db.commit()
     db.refresh(user)
     return user
@@ -120,7 +121,7 @@ def change_password(db: Session, user_id: int, current_password: str, new_passwo
     
     # Update password
     user.hashed_password = get_password_hash(new_password)
-    user.updated_at = datetime.utcnow()
+    user.updated_at = utc_now()
     db.commit()
     return True
 
@@ -153,9 +154,9 @@ def create_access_token(data: dict, expires_delta: Optional[timedelta] = None) -
     to_encode = data.copy()
     
     if expires_delta:
-        expire = datetime.utcnow() + expires_delta
+        expire = utc_now() + expires_delta
     else:
-        expire = datetime.utcnow() + timedelta(minutes=settings.ACCESS_TOKEN_EXPIRE_MINUTES)
+        expire = utc_now() + timedelta(minutes=settings.ACCESS_TOKEN_EXPIRE_MINUTES)
         
     to_encode.update({"exp": expire})
     encoded_jwt = jwt.encode(to_encode, settings.SECRET_KEY, algorithm=settings.ALGORITHM)
@@ -163,49 +164,72 @@ def create_access_token(data: dict, expires_delta: Optional[timedelta] = None) -
 
 
 def export_user_data(db: Session, user_id: int) -> dict:
-    """Export all user data including trades"""
+    """Export all user data including positions and events"""
     user = get_user_by_id(db, user_id)
     if not user:
         raise ValueError("User not found")
     
-    # Import Trade model here to avoid circular imports
-    from app.models.models import Trade
+    # Import v2 Position models
+    from app.models.position_models import TradingPosition, TradingPositionEvent
     
-    # Get all user trades
-    trades = db.query(Trade).filter(Trade.user_id == user_id).all()
+    # Get all user positions
+    positions = db.query(TradingPosition).filter(TradingPosition.user_id == user_id).all()
     
-    trades_data = []
-    for trade in trades:
-        trade_dict = {
-            "id": trade.id,
-            "ticker": trade.ticker,
-            "trade_type": trade.trade_type.value if trade.trade_type else None,
-            "status": trade.status.value if trade.status else None,
-            "position_size": float(trade.position_size) if trade.position_size else None,
-            "position_value": float(trade.position_value) if trade.position_value else None,
-            "entry_price": float(trade.entry_price) if trade.entry_price else None,
-            "exit_price": float(trade.exit_price) if trade.exit_price else None,
-            "entry_date": trade.entry_date.isoformat() if trade.entry_date else None,
-            "exit_date": trade.exit_date.isoformat() if trade.exit_date else None,
-            "entry_notes": trade.entry_notes,
-            "exit_notes": trade.exit_notes,
-            "profit_loss": float(trade.profit_loss) if trade.profit_loss else None,
-            "profit_loss_percent": float(trade.profit_loss_percent) if trade.profit_loss_percent else None,
-            "setup_type": trade.setup_type,
-            "strategy": trade.strategy,
-            "timeframe": trade.timeframe,
-            "market_conditions": trade.market_conditions,
-            "stop_loss": float(trade.stop_loss) if trade.stop_loss else None,
-            "take_profit": float(trade.take_profit) if trade.take_profit else None,
-            "risk_per_share": float(trade.risk_per_share) if trade.risk_per_share else None,
-            "total_risk": float(trade.total_risk) if trade.total_risk else None,
-            "risk_reward_ratio": float(trade.risk_reward_ratio) if trade.risk_reward_ratio else None,
-            "mistakes": trade.mistakes,
-            "lessons": trade.lessons,
-            "created_at": trade.created_at.isoformat() if trade.created_at else None,
-            "updated_at": trade.updated_at.isoformat() if trade.updated_at else None
+    positions_data = []
+    for position in positions:
+        # Get events for this position
+        events_data = []
+        for event in position.events:
+            event_dict = {
+                "id": event.id,
+                "event_type": event.event_type.value if event.event_type else None,
+                "event_date": event.event_date.isoformat() if event.event_date else None,
+                "shares": event.shares,
+                "price": float(event.price) if event.price else None,
+                "stop_loss": float(event.stop_loss) if event.stop_loss else None,
+                "take_profit": float(event.take_profit) if event.take_profit else None,
+                "notes": event.notes,
+                "source": event.source.value if event.source else None,
+                "source_id": event.source_id,
+                "position_shares_before": event.position_shares_before,
+                "position_shares_after": event.position_shares_after,
+                "realized_pnl": float(event.realized_pnl) if event.realized_pnl else None,
+                "created_at": event.created_at.isoformat() if event.created_at else None
+            }
+            events_data.append(event_dict)
+        
+        position_dict = {
+            "id": position.id,
+            "ticker": position.ticker,
+            "strategy": position.strategy,
+            "setup_type": position.setup_type,
+            "timeframe": position.timeframe,
+            "status": position.status.value if position.status else None,
+            "instrument_type": position.instrument_type.value if position.instrument_type else None,
+            "strike_price": float(position.strike_price) if position.strike_price else None,
+            "expiration_date": position.expiration_date.isoformat() if position.expiration_date else None,
+            "option_type": position.option_type.value if position.option_type else None,
+            "current_shares": position.current_shares,
+            "avg_entry_price": float(position.avg_entry_price) if position.avg_entry_price else None,
+            "total_cost": float(position.total_cost) if position.total_cost else None,
+            "total_realized_pnl": float(position.total_realized_pnl) if position.total_realized_pnl else None,
+            "current_stop_loss": float(position.current_stop_loss) if position.current_stop_loss else None,
+            "current_take_profit": float(position.current_take_profit) if position.current_take_profit else None,
+            "original_risk_percent": float(position.original_risk_percent) if position.original_risk_percent else None,
+            "current_risk_percent": float(position.current_risk_percent) if position.current_risk_percent else None,
+            "original_shares": position.original_shares,
+            "account_value_at_entry": float(position.account_value_at_entry) if position.account_value_at_entry else None,
+            "opened_at": position.opened_at.isoformat() if position.opened_at else None,
+            "closed_at": position.closed_at.isoformat() if position.closed_at else None,
+            "market_conditions": position.market_conditions,
+            "notes": position.notes,
+            "lessons": position.lessons,
+            "mistakes": position.mistakes,
+            "created_at": position.created_at.isoformat() if position.created_at else None,
+            "updated_at": position.updated_at.isoformat() if position.updated_at else None,
+            "events": events_data
         }
-        trades_data.append(trade_dict)
+        positions_data.append(position_dict)
     
     # User data (excluding sensitive information)
     user_data = {
@@ -229,9 +253,10 @@ def export_user_data(db: Session, user_id: int) -> dict:
             "created_at": user.created_at.isoformat() if user.created_at else None,
             "updated_at": user.updated_at.isoformat() if user.updated_at else None
         },
-        "trades": trades_data,
-        "export_date": datetime.utcnow().isoformat(),
-        "total_trades": len(trades_data)
+        "positions": positions_data,
+        "export_date": utc_now().isoformat(),
+        "total_positions": len(positions_data),
+        "format_version": "v2"  # Indicate this is v2 export format
     }
     
     return user_data
@@ -243,37 +268,36 @@ def delete_user_account(db: Session, user_id: int) -> bool:
     if not user:
         raise ValueError("User not found")
     
-    # Import models here to avoid circular imports
-    from app.models.models import Trade, Chart, PartialExit
-    from app.models.import_models import ImportedOrder, ImportBatch, Position, PositionOrder
+    # Import v2 models and deprecated models for complete cleanup
+    from app.models.position_models import TradingPosition, TradingPositionEvent, ImportedPendingOrder
+    from app.models.models import Trade, Chart, PartialExit, TradeEntry
     
     try:
         # Delete in order to respect foreign key constraints
         
-        # 1. Delete charts (depend on trades)
+        # 1. Delete v2 API data (current system)
+        trading_positions = db.query(TradingPosition).filter(TradingPosition.user_id == user_id).all()
+        for trading_position in trading_positions:
+            # Delete events for this position
+            db.query(TradingPositionEvent).filter(TradingPositionEvent.position_id == trading_position.id).delete()
+        
+        # Delete trading positions (current system)
+        db.query(TradingPosition).filter(TradingPosition.user_id == user_id).delete()
+        
+        # Delete imported pending orders
+        db.query(ImportedPendingOrder).filter(ImportedPendingOrder.user_id == user_id).delete()
+        
+        # 2. Delete deprecated data (old system - if any exists)
         trades = db.query(Trade).filter(Trade.user_id == user_id).all()
         for trade in trades:
             db.query(Chart).filter(Chart.trade_id == trade.id).delete()
             db.query(PartialExit).filter(PartialExit.trade_id == trade.id).delete()
+            db.query(TradeEntry).filter(TradeEntry.trade_id == trade.id).delete()
         
-        # 2. Delete position orders (depend on positions and imported orders)
-        positions = db.query(Position).filter(Position.user_id == user_id).all()
-        for position in positions:
-            db.query(PositionOrder).filter(PositionOrder.position_id == position.id).delete()
-        
-        # 3. Delete positions
-        db.query(Position).filter(Position.user_id == user_id).delete()
-        
-        # 4. Delete trades (now that charts and partial exits are gone)
+        # Delete trades (old system)
         db.query(Trade).filter(Trade.user_id == user_id).delete()
         
-        # 5. Delete imported orders
-        db.query(ImportedOrder).filter(ImportedOrder.user_id == user_id).delete()
-        
-        # 6. Delete import batches
-        db.query(ImportBatch).filter(ImportBatch.user_id == user_id).delete()
-        
-        # 7. Finally, delete the user
+        # 3. Finally, delete the user
         db.delete(user)
         db.commit()
         return True
@@ -292,7 +316,7 @@ def generate_password_reset_token(db: Session, email: str) -> Optional[str]:
     reset_token = secrets.token_urlsafe(32)
     
     # Set expiration to 1 hour from now
-    expires_at = datetime.utcnow() + timedelta(hours=1)
+    expires_at = utc_now() + timedelta(hours=1)
     
     # Update user with reset token and expiration
     user.password_reset_token = reset_token
@@ -308,7 +332,7 @@ def verify_password_reset_token(db: Session, token: str) -> Optional[User]:
     """Verify password reset token and return user if valid"""
     user = db.query(User).filter(
         User.password_reset_token == token,
-        User.password_reset_expires > datetime.utcnow()
+        User.password_reset_expires > utc_now()
     ).first()
     
     return user

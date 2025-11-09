@@ -1,9 +1,14 @@
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, status, UploadFile, File
 from sqlalchemy.orm import Session
+import os
+import uuid
+import shutil
+from pathlib import Path
+from PIL import Image
 
 from app.api.deps import get_current_user, get_current_active_user
 from app.db.session import get_db
-from app.models.models import User
+from app.models import User
 from app.models.schemas import (
     UserResponse, UserUpdate, ChangePasswordRequest, 
     NotificationSettings, TwoFactorSetup, TwoFactorVerification
@@ -232,4 +237,143 @@ def update_account_balance(
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Failed to update account balance"
+        )
+
+
+@router.post("/me/profile-picture")
+def upload_profile_picture(
+    file: UploadFile = File(...),
+    current_user: User = Depends(get_current_active_user),
+    db: Session = Depends(get_db)
+):
+    """Upload and update user's profile picture"""
+    try:
+        # Validate file type
+        allowed_types = ["image/jpeg", "image/jpg", "image/png", "image/webp"]
+        if file.content_type not in allowed_types:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Invalid file type. Only JPEG, PNG, and WebP images are allowed."
+            )
+        
+        # Validate file size (max 5MB)
+        max_size = 5 * 1024 * 1024  # 5MB
+        file_content = file.file.read()
+        if len(file_content) > max_size:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="File too large. Maximum size is 5MB."
+            )
+        
+        # Reset file pointer
+        file.file.seek(0)
+        
+        # Create uploads directory if it doesn't exist
+        upload_dir = Path("static/uploads")
+        upload_dir.mkdir(parents=True, exist_ok=True)
+        
+        # Generate unique filename
+        file_extension = file.filename.split('.')[-1].lower()
+        unique_filename = f"{uuid.uuid4()}.{file_extension}"
+        file_path = upload_dir / unique_filename
+        
+        # Save the uploaded file
+        with open(file_path, "wb") as buffer:
+            shutil.copyfileobj(file.file, buffer)
+        
+        # Process image - resize to reasonable dimensions and optimize
+        try:
+            with Image.open(file_path) as img:
+                # Convert to RGB if necessary (for PNG with transparency)
+                if img.mode in ('RGBA', 'LA', 'P'):
+                    background = Image.new('RGB', img.size, (255, 255, 255))
+                    if img.mode == 'P':
+                        img = img.convert('RGBA')
+                    background.paste(img, mask=img.split()[-1] if img.mode == 'RGBA' else None)
+                    img = background
+                
+                # Resize to max 400x400 while maintaining aspect ratio
+                img.thumbnail((400, 400), Image.Resampling.LANCZOS)
+                
+                # Save optimized image
+                img.save(file_path, "JPEG", quality=85, optimize=True)
+        except Exception as e:
+            # If image processing fails, remove the file and raise error
+            if file_path.exists():
+                file_path.unlink()
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Invalid image file or image processing failed."
+            )
+        
+        # Delete old profile picture if it exists
+        if current_user.profile_picture_url:
+            old_file_path = Path(current_user.profile_picture_url.lstrip('/'))
+            if old_file_path.exists():
+                try:
+                    old_file_path.unlink()
+                except:
+                    pass  # Ignore errors when deleting old file
+        
+        # Update user's profile picture URL
+        profile_picture_url = f"/static/uploads/{unique_filename}"
+        current_user.profile_picture_url = profile_picture_url
+        
+        db.commit()
+        
+        return {
+            "message": "Profile picture updated successfully",
+            "profile_picture_url": profile_picture_url
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        db.rollback()
+        # Clean up uploaded file if there was an error
+        if 'file_path' in locals() and file_path.exists():
+            try:
+                file_path.unlink()
+            except:
+                pass
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to upload profile picture"
+        )
+
+
+@router.delete("/me/profile-picture")
+def delete_profile_picture(
+    current_user: User = Depends(get_current_active_user),
+    db: Session = Depends(get_db)
+):
+    """Delete user's profile picture"""
+    try:
+        if not current_user.profile_picture_url:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="No profile picture to delete"
+            )
+        
+        # Delete the file
+        file_path = Path(current_user.profile_picture_url.lstrip('/'))
+        if file_path.exists():
+            try:
+                file_path.unlink()
+            except:
+                pass  # Ignore errors when deleting file
+        
+        # Clear the profile picture URL
+        current_user.profile_picture_url = None
+        db.commit()
+        
+        return {"message": "Profile picture deleted successfully"}
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        db.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to delete profile picture"
         )

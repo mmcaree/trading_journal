@@ -12,7 +12,7 @@ import secrets
 from typing import List, Tuple, Optional
 from sqlalchemy.orm import Session
 
-from app.models.models import User
+from app.models import User
 from app.core.config import settings
 
 class TwoFactorService:

@@ -2,12 +2,11 @@
 Models package - exports all SQLAlchemy models
 """
 
-# Import Base first
-from .models import Base
+# Import Base from position models (current models only)
+from .position_models import Base, User
 
-# Import all main models
+# Import deprecated models from models.py 
 from .models import (
-    User,
     Trade,
     TradeEntry,
     PartialExit,
@@ -15,17 +14,6 @@ from .models import (
     TradeStatus,
     InstrumentType,
     OptionType
-)
-
-# Import all import-related models
-from .import_models import (
-    ImportBatch,
-    ImportedOrder,
-    Position,
-    PositionOrder,
-    OrderStatus,
-    OrderSide,
-    TimeInForce
 )
 
 # Make all models available at package level
@@ -38,12 +26,5 @@ __all__ = [
     "TradeType",
     "TradeStatus",
     "InstrumentType",
-    "OptionType",
-    "ImportBatch",
-    "ImportedOrder",
-    "Position",
-    "PositionOrder",
-    "OrderStatus",
-    "OrderSide",
-    "TimeInForce"
+    "OptionType"
 ]

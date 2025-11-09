@@ -1,536 +1,1945 @@
-import React, { useState, useEffect } from 'react';
-import { 
-  Box, 
-  Typography, 
-  Paper, 
+import React, { useState, useEffect, useMemo } from 'react';
+import {
+  Box,
+  Typography,
+  Paper,
   Grid,
   Card,
   CardContent,
-  Tab,
+  CircularProgress,
+  Alert,
   Tabs,
+  Tab,
+  Chip,
+  Table,
+  TableBody,
+  TableCell,
+  TableContainer,
+  TableHead,
+  TableRow,
   Button,
-  Divider,
-  Alert
+  ButtonGroup,
+  Tooltip
 } from '@mui/material';
-import { 
-  BarChart,
-  Bar,
-  LineChart,
-  Line,
+import {
   PieChart,
   Pie,
   Cell,
   ResponsiveContainer,
+  Tooltip as RechartsTooltip,
+  BarChart,
+  Bar,
   XAxis,
   YAxis,
   CartesianGrid,
-  Tooltip,
+  LineChart,
+  Line,
   Legend
 } from 'recharts';
-import { fetchAnalyticsData } from '../services/analyticsService';
-import { formatCurrency, formatPercentage, formatProfitLoss } from '../utils/formatters';
-import { currencyTooltipFormatter, currencyTooltipFormatterWithDate, currencyTickFormatter } from '../utils/chartFormatters';
-import { useCurrencyFormatting } from '../hooks/useCurrencyFormatting';
-import CurrencyDisplay from '../components/CurrencyDisplay';
+import {
+  Analytics as AnalyticsIcon,
+  TrendingUp as TrendingUpIcon,
+  TrendingDown as TrendingDownIcon
+} from '@mui/icons-material';
+import { getAllPositions } from '../services/positionsService';
+import { accountService } from '../services/accountService';
+import { useCurrency } from '../context/CurrencyContext';
+import { Position } from '../services/positionsService';
+import { 
+  calculateAllMetrics, 
+  RiskMetrics, 
+  TimeBasedMetrics, 
+  PortfolioMetrics, 
+  EntryExitMetrics 
+} from '../utils/analyticsUtils';
+import { getTickerSector } from '../utils/tickerSectorMapping';
 
-interface AnalyticsData {
-  performance: {
-    daily: { date: string; value: number }[];
-    weekly: { week: string; value: number }[];
-    monthly: { month: string; value: number }[];
-    ytd: { month: string; value: number }[];
-    all: { period: string; value: number }[];
-  };
-  winLoss: {
-    winCount: number;
-    lossCount: number;
-    winRate: number;
-  };
-  profitLoss: {
-    totalProfit: number;
-    totalLoss: number;
-    netProfitLoss: number;
-    avgProfit: number;
-    avgLoss: number;
-  };
-  strategies: {
-    name: string;
-    trades: number;
-    winRate: number;
-    avgReturn: number;
-  }[];
-  setups: {
-    name: string;
-    trades: number;
-    winRate: number;
-    avgReturn: number;
-  }[];
+interface AnalyticsMetrics {
+  totalTrades: number;
+  winningTrades: number;
+  losingTrades: number;
+  winRate: number;
+  profitFactor: number;
+  avgWin: number;
+  avgLoss: number;
+  largestWin: number;
+  largestLoss: number;
+  totalRealized: number;
+  totalUnrealized: number;
+  totalVolume: number;
+  avgDaysHeld: number;
 }
 
-const COLORS = ['#4caf50', '#f44336', '#2196f3', '#ff9800', '#9c27b0', '#795548'];
+interface MonthlyData {
+  month: string;
+  pnl: number;
+  trades: number;
+}
+
+interface StrategyData {
+  strategy: string;
+  trades: number;
+  winRate: number;
+  avgReturn: number;
+  totalPnl: number;
+}
+
+export type TimeScale = '1M' | '3M' | '6M' | 'YTD' | '1YR' | 'ALL';
 
 const Analytics: React.FC = () => {
-  const [analyticsData, setAnalyticsData] = useState<AnalyticsData | null>(null);
+  const [tabValue, setTabValue] = useState(0);
   const [loading, setLoading] = useState(true);
-  const [timeframe, setTimeframe] = useState('monthly');
-  const [activeTab, setActiveTab] = useState(0);
   const [error, setError] = useState<string | null>(null);
-  const { formatCurrencyFromUSD, formatProfitLossFromUSD } = useCurrencyFormatting();
+  const [positions, setPositions] = useState<Position[]>([]);
+  const [accountBalance, setAccountBalance] = useState(0);
+  const [selectedTimeScale, setSelectedTimeScale] = useState<TimeScale>('ALL');
+  const { formatCurrency } = useCurrency();
+
+  // Advanced metrics state
+  const [advancedMetrics, setAdvancedMetrics] = useState<{
+    risk: RiskMetrics;
+    timeBased: TimeBasedMetrics;
+    portfolio: PortfolioMetrics;
+    entryExit: EntryExitMetrics;
+  } | null>(null);
 
   useEffect(() => {
-    const loadData = async () => {
-      try {
-        setLoading(true);
-        setError(null);
-        
-        const data = await fetchAnalyticsData();
-        setAnalyticsData(data);
-        
-        // Check if we have any data
-        const hasPerformanceData = data.performance.daily.length > 0 || 
-                                  data.performance.weekly.length > 0 || 
-                                  data.performance.monthly.length > 0 ||
-                                  data.performance.ytd.length > 0 ||
-                                  data.performance.all.length > 0;
-        
-        if (!hasPerformanceData) {
-          setError("No performance data available. Add some trades to see analytics.");
-        }
-      } catch (err) {
-        console.error('Error fetching analytics data:', err);
-        setError("Failed to load analytics data. Please try again later.");
-      } finally {
-        setLoading(false);
-      }
-    };
-
-    loadData();
+    loadAnalyticsData();
   }, []);
 
-  const handleTimeframeChange = (event: React.SyntheticEvent, newValue: string) => {
-    setTimeframe(newValue);
+  const loadAnalyticsData = async () => {
+    setLoading(true);
+    setError(null);
+    try {
+      const [positionsData, balance] = await Promise.all([
+        getAllPositions({ limit: 100000 }),  // Get all positions for analytics, not just 100
+        accountService.getCurrentBalance()
+      ]);
+      
+      setPositions(positionsData || []);
+      setAccountBalance(balance);
+    } catch (err) {
+      console.error('Error loading analytics data:', err);
+      setError('Failed to load analytics data');
+    } finally {
+      setLoading(false);
+    }
   };
 
-  const handleTabChange = (event: React.SyntheticEvent, newValue: number) => {
-    setActiveTab(newValue);
+  // Filter positions based on selected time scale
+  const getTimeScaleDate = (timeScale: TimeScale): Date => {
+    const now = new Date();
+    switch (timeScale) {
+      case '1M':
+        return new Date(now.getFullYear(), now.getMonth() - 1, now.getDate());
+      case '3M':
+        return new Date(now.getFullYear(), now.getMonth() - 3, now.getDate());
+      case '6M':  
+        return new Date(now.getFullYear(), now.getMonth() - 6, now.getDate());
+      case 'YTD':
+        return new Date(now.getFullYear(), 0, 1);
+      case '1YR':
+        return new Date(now.getFullYear() - 1, now.getMonth(), now.getDate());
+      case 'ALL':
+      default:
+        return new Date(0);
+    }
   };
+
+  const filteredPositions = useMemo(() => {
+    if (selectedTimeScale === 'ALL') return positions;
+    
+    const cutoffDate = getTimeScaleDate(selectedTimeScale);
+    return positions.filter(position => {
+      const positionDate = new Date(position.opened_at);
+      return positionDate >= cutoffDate;
+    });
+  }, [positions, selectedTimeScale]);
+
+  // Time Analysis calculations
+  const timeAnalysisData = useMemo(() => {
+    const closedPositions = filteredPositions.filter(p => p.status === 'closed' && p.closed_at);
+    
+    // Cumulative Returns Data
+    const cumulativeReturns = closedPositions
+      .sort((a, b) => new Date(a.closed_at!).getTime() - new Date(b.closed_at!).getTime())
+      .reduce((acc, position, index) => {
+        const runningTotal = index === 0 ? (position.total_realized_pnl || 0) : 
+          acc[index - 1].cumulative + (position.total_realized_pnl || 0);
+        
+        acc.push({
+          date: new Date(position.closed_at!).toLocaleDateString(),
+          pnl: position.total_realized_pnl || 0,
+          cumulative: runningTotal,
+          tradeNumber: index + 1
+        });
+        return acc;
+      }, [] as Array<{date: string, pnl: number, cumulative: number, tradeNumber: number}>);
+
+    // Holding Period Analysis
+    const holdingPeriodData = closedPositions.map(position => {
+      if (position.opened_at && position.closed_at) {
+        const days = Math.round((new Date(position.closed_at).getTime() - new Date(position.opened_at).getTime()) / (1000 * 60 * 60 * 24));
+        return {
+          days: Math.max(1, days),
+          pnl: position.total_realized_pnl || 0,
+          ticker: position.ticker
+        };
+      }
+      return null;
+    }).filter(Boolean) as Array<{days: number, pnl: number, ticker: string}>;
+
+    // Group by holding period ranges
+    const holdingPeriodRanges = holdingPeriodData.reduce((acc, trade) => {
+      let range = '';
+      if (trade.days <= 1) range = '=1 day';
+      else if (trade.days <= 7) range = '2-7 days';
+      else if (trade.days <= 30) range = '1-4 weeks';
+      else if (trade.days <= 90) range = '1-3 months';
+      else range = '>3 months';
+
+      if (!acc[range]) acc[range] = { count: 0, totalPnl: 0, avgPnl: 0 };
+      acc[range].count++;
+      acc[range].totalPnl += trade.pnl;
+      acc[range].avgPnl = acc[range].totalPnl / acc[range].count;
+      
+      return acc;
+    }, {} as Record<string, {count: number, totalPnl: number, avgPnl: number}>);
+
+    const holdingPeriodChart = Object.entries(holdingPeriodRanges).map(([range, data]) => ({
+      range,
+      count: data.count,
+      avgReturn: data.avgPnl,
+      totalReturn: data.totalPnl
+    }));
+
+    // P&L Distribution
+    const pnlDistribution = closedPositions.reduce((acc, position) => {
+      const pnl = position.total_realized_pnl || 0;
+      let bucket = '';
+      
+      if (pnl < -1000) bucket = '<-$1000';
+      else if (pnl < -500) bucket = '-$1000 to -$500';
+      else if (pnl < -100) bucket = '-$500 to -$100';
+      else if (pnl < 0) bucket = '-$100 to $0';
+      else if (pnl < 100) bucket = '$0 to $100';
+      else if (pnl < 500) bucket = '$100 to $500';
+      else if (pnl < 1000) bucket = '$500 to $1000';
+      else bucket = '>$1000';
+
+      if (!acc[bucket]) acc[bucket] = 0;
+      acc[bucket]++;
+      return acc;
+    }, {} as Record<string, number>);
+
+    const pnlDistributionChart = Object.entries(pnlDistribution).map(([range, count]) => ({
+      range,
+      count
+    }));
+
+    return {
+      cumulativeReturns,
+      holdingPeriodChart,
+      pnlDistributionChart,
+      totalTrades: closedPositions.length,
+      avgHoldingDays: holdingPeriodData.length > 0 ? 
+        holdingPeriodData.reduce((sum, trade) => sum + trade.days, 0) / holdingPeriodData.length : 0
+    };
+  }, [filteredPositions]);
+
+  // Portfolio Analysis calculations
+  const portfolioAnalysisData = useMemo(() => {
+    // Sector allocation using real ticker data
+    const sectorAllocation = filteredPositions.reduce((acc, position) => {
+      const sector = getTickerSector(position.ticker);
+      const positionValue = Math.abs(position.total_cost || 0);
+      
+      if (!acc[sector]) acc[sector] = { value: 0, count: 0 };
+      acc[sector].value += positionValue;
+      acc[sector].count += 1;
+      
+      return acc;
+    }, {} as Record<string, {value: number, count: number}>);
+
+    const sectorChart = Object.entries(sectorAllocation).map(([sector, data]) => ({
+      name: sector,
+      value: data.value,
+      count: data.count
+    }));
+
+    // Position sizing analysis
+    const positionSizes = filteredPositions
+      .filter(p => (p.total_cost || 0) !== 0)
+      .map(position => {
+        const totalValue = Math.abs(position.total_cost || 0);
+        return {
+          ticker: position.ticker,
+          value: totalValue,
+          pnl: position.total_realized_pnl || 0,
+          status: position.status
+        };
+      })
+      .sort((a, b) => b.value - a.value);
+
+    // Position size distribution
+    const positionSizeDistribution = positionSizes.reduce((acc, position) => {
+      let bucket = '';
+      const value = position.value;
+      
+      if (value < 500) bucket = '<$500';
+      else if (value < 1000) bucket = '$500-$1K';
+      else if (value < 2500) bucket = '$1K-$2.5K';
+      else if (value < 5000) bucket = '$2.5K-$5K';
+      else if (value < 10000) bucket = '$5K-$10K';
+      else bucket = '>$10K';
+
+      if (!acc[bucket]) acc[bucket] = 0;
+      acc[bucket]++;
+      return acc;
+    }, {} as Record<string, number>);
+
+    const positionSizeChart = Object.entries(positionSizeDistribution).map(([range, count]) => ({
+      range,
+      count
+    }));
+
+    // Top positions by value
+    const topPositions = positionSizes.slice(0, 10);
+
+    // Win/Loss by position size
+    const sizePerformance = positionSizes.reduce((acc, position) => {
+      let sizeCategory = '';
+      if (position.value < 1000) sizeCategory = 'Small (<$1K)';
+      else if (position.value < 5000) sizeCategory = 'Medium ($1K-$5K)';
+      else sizeCategory = 'Large (>$5K)';
+
+      if (!acc[sizeCategory]) acc[sizeCategory] = { wins: 0, losses: 0, totalPnl: 0 };
+      
+      if (position.pnl > 0) acc[sizeCategory].wins++;
+      else if (position.pnl < 0) acc[sizeCategory].losses++;
+      
+      acc[sizeCategory].totalPnl += position.pnl;
+      
+      return acc;
+    }, {} as Record<string, {wins: number, losses: number, totalPnl: number}>);
+
+    const performanceBySize = Object.entries(sizePerformance).map(([category, data]) => ({
+      category,
+      wins: data.wins,
+      losses: data.losses,
+      winRate: data.wins + data.losses > 0 ? (data.wins / (data.wins + data.losses)) * 100 : 0,
+      totalPnl: data.totalPnl,
+      avgPnl: data.wins + data.losses > 0 ? data.totalPnl / (data.wins + data.losses) : 0
+    }));
+
+    // Concentration risk - top 5 positions as % of total
+    const totalPortfolioValue = positionSizes.reduce((sum, pos) => sum + pos.value, 0);
+    const top5Value = positionSizes.slice(0, 5).reduce((sum, pos) => sum + pos.value, 0);
+    const concentrationRisk = totalPortfolioValue > 0 ? (top5Value / totalPortfolioValue) * 100 : 0;
+
+    return {
+      sectorChart,
+      positionSizeChart,
+      topPositions,
+      performanceBySize,
+      concentrationRisk,
+      totalPositions: filteredPositions.length,
+      activePositions: filteredPositions.filter(p => p.status === 'open').length,
+      totalPortfolioValue
+    };
+  }, [filteredPositions]);
+
+  // Entry/Exit Analysis calculations
+  const entryExitAnalysisData = useMemo(() => {
+    const closedPositions = filteredPositions.filter(p => p.status === 'closed' && p.closed_at);
+    
+    // Entry timing analysis
+    const entryTimingData = closedPositions.map(position => {
+      const entryDate = new Date(position.opened_at);
+      const dayOfWeek = entryDate.toLocaleDateString('en-US', { weekday: 'long' });
+      const hourOfDay = entryDate.getHours();
+      return {
+        dayOfWeek,
+        hourOfDay,
+        pnl: position.total_realized_pnl || 0,
+        ticker: position.ticker
+      };
+    });
+
+    // Best entry days
+    const entryDayPerformance = entryTimingData.reduce((acc, trade) => {
+      if (!acc[trade.dayOfWeek]) acc[trade.dayOfWeek] = { count: 0, totalPnl: 0, avgPnl: 0 };
+      acc[trade.dayOfWeek].count++;
+      acc[trade.dayOfWeek].totalPnl += trade.pnl;
+      acc[trade.dayOfWeek].avgPnl = acc[trade.dayOfWeek].totalPnl / acc[trade.dayOfWeek].count;
+      return acc;
+    }, {} as Record<string, {count: number, totalPnl: number, avgPnl: number}>);
+
+    const entryDayChart = Object.entries(entryDayPerformance).map(([day, data]) => ({
+      day,
+      count: data.count,
+      avgPnl: data.avgPnl,
+      totalPnl: data.totalPnl
+    }));
+
+    // Entry hour analysis
+    const entryHourPerformance = entryTimingData.reduce((acc, trade) => {
+      const hourRange = `${Math.floor(trade.hourOfDay / 2) * 2}-${Math.floor(trade.hourOfDay / 2) * 2 + 2}h`;
+      if (!acc[hourRange]) acc[hourRange] = { count: 0, totalPnl: 0, avgPnl: 0 };
+      acc[hourRange].count++;
+      acc[hourRange].totalPnl += trade.pnl;
+      acc[hourRange].avgPnl = acc[hourRange].totalPnl / acc[hourRange].count;
+      return acc;
+    }, {} as Record<string, {count: number, totalPnl: number, avgPnl: number}>);
+
+    const entryHourChart = Object.entries(entryHourPerformance).map(([hour, data]) => ({
+      hour,
+      count: data.count,
+      avgPnl: data.avgPnl
+    }));
+
+    // Exit efficiency - positions with take profit vs stop loss
+    const exitAnalysis = closedPositions.reduce((acc, position) => {
+      const pnl = position.total_realized_pnl || 0;
+      if (pnl > 0) {
+        acc.profits.count++;
+        acc.profits.totalPnl += pnl;
+      } else if (pnl < 0) {
+        acc.losses.count++;
+        acc.losses.totalPnl += Math.abs(pnl);
+      }
+      return acc;
+    }, { profits: { count: 0, totalPnl: 0 }, losses: { count: 0, totalPnl: 0 } });
+
+    const avgWin = exitAnalysis.profits.count > 0 ? exitAnalysis.profits.totalPnl / exitAnalysis.profits.count : 0;
+    const avgLoss = exitAnalysis.losses.count > 0 ? exitAnalysis.losses.totalPnl / exitAnalysis.losses.count : 0;
+    const winLossRatio = avgLoss > 0 ? avgWin / avgLoss : 0;
+
+    return {
+      entryDayChart,
+      entryHourChart,
+      avgWin,
+      avgLoss,
+      winLossRatio,
+      totalExits: closedPositions.length,
+      profitableExits: exitAnalysis.profits.count,
+      unprofitableExits: exitAnalysis.losses.count
+    };
+  }, [filteredPositions]);
+
+  // Trading Psychology calculations
+  const psychologyData = useMemo(() => {
+    const closedPositions = filteredPositions.filter(p => p.status === 'closed');
+    
+    // Streak analysis
+    let currentStreak = 0;
+    let maxWinStreak = 0;
+    let maxLossStreak = 0;
+    let winStreaks: number[] = [];
+    let lossStreaks: number[] = [];
+
+    closedPositions
+      .sort((a, b) => new Date(a.closed_at!).getTime() - new Date(b.closed_at!).getTime())
+      .forEach((position, index) => {
+        const pnl = position.total_realized_pnl || 0;
+        const isWin = pnl > 0;
+        
+        if (index === 0) {
+          currentStreak = isWin ? 1 : -1;
+        } else {
+          const prevPnl = closedPositions[index - 1].total_realized_pnl || 0;
+          const prevIsWin = prevPnl > 0;
+          
+          if (isWin === prevIsWin) {
+            currentStreak = isWin ? Math.abs(currentStreak) + 1 : -(Math.abs(currentStreak) + 1);
+          } else {
+            if (currentStreak > 0) winStreaks.push(currentStreak);
+            else if (currentStreak < 0) lossStreaks.push(Math.abs(currentStreak));
+            currentStreak = isWin ? 1 : -1;
+          }
+          
+          if (isWin) maxWinStreak = Math.max(maxWinStreak, Math.abs(currentStreak));
+          else maxLossStreak = Math.max(maxLossStreak, Math.abs(currentStreak));
+        }
+      });
+
+    // Emotional impact analysis
+    const emotionalImpact = closedPositions.map(position => {
+      const pnl = position.total_realized_pnl || 0;
+      const impact = Math.abs(pnl);
+      let category = '';
+      
+      if (impact < 1000) category = 'Low Impact';
+      else if (impact < 5000) category = 'Medium Impact';
+      else category = 'High Impact';
+      
+      return {
+        category,
+        pnl,
+        isWin: pnl > 0,
+        ticker: position.ticker
+      };
+    });
+
+    const impactAnalysis = emotionalImpact.reduce((acc, trade) => {
+      if (!acc[trade.category]) acc[trade.category] = { wins: 0, losses: 0, totalPnl: 0 };
+      if (trade.isWin) acc[trade.category].wins++;
+      else acc[trade.category].losses++;
+      acc[trade.category].totalPnl += trade.pnl;
+      return acc;
+    }, {} as Record<string, {wins: number, losses: number, totalPnl: number}>);
+
+    const impactChart = Object.entries(impactAnalysis).map(([category, data]) => ({
+      category,
+      wins: data.wins,
+      losses: data.losses,
+      winRate: (data.wins + data.losses) > 0 ? (data.wins / (data.wins + data.losses)) * 100 : 0,
+      totalPnl: data.totalPnl
+    }));
+
+    return {
+      maxWinStreak,
+      maxLossStreak,
+      avgWinStreak: winStreaks.length > 0 ? winStreaks.reduce((a, b) => a + b, 0) / winStreaks.length : 0,
+      avgLossStreak: lossStreaks.length > 0 ? lossStreaks.reduce((a, b) => a + b, 0) / lossStreaks.length : 0,
+      impactChart,
+      totalTrades: closedPositions.length
+    };
+  }, [filteredPositions]);
+
+  // Top Performers calculations
+  const topPerformersData = useMemo(() => {
+    const closedPositions = filteredPositions.filter(p => p.status === 'closed' && p.total_realized_pnl);
+    
+    // Best and worst trades
+    const bestTrades = closedPositions
+      .filter(p => (p.total_realized_pnl || 0) > 0)
+      .sort((a, b) => (b.total_realized_pnl || 0) - (a.total_realized_pnl || 0))
+      .slice(0, 10);
+
+    const worstTrades = closedPositions
+      .filter(p => (p.total_realized_pnl || 0) < 0)
+      .sort((a, b) => (a.total_realized_pnl || 0) - (b.total_realized_pnl || 0))
+      .slice(0, 10);
+
+    // Best performing tickers
+    const tickerPerformance = closedPositions.reduce((acc, position) => {
+      const ticker = position.ticker;
+      const pnl = position.total_realized_pnl || 0;
+      
+      if (!acc[ticker]) acc[ticker] = { trades: 0, totalPnl: 0, wins: 0, losses: 0 };
+      acc[ticker].trades++;
+      acc[ticker].totalPnl += pnl;
+      if (pnl > 0) acc[ticker].wins++;
+      else if (pnl < 0) acc[ticker].losses++;
+      
+      return acc;
+    }, {} as Record<string, {trades: number, totalPnl: number, wins: number, losses: number}>);
+
+    const topTickers = Object.entries(tickerPerformance)
+      .map(([ticker, data]) => ({
+        ticker,
+        trades: data.trades,
+        totalPnl: data.totalPnl,
+        avgPnl: data.totalPnl / data.trades,
+        winRate: data.trades > 0 ? (data.wins / data.trades) * 100 : 0,
+        wins: data.wins,
+        losses: data.losses
+      }))
+      .filter(item => item.trades >= 2) // Only show tickers with multiple trades
+      .sort((a, b) => b.totalPnl - a.totalPnl)
+      .slice(0, 10);
+
+    // Strategy performance (if available)
+    const strategyPerformance = closedPositions.reduce((acc, position) => {
+      const strategy = position.strategy || 'No Strategy';
+      const pnl = position.total_realized_pnl || 0;
+      
+      if (!acc[strategy]) acc[strategy] = { trades: 0, totalPnl: 0, wins: 0, losses: 0 };
+      acc[strategy].trades++;
+      acc[strategy].totalPnl += pnl;
+      if (pnl > 0) acc[strategy].wins++;
+      else if (pnl < 0) acc[strategy].losses++;
+      
+      return acc;
+    }, {} as Record<string, {trades: number, totalPnl: number, wins: number, losses: number}>);
+
+    const topStrategies = Object.entries(strategyPerformance)
+      .map(([strategy, data]) => ({
+        strategy,
+        trades: data.trades,
+        totalPnl: data.totalPnl,
+        avgPnl: data.totalPnl / data.trades,
+        winRate: data.trades > 0 ? (data.wins / data.trades) * 100 : 0,
+        wins: data.wins,
+        losses: data.losses
+      }))
+      .sort((a, b) => b.totalPnl - a.totalPnl);
+
+    return {
+      bestTrades,
+      worstTrades,
+      topTickers,
+      topStrategies
+    };
+  }, [filteredPositions]);
+
+  // Calculate advanced metrics whenever filtered positions change
+  useEffect(() => {
+    if (filteredPositions.length > 0) {
+      const metrics = calculateAllMetrics(filteredPositions, accountBalance || 10000);
+      setAdvancedMetrics(metrics);
+    }
+  }, [filteredPositions, accountBalance]);
 
   if (loading) {
-    return <Box sx={{ p: 3 }}><Typography>Loading analytics...</Typography></Box>;
+    return (
+      <Box display="flex" justifyContent="center" alignItems="center" minHeight="400px">
+        <CircularProgress />
+      </Box>
+    );
   }
 
-  if (!analyticsData) {
-    return <Box sx={{ p: 3 }}><Typography>Failed to load analytics data.</Typography></Box>;
+  if (error) {
+    return (
+      <Box sx={{ p: 3 }}>
+        <Alert severity="error">{error}</Alert>
+      </Box>
+    );
   }
-
-  // Get the appropriate performance data based on timeframe
-  const performanceData = 
-    timeframe === 'daily' ? analyticsData.performance.daily :
-    timeframe === 'weekly' ? analyticsData.performance.weekly :
-    timeframe === 'monthly' ? analyticsData.performance.monthly :
-    timeframe === 'ytd' ? analyticsData.performance.ytd :
-    timeframe === 'all' ? analyticsData.performance.all :
-    analyticsData.performance.monthly;
-
-  const winLossData = [
-    { name: 'Wins', value: analyticsData.winLoss.winCount },
-    { name: 'Losses', value: analyticsData.winLoss.lossCount }
-  ].filter(item => item.value > 0); // Filter out zero values
-
-  const hasWinLossData = winLossData.length > 0;
-  const hasPerformanceData = performanceData.length > 0;
-  const hasStrategiesData = analyticsData.strategies.length > 0;
-  const hasSetupsData = analyticsData.setups.length > 0;
 
   return (
     <Box sx={{ p: 3 }}>
-      <Typography variant="h4" gutterBottom>
-        Trading Analytics
-      </Typography>
-      
-      {error && (
-        <Alert severity="info" sx={{ mb: 3 }}>
-          {error}
-        </Alert>
-      )}
-
-      <Box sx={{ mb: 4 }}>
-        <Tabs
-          value={activeTab}
-          onChange={handleTabChange}
-          variant="fullWidth"
-        >
-          <Tab label="Performance" />
-          <Tab label="Strategies" />
-          <Tab label="Setups" />
-        </Tabs>
+      <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 3 }}>
+        <Typography variant="h4" sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+          <AnalyticsIcon />
+          Trading Analytics
+        </Typography>
+        
+        {/* Time Scale Selector */}
+        <Paper sx={{ p: 1 }}>
+          <ButtonGroup variant="outlined" size="small">
+            {(['1M', '3M', '6M', 'YTD', '1YR', 'ALL'] as TimeScale[]).map((scale) => (
+              <Button
+                key={scale}
+                variant={selectedTimeScale === scale ? 'contained' : 'outlined'}
+                onClick={() => setSelectedTimeScale(scale)}
+                sx={{ minWidth: '50px' }}
+              >
+                {scale}
+              </Button>
+            ))}
+          </ButtonGroup>
+          <Typography variant="caption" sx={{ ml: 2, color: 'text.secondary' }}>
+            Time Period: {selectedTimeScale === 'ALL' ? 'All Time' : selectedTimeScale}
+          </Typography>
+        </Paper>
       </Box>
 
-      {/* Performance Tab */}
-      {activeTab === 0 && (
+      {/* Tabs */}
+      <Paper sx={{ mb: 3 }}>
+        <Tabs 
+          value={tabValue} 
+          onChange={(e, newValue) => setTabValue(newValue)}
+          variant="scrollable"
+          scrollButtons="auto"
+        >
+          <Tab label="📊 Overview" />
+          <Tab label="⚠️ Risk Management" />
+          <Tab label="⏰ Time Analysis" />
+          <Tab label="💼 Portfolio" />
+          <Tab label="🎯 Entry/Exit" />
+          <Tab label="🧠 Psychology" />
+          <Tab label="📈 Strategies" />
+          <Tab label="🏆 Top Performers" />
+        </Tabs>
+      </Paper>
+
+      {/* Overview Tab */}
+      {tabValue === 0 && (
         <Grid container spacing={3}>
-          {/* P&L Chart */}
+          {/* Key Performance Metrics */}
           <Grid item xs={12}>
-            <Paper sx={{ p: 2 }}>
-              <Typography variant="h6" gutterBottom>
-                Profit & Loss Over Time
-              </Typography>
-              <Box sx={{ mb: 2 }}>
-                <Tabs
-                  value={timeframe}
-                  onChange={handleTimeframeChange}
-                  aria-label="timeframe tabs"
+            <Typography variant="h5" gutterBottom sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+              📊 Trading Performance Overview
+            </Typography>
+          </Grid>
+
+          {/* Top Level KPIs */}
+          <Grid item xs={12} sm={6} md={3}>
+            <Card sx={{ height: '100%' }}>
+              <CardContent>
+                <Typography color="text.secondary" gutterBottom>Total Positions</Typography>
+                <Typography variant="h4">{filteredPositions.length}</Typography>
+                <Typography variant="body2" color="text.secondary">
+                  {filteredPositions.filter(p => p.status === 'open').length} active
+                </Typography>
+              </CardContent>
+            </Card>
+          </Grid>
+
+          <Grid item xs={12} sm={6} md={3}>
+            <Card sx={{ height: '100%' }}>
+              <CardContent>
+                <Typography color="text.secondary" gutterBottom>Total P&L</Typography>
+                <Typography 
+                  variant="h4" 
+                  color={filteredPositions.reduce((sum, p) => sum + (p.total_realized_pnl || 0), 0) >= 0 ? 'success.main' : 'error.main'}
                 >
-                  <Tab label="Daily" value="daily" />
-                  <Tab label="Weekly" value="weekly" />
-                  <Tab label="Monthly" value="monthly" />
-                  <Tab label="YTD" value="ytd" />
-                  <Tab label="All" value="all" />
-                </Tabs>
-              </Box>
-              {hasPerformanceData ? (
-                <Box sx={{ height: 400 }}>
-                  <ResponsiveContainer width="100%" height="100%">
-                    <LineChart
-                      data={performanceData}
-                      margin={{ top: 5, right: 30, left: 20, bottom: 5 }}
-                    >
+                  ${filteredPositions.reduce((sum, p) => sum + (p.total_realized_pnl || 0), 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                </Typography>
+                <Typography variant="body2" color="text.secondary">
+                  Realized P&L
+                </Typography>
+              </CardContent>
+            </Card>
+          </Grid>
+
+          <Grid item xs={12} sm={6} md={3}>
+            <Card sx={{ height: '100%' }}>
+              <CardContent>
+                <Typography color="text.secondary" gutterBottom>Win Rate</Typography>
+                <Typography 
+                  variant="h4" 
+                  color={advancedMetrics && advancedMetrics.risk.winRate >= 50 ? 'success.main' : 'error.main'}
+                >
+                  {advancedMetrics ? `${advancedMetrics.risk.winRate.toFixed(1)}%` : 'N/A'}
+                </Typography>
+                <Typography variant="body2" color="text.secondary">
+                  Closed positions
+                </Typography>
+              </CardContent>
+            </Card>
+          </Grid>
+
+          <Grid item xs={12} sm={6} md={3}>
+            <Card sx={{ height: '100%' }}>
+              <CardContent>
+                <Tooltip title="Measures risk-adjusted returns. Values > 1 are good, > 2 are excellent. Formula: (Return - Risk-free rate) / Standard deviation">
+                  <Typography color="text.secondary" gutterBottom sx={{ cursor: 'help' }}>
+                    Sharpe Ratio ℹ️
+                  </Typography>
+                </Tooltip>
+                <Typography 
+                  variant="h4" 
+                  color={advancedMetrics && advancedMetrics.risk.sharpeRatio > 1 ? 'success.main' : 
+                    advancedMetrics && advancedMetrics.risk.sharpeRatio > 0 ? 'warning.main' : 'error.main'}
+                >
+                  {advancedMetrics ? advancedMetrics.risk.sharpeRatio.toFixed(2) : 'N/A'}
+                </Typography>
+                <Typography variant="body2" color="text.secondary">
+                  Risk-adjusted return
+                </Typography>
+              </CardContent>
+            </Card>
+          </Grid>
+
+          {/* Quick Charts Row */}
+          <Grid item xs={12} md={6}>
+            <Paper sx={{ p: 3 }}>
+              <Typography variant="h6" gutterBottom>Recent Performance Trend</Typography>
+              <Box sx={{ width: '100%', height: 250 }}>
+                {timeAnalysisData.cumulativeReturns.length > 0 ? (
+                  <ResponsiveContainer>
+                    <LineChart data={timeAnalysisData.cumulativeReturns}>
                       <CartesianGrid strokeDasharray="3 3" />
-                      <XAxis 
-                        dataKey={
-                          timeframe === 'daily' ? 'date' : 
-                          timeframe === 'weekly' ? 'week' : 
-                          timeframe === 'monthly' ? 'month' :
-                          timeframe === 'ytd' ? 'month' :
-                          timeframe === 'all' ? 'period' : 'month'
-                        } 
-                      />
-                      <YAxis tickFormatter={currencyTickFormatter} />
-                      <Tooltip formatter={currencyTooltipFormatterWithDate} />
-                      <Legend />
-                      <Line
-                        type="monotone"
-                        dataKey="value"
-                        stroke="#4caf50"
-                        activeDot={{ r: 8 }}
-                        name="P&L"
+
+                      <YAxis tickFormatter={(value) => `$${value.toLocaleString()}`} />
+                      <RechartsTooltip formatter={(value: number) => [`$${value.toLocaleString()}`, 'Cumulative P&L']} />
+                      <Line 
+                        type="monotone" 
+                        dataKey="cumulative" 
+                        stroke="#1976d2" 
+                        strokeWidth={1}
+                        dot={{ r: 1 }}
                       />
                     </LineChart>
                   </ResponsiveContainer>
-                </Box>
-              ) : (
-                <Box sx={{ height: 200, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-                  <Typography color="text.secondary">
-                    No performance data available for this timeframe
-                  </Typography>
-                </Box>
-              )}
+                ) : (
+                  <Box display="flex" alignItems="center" justifyContent="center" height="100%">
+                    <Typography color="text.secondary">No closed trades to display</Typography>
+                  </Box>
+                )}
+              </Box>
             </Paper>
           </Grid>
 
-          {/* Stats Cards */}
           <Grid item xs={12} md={6}>
-            <Card>
-              <CardContent>
-                <Typography variant="h6" gutterBottom>
-                  Win/Loss Ratio
-                </Typography>
-                {hasWinLossData ? (
-                  <>
-                    <Box sx={{ height: 300 }}>
-                      <ResponsiveContainer width="100%" height="100%">
-                        <PieChart>
-                          <Pie
-                            data={winLossData}
-                            cx="50%"
-                            cy="50%"
-                            labelLine={false}
-                            label={false}
-                            outerRadius={100}
-                            fill="#8884d8"
-                            dataKey="value"
-                          >
-                            {winLossData.map((entry, index) => (
-                              <Cell key={`cell-${index}`} fill={COLORS[index % COLORS.length]} />
-                            ))}
-                          </Pie>
-                          <Tooltip formatter={(value) => [`${value} trades`, '']} />
-                          <Legend 
-                            wrapperStyle={{ paddingTop: '10px' }}
-                            formatter={(value, entry) => {
-                              const data = entry?.payload;
-                              if (!data) return value;
-                              const total = winLossData.reduce((sum, item) => sum + item.value, 0);
-                              const percentage = total > 0 ? ((data.value / total) * 100).toFixed(1) : '0.0';
-                              return `${value}: ${percentage}%`;
-                            }}
+            <Paper sx={{ p: 3 }}>
+              <Typography variant="h6" gutterBottom>Portfolio Allocation</Typography>
+              <Box sx={{ width: '100%', height: 250 }}>
+                {portfolioAnalysisData.sectorChart.length > 0 ? (
+                  <ResponsiveContainer>
+                    <PieChart>
+                      <Pie
+                        data={portfolioAnalysisData.sectorChart.slice(0, 6)}
+                        cx="50%"
+                        cy="50%"
+                        outerRadius={80}
+                        fill="#8884d8"
+                        dataKey="value"
+                      >
+                        {portfolioAnalysisData.sectorChart.slice(0, 6).map((entry, index) => (
+                          <Cell 
+                            key={`sector-${index}`} 
+                            fill={[
+                              '#1976d2', '#2e7d32', '#ed6c02', '#9c27b0', 
+                              '#d32f2f', '#0288d1'
+                            ][index % 6]} 
                           />
-                        </PieChart>
-                      </ResponsiveContainer>
-                    </Box>
-                    <Typography variant="h5" align="center" gutterBottom>
-                      Win Rate: {formatPercentage(analyticsData.winLoss.winRate * 100)}
-                    </Typography>
-                  </>
+                        ))}
+                      </Pie>
+                      <RechartsTooltip formatter={(value: number) => [`$${value.toLocaleString()}`, 'Value']} />
+                      <Legend />
+                    </PieChart>
+                  </ResponsiveContainer>
                 ) : (
-                  <Box sx={{ height: 300, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-                    <Typography color="text.secondary">
-                      No win/loss data available
-                    </Typography>
+                  <Box display="flex" alignItems="center" justifyContent="center" height="100%">
+                    <Typography color="text.secondary">No position data to display</Typography>
                   </Box>
                 )}
+              </Box>
+            </Paper>
+          </Grid>
+
+          {/* Risk Metrics Summary */}
+          {advancedMetrics && (
+            <Grid item xs={12}>
+              <Paper sx={{ p: 3 }}>
+                <Typography variant="h6" gutterBottom>Risk Summary</Typography>
+                <Grid container spacing={2}>
+                  <Grid item xs={12} sm={6} md={3}>
+                    <Box textAlign="center">
+                      <Typography variant="h6" color={advancedMetrics.risk.maxDrawdownPercent > -20 ? 'success.main' : 'error.main'}>
+                        -{advancedMetrics.risk.maxDrawdownPercent.toFixed(1)}%
+                      </Typography>
+                      <Tooltip title="Maximum peak-to-trough decline. Shows worst losing streak as % of peak portfolio value">
+                        <Typography variant="body2" color="text.secondary" sx={{ cursor: 'help' }}>
+                          Max Drawdown ℹ️
+                        </Typography>
+                      </Tooltip>
+                    </Box>
+                  </Grid>
+                  <Grid item xs={12} sm={6} md={3}>
+                    <Box textAlign="center">
+                      <Typography variant="h6" color={advancedMetrics.risk.kellyPercentage > 0 ? 'success.main' : 'error.main'}>
+                        {advancedMetrics.risk.kellyPercentage.toFixed(1)}%
+                      </Typography>
+                      <Tooltip title="Optimal position size for maximizing long-term growth. Formula: (Win% × Avg Win - Loss% × Avg Loss) / Avg Win. Values > 2% suggest good edge">
+                        <Typography variant="body2" color="text.secondary" sx={{ cursor: 'help' }}>
+                          Kelly % ℹ️
+                        </Typography>
+                      </Tooltip>
+                    </Box>
+                  </Grid>
+                  <Grid item xs={12} sm={6} md={3}>
+                    <Box textAlign="center">
+                      <Typography variant="h6">
+                        {psychologyData.maxWinStreak}
+                      </Typography>
+                      <Typography variant="body2" color="text.secondary">Max Win Streak</Typography>
+                    </Box>
+                  </Grid>
+                  <Grid item xs={12} sm={6} md={3}>
+                    <Box textAlign="center">
+                      <Typography variant="h6" color={entryExitAnalysisData.winLossRatio > 1 ? 'success.main' : 'error.main'}>
+                        {entryExitAnalysisData.winLossRatio.toFixed(2)}
+                      </Typography>
+                      <Typography variant="body2" color="text.secondary">Win/Loss Ratio</Typography>
+                    </Box>
+                  </Grid>
+                </Grid>
+              </Paper>
+            </Grid>
+          )}
+
+          {/* Top Performers Summary */}
+          <Grid item xs={12} md={6}>
+            <Paper sx={{ p: 3 }}>
+              <Typography variant="h6" gutterBottom>🏆 Best Recent Trades</Typography>
+              <TableContainer sx={{ maxHeight: 300 }}>
+                <Table size="small">
+                  <TableHead>
+                    <TableRow>
+                      <TableCell>Ticker</TableCell>
+                      <TableCell align="right">P&L</TableCell>
+                      <TableCell align="right">Date</TableCell>
+                    </TableRow>
+                  </TableHead>
+                  <TableBody>
+                    {topPerformersData.bestTrades.length > 0 ? (
+                      topPerformersData.bestTrades.slice(0, 5).map((trade, index) => (
+                        <TableRow key={`overview-best-${index}`}>
+                          <TableCell>{trade.ticker}</TableCell>
+                          <TableCell align="right" sx={{ color: 'success.main' }}>
+                            ${(trade.total_realized_pnl || 0).toLocaleString()}
+                          </TableCell>
+                          <TableCell align="right">
+                            {trade.closed_at ? new Date(trade.closed_at).toLocaleDateString() : 'N/A'}
+                          </TableCell>
+                        </TableRow>
+                      ))
+                    ) : (
+                      <TableRow>
+                        <TableCell colSpan={3} align="center">
+                          <Typography color="text.secondary">No profitable trades yet</Typography>
+                        </TableCell>
+                      </TableRow>
+                    )}
+                  </TableBody>
+                </Table>
+              </TableContainer>
+            </Paper>
+          </Grid>
+
+          <Grid item xs={12} md={6}>
+            <Paper sx={{ p: 3 }}>
+              <Typography variant="h6" gutterBottom>🏆 Top Performing Stocks</Typography>
+              <TableContainer sx={{ maxHeight: 300 }}>
+                <Table size="small">
+                  <TableHead>
+                    <TableRow>
+                      <TableCell>Ticker</TableCell>
+                      <TableCell align="right">Trades</TableCell>
+                      <TableCell align="right">Win Rate</TableCell>
+                      <TableCell align="right">Total P&L</TableCell>
+                    </TableRow>
+                  </TableHead>
+                  <TableBody>
+                    {topPerformersData.topTickers.length > 0 ? (
+                      topPerformersData.topTickers.slice(0, 5).map((ticker, index) => (
+                        <TableRow key={`overview-ticker-${index}`}>
+                          <TableCell>{ticker.ticker}</TableCell>
+                          <TableCell align="right">{ticker.trades}</TableCell>
+                          <TableCell 
+                            align="right" 
+                            sx={{ color: ticker.winRate >= 50 ? 'success.main' : 'error.main' }}
+                          >
+                            {ticker.winRate.toFixed(0)}%
+                          </TableCell>
+                          <TableCell 
+                            align="right" 
+                            sx={{ color: ticker.totalPnl >= 0 ? 'success.main' : 'error.main' }}
+                          >
+                            ${ticker.totalPnl.toLocaleString()}
+                          </TableCell>
+                        </TableRow>
+                      ))
+                    ) : (
+                      <TableRow>
+                        <TableCell colSpan={4} align="center">
+                          <Typography color="text.secondary">No trading data available</Typography>
+                        </TableCell>
+                      </TableRow>
+                    )}
+                  </TableBody>
+                </Table>
+              </TableContainer>
+            </Paper>
+          </Grid>
+
+          {/* Quick Insights */}
+          <Grid item xs={12}>
+            <Paper sx={{ p: 3, bgcolor: 'background.default' }}>
+              <Typography variant="h6" gutterBottom> 📊 Key Insights</Typography>
+              <Grid container spacing={2}>
+                <Grid item xs={12} md={4}>
+                  <Alert severity={portfolioAnalysisData.concentrationRisk > 50 ? 'error' : portfolioAnalysisData.concentrationRisk > 30 ? 'warning' : 'success'}>
+                    <Typography variant="subtitle2">Portfolio Concentration</Typography>
+                    <Typography variant="body2">
+                      Top 5 positions represent {portfolioAnalysisData.concentrationRisk.toFixed(1)}% of portfolio
+                      {portfolioAnalysisData.concentrationRisk > 50 ? ' - High risk!' : 
+                       portfolioAnalysisData.concentrationRisk > 30 ? ' - Moderate risk' : ' - Well diversified'}
+                    </Typography>
+                  </Alert>
+                </Grid>
+                <Grid item xs={12} md={4}>
+                  <Alert severity={advancedMetrics && advancedMetrics.risk.winRate >= 60 ? 'success' : 
+                    advancedMetrics && advancedMetrics.risk.winRate >= 40 ? 'warning' : 'error'}>
+                    <Typography variant="subtitle2">Trading Performance</Typography>
+                    <Typography variant="body2">
+                      {advancedMetrics ? `${advancedMetrics.risk.winRate.toFixed(1)}% win rate` : 'N/A'} 
+                      {advancedMetrics && advancedMetrics.risk.winRate >= 60 ? ' - Excellent!' : 
+                       advancedMetrics && advancedMetrics.risk.winRate >= 40 ? ' - Good' : ' - Needs improvement'}
+                    </Typography>
+                  </Alert>
+                </Grid>
+                <Grid item xs={12} md={4}>
+                  <Alert severity={psychologyData.maxLossStreak <= 3 ? 'success' : 
+                    psychologyData.maxLossStreak <= 5 ? 'warning' : 'error'}>
+                    <Typography variant="subtitle2">Risk Control</Typography>
+                    <Typography variant="body2">
+                      Max loss streak: {psychologyData.maxLossStreak} trades
+                      {psychologyData.maxLossStreak <= 3 ? ' - Great discipline!' : 
+                       psychologyData.maxLossStreak <= 5 ? ' - Good control' : ' - Review risk management'}
+                    </Typography>
+                  </Alert>
+                </Grid>
+              </Grid>
+            </Paper>
+          </Grid>
+        </Grid>
+      )}
+
+      {/* Risk Management Tab */}
+      {tabValue === 1 && advancedMetrics && (
+        <Grid container spacing={3}>
+          <Grid item xs={12}>
+            <Typography variant="h5" gutterBottom sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+              ⚠️ Risk Management Dashboard
+            </Typography>
+          </Grid>
+
+          {/* Key Risk Metrics Cards */}
+          <Grid item xs={12} md={3}>
+            <Card sx={{ height: '100%' }}>
+              <CardContent>
+                <Typography color="text.secondary" gutterBottom>Max Drawdown</Typography>
+                <Typography variant="h5" color="error.main">
+                  {formatCurrency(advancedMetrics.risk.maxDrawdown)}
+                </Typography>
+                <Typography variant="body2" color="text.secondary">
+                  {advancedMetrics.risk.maxDrawdownPercent.toFixed(1)}% of peak
+                </Typography>
               </CardContent>
             </Card>
           </Grid>
 
-          <Grid item xs={12} md={6}>
-            <Card>
+          <Grid item xs={12} md={3}>
+            <Card sx={{ height: '100%' }}>
               <CardContent>
-                <Typography variant="h6" gutterBottom>
-                  Profit & Loss Summary
+                <Typography color="text.secondary" gutterBottom>Sharpe Ratio</Typography>
+                <Typography 
+                  variant="h5" 
+                  color={advancedMetrics.risk.sharpeRatio > 1 ? 'success.main' : advancedMetrics.risk.sharpeRatio > 0 ? 'warning.main' : 'error.main'}
+                >
+                  {advancedMetrics.risk.sharpeRatio.toFixed(2)}
                 </Typography>
-                <Divider sx={{ mb: 2 }} />
-                
-                {(analyticsData.profitLoss.totalProfit > 0 || analyticsData.profitLoss.totalLoss > 0) ? (
-                  <Grid container spacing={2}>
-                    <Grid item xs={6}>
-                      <Typography variant="body2" color="text.secondary">Total Profit</Typography>
-                      <CurrencyDisplay 
-                        value={analyticsData.profitLoss.totalProfit}
-                        variant="h6" 
-                        color="success.main"
-                      />
-                    </Grid>
-                    <Grid item xs={6}>
-                      <Typography variant="body2" color="text.secondary">Total Loss</Typography>
-                      <CurrencyDisplay 
-                        value={analyticsData.profitLoss.totalLoss}
-                        variant="h6" 
-                        color="error.main"
-                      />
-                    </Grid>
-                    <Grid item xs={12}>
-                      <Typography variant="body2" color="text.secondary">Net Profit/Loss</Typography>
-                      <CurrencyDisplay 
-                        value={analyticsData.profitLoss.netProfitLoss}
-                        type="profit-loss"
-                        variant="h5" 
-                        color={analyticsData.profitLoss.netProfitLoss >= 0 ? 'success.main' : 'error.main'}
-                      />
-                    </Grid>
-                    <Grid item xs={6}>
-                      <Typography variant="body2" color="text.secondary">Average Win</Typography>
-                      <CurrencyDisplay 
-                        value={analyticsData.profitLoss.avgProfit}
-                        variant="h6" 
-                        color="success.main"
-                      />
-                    </Grid>
-                    <Grid item xs={6}>
-                      <Typography variant="body2" color="text.secondary">Average Loss</Typography>
-                      <CurrencyDisplay 
-                        value={analyticsData.profitLoss.avgLoss}
-                        variant="h6" 
-                        color="error.main"
-                      />
-                    </Grid>
-                  </Grid>
-                ) : (
-                  <Box sx={{ height: 200, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-                    <Typography color="text.secondary">
-                      No profit/loss data available
-                    </Typography>
-                  </Box>
-                )}
+                <Typography variant="body2" color="text.secondary">
+                  Risk-adjusted return
+                </Typography>
               </CardContent>
             </Card>
+          </Grid>
+
+          <Grid item xs={12} md={3}>
+            <Card sx={{ height: '100%' }}>
+              <CardContent>
+                <Typography color="text.secondary" gutterBottom>Recovery Factor</Typography>
+                <Typography 
+                  variant="h5" 
+                  color={advancedMetrics.risk.recoveryFactor > 3 ? 'success.main' : 'warning.main'}
+                >
+                  {advancedMetrics.risk.recoveryFactor === 999 ? '8' : advancedMetrics.risk.recoveryFactor.toFixed(1)}
+                </Typography>
+                <Typography variant="body2" color="text.secondary">
+                  Net profit / Max DD
+                </Typography>
+              </CardContent>
+            </Card>
+          </Grid>
+
+          <Grid item xs={12} md={3}>
+            <Card sx={{ height: '100%' }}>
+              <CardContent>
+                <Typography color="text.secondary" gutterBottom>Kelly %</Typography>
+                <Typography 
+                  variant="h5" 
+                  color={advancedMetrics.risk.kellyPercentage > 0 ? 'success.main' : 'error.main'}
+                >
+                  {advancedMetrics.risk.kellyPercentage.toFixed(1)}%
+                </Typography>
+                <Typography variant="body2" color="text.secondary">
+                  Optimal position size
+                </Typography>
+              </CardContent>
+            </Card>
+          </Grid>
+
+          {/* Advanced Risk Metrics */}
+          <Grid item xs={12} md={6}>
+            <Paper sx={{ p: 3 }}>
+              <Typography variant="h6" gutterBottom>Advanced Risk Ratios</Typography>
+              <Grid container spacing={2}>
+                <Grid item xs={6}>
+                  <Typography variant="body2" color="text.secondary">Calmar Ratio</Typography>
+                  <Typography variant="h6" color={advancedMetrics.risk.calmarRatio > 1 ? 'success.main' : 'warning.main'}>
+                    {advancedMetrics.risk.calmarRatio === 999 ? '8' : advancedMetrics.risk.calmarRatio.toFixed(2)}
+                  </Typography>
+                </Grid>
+                <Grid item xs={6}>
+                  <Typography variant="body2" color="text.secondary">Sortino Ratio</Typography>
+                  <Typography variant="h6" color={advancedMetrics.risk.sortinoRatio > 1 ? 'success.main' : 'warning.main'}>
+                    {advancedMetrics.risk.sortinoRatio.toFixed(2)}
+                  </Typography>
+                </Grid>
+                <Grid item xs={6}>
+                  <Typography variant="body2" color="text.secondary">Expectancy</Typography>
+                  <Typography variant="h6" color={advancedMetrics.risk.expectancy > 0 ? 'success.main' : 'error.main'}>
+                    {formatCurrency(advancedMetrics.risk.expectancy)}
+                  </Typography>
+                </Grid>
+                <Grid item xs={6}>
+                  <Typography variant="body2" color="text.secondary">Profit Factor</Typography>
+                  <Typography variant="h6" color={advancedMetrics.risk.profitFactor > 1.5 ? 'success.main' : 'warning.main'}>
+                    {advancedMetrics.risk.profitFactor.toFixed(2)}
+                  </Typography>
+                </Grid>
+              </Grid>
+            </Paper>
+          </Grid>
+
+          {/* Streak Analysis */}
+          <Grid item xs={12} md={6}>
+            <Paper sx={{ p: 3 }}>
+              <Typography variant="h6" gutterBottom>Streak Analysis</Typography>
+              <Grid container spacing={2}>
+                <Grid item xs={6}>
+                  <Typography variant="body2" color="text.secondary">Current Win Streak</Typography>
+                  <Typography variant="h6" color="success.main">
+                    {advancedMetrics.risk.consecutiveWins}
+                  </Typography>
+                </Grid>
+                <Grid item xs={6}>
+                  <Typography variant="body2" color="text.secondary">Current Loss Streak</Typography>
+                  <Typography variant="h6" color="error.main">
+                    {advancedMetrics.risk.consecutiveLosses}
+                  </Typography>
+                </Grid>
+                <Grid item xs={6}>
+                  <Typography variant="body2" color="text.secondary">Max Win Streak</Typography>
+                  <Typography variant="h6" color="success.main">
+                    {advancedMetrics.risk.maxConsecutiveWins}
+                  </Typography>
+                </Grid>
+                <Grid item xs={6}>
+                  <Typography variant="body2" color="text.secondary">Max Loss Streak</Typography>
+                  <Typography variant="h6" color="error.main">
+                    {advancedMetrics.risk.maxConsecutiveLosses}
+                  </Typography>
+                </Grid>
+              </Grid>
+            </Paper>
+          </Grid>
+        </Grid>
+      )}
+
+      {/* Time Analysis Tab */}
+      {tabValue === 2 && (
+        <Grid container spacing={3}>
+          {/* Summary Cards */}
+          <Grid item xs={12} md={4}>
+            <Card>
+              <CardContent>
+                <Typography color="text.secondary" gutterBottom>Total Closed Trades</Typography>
+                <Typography variant="h4">{timeAnalysisData.totalTrades}</Typography>
+              </CardContent>
+            </Card>
+          </Grid>
+          <Grid item xs={12} md={4}>
+            <Card>
+              <CardContent>
+                <Typography color="text.secondary" gutterBottom>Avg Holding Period</Typography>
+                <Typography variant="h4">{timeAnalysisData.avgHoldingDays.toFixed(0)} days</Typography>
+              </CardContent>
+            </Card>
+          </Grid>
+          <Grid item xs={12} md={4}>
+            <Card>
+              <CardContent>
+                <Typography color="text.secondary" gutterBottom>Final P&L</Typography>
+                <Typography 
+                  variant="h4" 
+                  color={timeAnalysisData.cumulativeReturns.length > 0 && 
+                    timeAnalysisData.cumulativeReturns[timeAnalysisData.cumulativeReturns.length - 1]?.cumulative > 0 
+                    ? 'success.main' : 'error.main'}
+                >
+                  ${timeAnalysisData.cumulativeReturns.length > 0 ? 
+                    timeAnalysisData.cumulativeReturns[timeAnalysisData.cumulativeReturns.length - 1]?.cumulative.toLocaleString() : '0'}
+                </Typography>
+              </CardContent>
+            </Card>
+          </Grid>
+
+          {/* Cumulative Returns Chart */}
+          <Grid item xs={12}>
+            <Paper sx={{ p: 3 }}>
+              <Typography variant="h6" gutterBottom>Cumulative Returns</Typography>
+              <Box sx={{ width: '100%', height: 400 }}>
+                <ResponsiveContainer>
+                  <LineChart data={timeAnalysisData.cumulativeReturns}>
+                    <CartesianGrid strokeDasharray="3 3" />
+                    <YAxis 
+                      label={{ value: 'Cumulative P&L ($)', angle: -90, position: 'insideLeft' }}
+                      tickFormatter={(value) => `$${value.toLocaleString()}`}
+                    />
+                    <RechartsTooltip 
+                      formatter={(value: number, name: string) => [
+                        name === 'cumulative' ? `$${value.toLocaleString()}` : `$${value.toLocaleString()}`,
+                        name === 'cumulative' ? 'Cumulative P&L' : 'Trade P&L'
+                      ]}
+                      labelFormatter={(value) => `Trade #${value}`}
+                    />
+                    <Line 
+                      type="monotone" 
+                      dataKey="cumulative" 
+                      stroke="#1976d2" 
+                      strokeWidth={2}
+                      dot={{ r: 3 }}
+                      activeDot={{ r: 5 }}
+                    />
+                  </LineChart>
+                </ResponsiveContainer>
+              </Box>
+            </Paper>
+          </Grid>
+
+          {/* Holding Period Analysis */}
+          <Grid item xs={12} md={6}>
+            <Paper sx={{ p: 3 }}>
+              <Typography variant="h6" gutterBottom>Holding Period Analysis</Typography>
+              <Box sx={{ width: '100%', height: 300 }}>
+                <ResponsiveContainer>
+                  <BarChart data={timeAnalysisData.holdingPeriodChart}>
+                    <CartesianGrid strokeDasharray="3 3" />
+                    <XAxis dataKey="range" />
+                    <YAxis />
+                    <RechartsTooltip 
+                      formatter={(value: number, name: string) => [
+                        name === 'count' ? value : `$${value.toLocaleString()}`,
+                        name === 'count' ? 'Trade Count' : name === 'avgReturn' ? 'Avg Return' : 'Total Return'
+                      ]}
+                    />
+                    <Bar dataKey="count" fill="#1976d2" name="count" />
+                  </BarChart>
+                </ResponsiveContainer>
+              </Box>
+            </Paper>
+          </Grid>
+
+          {/* P&L Distribution */}
+          <Grid item xs={12} md={6}>
+            <Paper sx={{ p: 3 }}>
+              <Typography variant="h6" gutterBottom>P&L Distribution</Typography>
+              <Box sx={{ width: '100%', height: 300 }}>
+                <ResponsiveContainer>
+                  <BarChart data={timeAnalysisData.pnlDistributionChart}>
+                    <CartesianGrid strokeDasharray="3 3" />
+                    <XAxis dataKey="range" angle={-45} textAnchor="end" height={80} />
+                    <YAxis />
+                    <RechartsTooltip formatter={(value: number) => [value, 'Trade Count']} />
+                    <Bar dataKey="count" fill="#2e7d32" />
+                  </BarChart>
+                </ResponsiveContainer>
+              </Box>
+            </Paper>
+          </Grid>
+
+          {/* Holding Period vs Returns Table */}
+          <Grid item xs={12}>
+            <Paper sx={{ p: 3 }}>
+              <Typography variant="h6" gutterBottom>Holding Period Performance Summary</Typography>
+              <TableContainer>
+                <Table>
+                  <TableHead>
+                    <TableRow>
+                      <TableCell>Holding Period</TableCell>
+                      <TableCell align="right">Trade Count</TableCell>
+                      <TableCell align="right">Total Return</TableCell>
+                      <TableCell align="right">Average Return</TableCell>
+                      <TableCell align="right">Success Rate</TableCell>
+                    </TableRow>
+                  </TableHead>
+                  <TableBody>
+                    {timeAnalysisData.holdingPeriodChart.map((row) => (
+                      <TableRow key={row.range}>
+                        <TableCell component="th" scope="row">{row.range}</TableCell>
+                        <TableCell align="right">{row.count}</TableCell>
+                        <TableCell 
+                          align="right" 
+                          sx={{ color: row.totalReturn >= 0 ? 'success.main' : 'error.main' }}
+                        >
+                          ${row.totalReturn.toLocaleString()}
+                        </TableCell>
+                        <TableCell 
+                          align="right"
+                          sx={{ color: row.avgReturn >= 0 ? 'success.main' : 'error.main' }}
+                        >
+                          ${row.avgReturn.toLocaleString()}
+                        </TableCell>
+                        <TableCell align="right">
+                          {/* Calculate success rate - would need additional data structure for this */}
+                          -
+                        </TableCell>
+                      </TableRow>
+                    ))}
+                  </TableBody>
+                </Table>
+              </TableContainer>
+            </Paper>
+          </Grid>
+        </Grid>
+      )}
+
+      {/* Portfolio Analysis Tab */}
+      {tabValue === 3 && (
+        <Grid container spacing={3}>
+          {/* Portfolio Overview Cards */}
+          <Grid item xs={12} md={3}>
+            <Card>
+              <CardContent>
+                <Typography color="text.secondary" gutterBottom>Total Positions</Typography>
+                <Typography variant="h4">{portfolioAnalysisData.totalPositions}</Typography>
+                <Typography variant="body2" color="success.main">
+                  {portfolioAnalysisData.activePositions} active
+                </Typography>
+              </CardContent>
+            </Card>
+          </Grid>
+          <Grid item xs={12} md={3}>
+            <Card>
+              <CardContent>
+                <Typography color="text.secondary" gutterBottom>Portfolio Value</Typography>
+                <Typography variant="h4">${portfolioAnalysisData.totalPortfolioValue.toLocaleString()}</Typography>
+                <Typography variant="body2" color="text.secondary">
+                  Total invested capital
+                </Typography>
+              </CardContent>
+            </Card>
+          </Grid>
+          <Grid item xs={12} md={3}>
+            <Card>
+              <CardContent>
+                <Typography color="text.secondary" gutterBottom>Concentration Risk</Typography>
+                <Typography 
+                  variant="h4" 
+                  color={portfolioAnalysisData.concentrationRisk > 50 ? 'error.main' : 
+                    portfolioAnalysisData.concentrationRisk > 30 ? 'warning.main' : 'success.main'}
+                >
+                  {portfolioAnalysisData.concentrationRisk.toFixed(1)}%
+                </Typography>
+                <Typography variant="body2" color="text.secondary">
+                  Top 5 positions
+                </Typography>
+              </CardContent>
+            </Card>
+          </Grid>
+          <Grid item xs={12} md={3}>
+            <Card>
+              <CardContent>
+                <Typography color="text.secondary" gutterBottom>Diversification</Typography>
+                <Typography variant="h4">{portfolioAnalysisData.sectorChart.length}</Typography>
+                <Typography variant="body2" color="text.secondary">
+                  Sectors represented
+                </Typography>
+              </CardContent>
+            </Card>
+          </Grid>
+
+          {/* Sector Allocation Pie Chart */}
+          <Grid item xs={12} md={6}>
+            <Paper sx={{ p: 3 }}>
+              <Typography variant="h6" gutterBottom>Sector Allocation</Typography>
+              <Box sx={{ width: '100%', height: 400 }}>
+                <ResponsiveContainer>
+                  <PieChart>
+                    <Pie
+                      data={portfolioAnalysisData.sectorChart}
+                      cx="50%"
+                      cy="50%"
+                      outerRadius={120}
+                      fill="#8884d8"
+                      dataKey="value"
+                    >
+                      {portfolioAnalysisData.sectorChart.map((entry, index) => (
+                        <Cell 
+                          key={`sector-${index}`} 
+                          fill={[
+                            '#1976d2', '#2e7d32', '#ed6c02', '#9c27b0', 
+                            '#d32f2f', '#0288d1', '#689f38', '#f57c00'
+                          ][index % 8]} 
+                        />
+                      ))}
+                    </Pie>
+                    <RechartsTooltip formatter={(value: number) => [`$${value.toLocaleString()}`, 'Value']} />
+                    <Legend />
+                  </PieChart>
+                </ResponsiveContainer>
+              </Box>
+            </Paper>
+          </Grid>
+
+          {/* Position Size Distribution */}
+          <Grid item xs={12} md={6}>
+            <Paper sx={{ p: 3 }}>
+              <Typography variant="h6" gutterBottom>Position Size Distribution</Typography>
+              <Box sx={{ width: '100%', height: 400 }}>
+                <ResponsiveContainer>
+                  <BarChart data={portfolioAnalysisData.positionSizeChart}>
+                    <CartesianGrid strokeDasharray="3 3" />
+                    <XAxis dataKey="range" />
+                    <YAxis />
+                    <RechartsTooltip formatter={(value: number) => [value, 'Position Count']} />
+                    <Bar dataKey="count" fill="#1976d2" />
+                  </BarChart>
+                </ResponsiveContainer>
+              </Box>
+            </Paper>
+          </Grid>
+
+          {/* Performance by Position Size */}
+          <Grid item xs={12}>
+            <Paper sx={{ p: 3 }}>
+              <Typography variant="h6" gutterBottom>Performance by Position Size</Typography>
+              <Box sx={{ width: '100%', height: 400 }}>
+                <ResponsiveContainer>
+                  <BarChart data={portfolioAnalysisData.performanceBySize}>
+                    <CartesianGrid strokeDasharray="3 3" />
+                    <XAxis dataKey="category" />
+                    <YAxis />
+                    <RechartsTooltip 
+                      formatter={(value: number, name: string) => {
+                        if (name === 'winRate') return [`${value.toFixed(1)}%`, 'Win Rate'];
+                        if (name === 'totalPnl' || name === 'avgPnl') return [`$${value.toLocaleString()}`, name === 'totalPnl' ? 'Total P&L' : 'Avg P&L'];
+                        return [value, name === 'wins' ? 'Wins' : 'Losses'];
+                      }}
+                    />
+                    <Bar dataKey="wins" stackId="trades" fill="#2e7d32" name="wins" />
+                    <Bar dataKey="losses" stackId="trades" fill="#d32f2f" name="losses" />
+                  </BarChart>
+                </ResponsiveContainer>
+              </Box>
+            </Paper>
+          </Grid>
+
+          {/* Top Positions Table */}
+          <Grid item xs={12}>
+            <Paper sx={{ p: 3 }}>
+              <Typography variant="h6" gutterBottom>Top Positions by Value</Typography>
+              <TableContainer>
+                <Table>
+                  <TableHead>
+                    <TableRow>
+                      <TableCell>Ticker</TableCell>
+                      <TableCell align="right">Position Value</TableCell>
+                      <TableCell align="right">P&L</TableCell>
+                      <TableCell align="right">Status</TableCell>
+                      <TableCell align="right">% of Portfolio</TableCell>
+                    </TableRow>
+                  </TableHead>
+                  <TableBody>
+                    {portfolioAnalysisData.topPositions.map((position, index) => (
+                      <TableRow key={`${position.ticker}-${index}`}>
+                        <TableCell component="th" scope="row">
+                          <Typography variant="subtitle2">{position.ticker}</Typography>
+                        </TableCell>
+                        <TableCell align="right">
+                          ${position.value.toLocaleString()}
+                        </TableCell>
+                        <TableCell 
+                          align="right"
+                          sx={{ color: position.pnl >= 0 ? 'success.main' : 'error.main' }}
+                        >
+                          ${position.pnl.toLocaleString()}
+                        </TableCell>
+                        <TableCell align="right">
+                          <Chip 
+                            label={position.status}
+                            color={position.status === 'open' ? 'primary' : 'default'}
+                            size="small"
+                          />
+                        </TableCell>
+                        <TableCell align="right">
+                          {portfolioAnalysisData.totalPortfolioValue > 0 ? 
+                            ((position.value / portfolioAnalysisData.totalPortfolioValue) * 100).toFixed(1) : 0}%
+                        </TableCell>
+                      </TableRow>
+                    ))}
+                  </TableBody>
+                </Table>
+              </TableContainer>
+            </Paper>
+          </Grid>
+
+          {/* Performance Summary by Size Category */}
+          <Grid item xs={12}>
+            <Paper sx={{ p: 3 }}>
+              <Typography variant="h6" gutterBottom>Position Size Performance Analysis</Typography>
+              <TableContainer>
+                <Table>
+                  <TableHead>
+                    <TableRow>
+                      <TableCell>Position Size</TableCell>
+                      <TableCell align="right">Total Trades</TableCell>
+                      <TableCell align="right">Wins</TableCell>
+                      <TableCell align="right">Losses</TableCell>
+                      <TableCell align="right">Win Rate</TableCell>
+                      <TableCell align="right">Total P&L</TableCell>
+                      <TableCell align="right">Avg P&L</TableCell>
+                    </TableRow>
+                  </TableHead>
+                  <TableBody>
+                    {portfolioAnalysisData.performanceBySize.map((row) => (
+                      <TableRow key={row.category}>
+                        <TableCell component="th" scope="row">{row.category}</TableCell>
+                        <TableCell align="right">{row.wins + row.losses}</TableCell>
+                        <TableCell align="right" sx={{ color: 'success.main' }}>{row.wins}</TableCell>
+                        <TableCell align="right" sx={{ color: 'error.main' }}>{row.losses}</TableCell>
+                        <TableCell 
+                          align="right"
+                          sx={{ color: row.winRate >= 50 ? 'success.main' : 'error.main' }}
+                        >
+                          {row.winRate.toFixed(1)}%
+                        </TableCell>
+                        <TableCell 
+                          align="right"
+                          sx={{ color: row.totalPnl >= 0 ? 'success.main' : 'error.main' }}
+                        >
+                          ${row.totalPnl.toLocaleString()}
+                        </TableCell>
+                        <TableCell 
+                          align="right"
+                          sx={{ color: row.avgPnl >= 0 ? 'success.main' : 'error.main' }}
+                        >
+                          ${row.avgPnl.toLocaleString()}
+                        </TableCell>
+                      </TableRow>
+                    ))}
+                  </TableBody>
+                </Table>
+              </TableContainer>
+            </Paper>
+          </Grid>
+        </Grid>
+      )}
+
+      {/* Entry/Exit Analysis Tab */}
+      {tabValue === 4 && (
+        <Grid container spacing={3}>
+          {/* Entry/Exit Summary Cards */}
+          <Grid item xs={12} md={3}>
+            <Card>
+              <CardContent>
+                <Typography color="text.secondary" gutterBottom>Total Exits</Typography>
+                <Typography variant="h4">{entryExitAnalysisData.totalExits}</Typography>
+              </CardContent>
+            </Card>
+          </Grid>
+          <Grid item xs={12} md={3}>
+            <Card>
+              <CardContent>
+                <Typography color="text.secondary" gutterBottom>Win/Loss Ratio</Typography>
+                <Typography variant="h4" color={entryExitAnalysisData.winLossRatio > 1 ? 'success.main' : 'error.main'}>
+                  {entryExitAnalysisData.winLossRatio.toFixed(2)}
+                </Typography>
+              </CardContent>
+            </Card>
+          </Grid>
+          <Grid item xs={12} md={3}>
+            <Card>
+              <CardContent>
+                <Typography color="text.secondary" gutterBottom>Avg Win</Typography>
+                <Typography variant="h4" color="success.main">
+                  ${entryExitAnalysisData.avgWin.toLocaleString()}
+                </Typography>
+              </CardContent>
+            </Card>
+          </Grid>
+          <Grid item xs={12} md={3}>
+            <Card>
+              <CardContent>
+                <Typography color="text.secondary" gutterBottom>Avg Loss</Typography>
+                <Typography variant="h4" color="error.main">
+                  ${entryExitAnalysisData.avgLoss.toLocaleString()}
+                </Typography>
+              </CardContent>
+            </Card>
+          </Grid>
+
+          {/* Entry Day Analysis */}
+          <Grid item xs={12} md={6}>
+            <Paper sx={{ p: 3 }}>
+              <Typography variant="h6" gutterBottom>Best Entry Days</Typography>
+              <Box sx={{ width: '100%', height: 300 }}>
+                <ResponsiveContainer>
+                  <BarChart data={entryExitAnalysisData.entryDayChart}>
+                    <CartesianGrid strokeDasharray="3 3" />
+                    <XAxis dataKey="day" />
+                    <YAxis />
+                    <RechartsTooltip formatter={(value: number, name: string) => [
+                      name === 'avgPnl' ? `$${value.toLocaleString()}` : value,
+                      name === 'avgPnl' ? 'Avg P&L' : 'Trade Count'
+                    ]} />
+                    <Bar dataKey="avgPnl" fill="#1976d2" />
+                  </BarChart>
+                </ResponsiveContainer>
+              </Box>
+            </Paper>
+          </Grid>
+
+          {/* Entry Hour Analysis */}
+          <Grid item xs={12} md={6}>
+            <Paper sx={{ p: 3 }}>
+              <Tooltip title="Shows average P&L by the time of day when trades were entered. Helps identify optimal entry timing patterns.">
+                <Typography variant="h6" gutterBottom sx={{ cursor: 'help' }}>
+                  Entry Time Analysis ℹ️
+                </Typography>
+              </Tooltip>
+              <Box sx={{ width: '100%', height: 300 }}>
+                <ResponsiveContainer>
+                  <BarChart data={entryExitAnalysisData.entryHourChart}>
+                    <CartesianGrid strokeDasharray="3 3" />
+                    <XAxis 
+                      dataKey="hour" 
+                      label={{ value: 'Time of Day (Hours)', position: 'insideBottom', offset: -5 }}
+                    />
+                    <YAxis 
+                      label={{ value: 'Avg P&L ($)', angle: -90, position: 'insideLeft' }}
+                      tickFormatter={(value) => `$${value.toLocaleString()}`}
+                    />
+                    <RechartsTooltip formatter={(value: number) => [`$${value.toLocaleString()}`, 'Avg P&L']} />
+                    <Bar dataKey="avgPnl" fill="#2e7d32" />
+                  </BarChart>
+                </ResponsiveContainer>
+              </Box>
+            </Paper>
+          </Grid>
+        </Grid>
+      )}
+
+      {/* Trading Psychology Tab */}
+      {tabValue === 5 && (
+        <Grid container spacing={3}>
+          {/* Psychology Summary Cards */}
+          <Grid item xs={12} md={3}>
+            <Card>
+              <CardContent>
+                <Typography color="text.secondary" gutterBottom>Max Win Streak</Typography>
+                <Typography variant="h4" color="success.main">{psychologyData.maxWinStreak}</Typography>
+                <Typography variant="body2" color="text.secondary">
+                  consecutive wins
+                </Typography>
+              </CardContent>
+            </Card>
+          </Grid>
+          <Grid item xs={12} md={3}>
+            <Card>
+              <CardContent>
+                <Typography color="text.secondary" gutterBottom>Max Loss Streak</Typography>
+                <Typography variant="h4" color="error.main">{psychologyData.maxLossStreak}</Typography>
+                <Typography variant="body2" color="text.secondary">
+                  consecutive losses
+                </Typography>
+              </CardContent>
+            </Card>
+          </Grid>
+          <Grid item xs={12} md={3}>
+            <Card>
+              <CardContent>
+                <Typography color="text.secondary" gutterBottom>Avg Win Streak</Typography>
+                <Typography variant="h4">{psychologyData.avgWinStreak.toFixed(1)}</Typography>
+                <Typography variant="body2" color="text.secondary">
+                  average streak
+                </Typography>
+              </CardContent>
+            </Card>
+          </Grid>
+          <Grid item xs={12} md={3}>
+            <Card>
+              <CardContent>
+                <Typography color="text.secondary" gutterBottom>Avg Loss Streak</Typography>
+                <Typography variant="h4">{psychologyData.avgLossStreak.toFixed(1)}</Typography>
+                <Typography variant="body2" color="text.secondary">
+                  average streak
+                </Typography>
+              </CardContent>
+            </Card>
+          </Grid>
+
+          {/* Emotional Impact Analysis */}
+          <Grid item xs={12}>
+            <Paper sx={{ p: 3 }}>
+              <Tooltip title="Categorizes trades by their potential emotional impact based on P&L size. Low Impact: <$1000, Medium Impact: $1000-$5000, High Impact: >$5000. Shows if larger trades affect your performance differently.">
+                <Typography variant="h6" gutterBottom sx={{ cursor: 'help' }}>
+                  Performance by Emotional Impact ℹ️
+                </Typography>
+              </Tooltip>
+              <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
+                How well do you perform on trades of different sizes? Large trades can create emotional pressure.
+              </Typography>
+              <Box sx={{ width: '100%', height: 400 }}>
+                <ResponsiveContainer>
+                  <BarChart data={psychologyData.impactChart}>
+                    <CartesianGrid strokeDasharray="3 3" />
+                    <XAxis dataKey="category" />
+                    <YAxis />
+                    <RechartsTooltip formatter={(value: number, name: string) => [
+                      name === 'winRate' ? `${value.toFixed(1)}%` : value,
+                      name === 'winRate' ? 'Win Rate' : name === 'wins' ? 'Wins' : 'Losses'
+                    ]} />
+                    <Bar dataKey="wins" stackId="trades" fill="#2e7d32" name="wins" />
+                    <Bar dataKey="losses" stackId="trades" fill="#d32f2f" name="losses" />
+                  </BarChart>
+                </ResponsiveContainer>
+              </Box>
+            </Paper>
+          </Grid>
+
+          {/* Psychological Impact Table */}
+          <Grid item xs={12}>
+            <Paper sx={{ p: 3 }}>
+              <Typography variant="h6" gutterBottom>Emotional Impact Analysis</Typography>
+              <TableContainer>
+                <Table>
+                  <TableHead>
+                    <TableRow>
+                      <TableCell>Impact Level</TableCell>
+                      <TableCell align="right">Total Trades</TableCell>
+                      <TableCell align="right">Wins</TableCell>
+                      <TableCell align="right">Losses</TableCell>
+                      <TableCell align="right">Win Rate</TableCell>
+                      <TableCell align="right">Total P&L</TableCell>
+                    </TableRow>
+                  </TableHead>
+                  <TableBody>
+                    {psychologyData.impactChart.map((row) => (
+                      <TableRow key={row.category}>
+                        <TableCell component="th" scope="row">{row.category}</TableCell>
+                        <TableCell align="right">{row.wins + row.losses}</TableCell>
+                        <TableCell align="right" sx={{ color: 'success.main' }}>{row.wins}</TableCell>
+                        <TableCell align="right" sx={{ color: 'error.main' }}>{row.losses}</TableCell>
+                        <TableCell 
+                          align="right"
+                          sx={{ color: row.winRate >= 50 ? 'success.main' : 'error.main' }}
+                        >
+                          {row.winRate.toFixed(1)}%
+                        </TableCell>
+                        <TableCell 
+                          align="right"
+                          sx={{ color: row.totalPnl >= 0 ? 'success.main' : 'error.main' }}
+                        >
+                          ${row.totalPnl.toLocaleString()}
+                        </TableCell>
+                      </TableRow>
+                    ))}
+                  </TableBody>
+                </Table>
+              </TableContainer>
+            </Paper>
           </Grid>
         </Grid>
       )}
 
       {/* Strategies Tab */}
-      {activeTab === 1 && (
+      {tabValue === 6 && (
         <Grid container spacing={3}>
           <Grid item xs={12}>
-            <Paper sx={{ p: 2 }}>
-              <Typography variant="h6" gutterBottom>
-                Strategy Performance
-              </Typography>
-              {hasStrategiesData ? (
-                <Box sx={{ height: 400 }}>
-                  <ResponsiveContainer width="100%" height="100%">
-                    <BarChart
-                      data={analyticsData.strategies}
-                      margin={{ top: 20, right: 30, left: 20, bottom: 5 }}
-                    >
-                      <CartesianGrid strokeDasharray="3 3" />
-                      <XAxis dataKey="name" />
-                      <YAxis yAxisId="left" orientation="left" stroke="#8884d8" />
-                      <YAxis yAxisId="right" orientation="right" stroke="#82ca9d" />
-                      <Tooltip 
-                        formatter={(value, name) => [
-                          typeof value === 'number' ? value.toFixed(2) : value,
-                          name
-                        ]}
-                      />
-                      <Legend />
-                      <Bar yAxisId="left" dataKey="trades" name="# of Trades" fill="#8884d8" />
-                      <Bar yAxisId="right" dataKey="winRate" name="Win Rate (%)" fill="#82ca9d" />
-                    </BarChart>
-                  </ResponsiveContainer>
-                </Box>
-              ) : (
-                <Box sx={{ height: 200, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-                  <Typography color="text.secondary">
-                    No strategy data available
-                  </Typography>
-                </Box>
-              )}
+            <Paper sx={{ p: 3 }}>
+              <Typography variant="h6" gutterBottom>Strategy Performance</Typography>
+              <TableContainer>
+                <Table>
+                  <TableHead>
+                    <TableRow>
+                      <TableCell>Strategy</TableCell>
+                      <TableCell align="right">Total Trades</TableCell>
+                      <TableCell align="right">Wins</TableCell>
+                      <TableCell align="right">Losses</TableCell>
+                      <TableCell align="right">Win Rate</TableCell>
+                      <TableCell align="right">Total P&L</TableCell>
+                      <TableCell align="right">Avg P&L</TableCell>
+                    </TableRow>
+                  </TableHead>
+                  <TableBody>
+                    {topPerformersData.topStrategies.map((strategy, index) => (
+                      <TableRow key={`${strategy.strategy}-${index}`}>
+                        <TableCell component="th" scope="row">
+                          <Typography variant="subtitle2">{strategy.strategy}</Typography>
+                        </TableCell>
+                        <TableCell align="right">{strategy.trades}</TableCell>
+                        <TableCell align="right" sx={{ color: 'success.main' }}>{strategy.wins}</TableCell>
+                        <TableCell align="right" sx={{ color: 'error.main' }}>{strategy.losses}</TableCell>
+                        <TableCell 
+                          align="right"
+                          sx={{ color: strategy.winRate >= 50 ? 'success.main' : 'error.main' }}
+                        >
+                          {strategy.winRate.toFixed(1)}%
+                        </TableCell>
+                        <TableCell 
+                          align="right"
+                          sx={{ color: strategy.totalPnl >= 0 ? 'success.main' : 'error.main' }}
+                        >
+                          ${strategy.totalPnl.toLocaleString()}
+                        </TableCell>
+                        <TableCell 
+                          align="right"
+                          sx={{ color: strategy.avgPnl >= 0 ? 'success.main' : 'error.main' }}
+                        >
+                          ${strategy.avgPnl.toLocaleString()}
+                        </TableCell>
+                      </TableRow>
+                    ))}
+                  </TableBody>
+                </Table>
+              </TableContainer>
             </Paper>
           </Grid>
 
+          {/* Strategy Performance Chart */}
           <Grid item xs={12}>
-            <Paper sx={{ p: 2 }}>
-              <Typography variant="h6" gutterBottom>
-                Strategy Details
-              </Typography>
-              <Divider sx={{ mb: 2 }} />
-              {hasStrategiesData ? (
-                <Grid container spacing={2}>
-                  {analyticsData.strategies.map((strategy) => (
-                    <Grid item xs={12} sm={6} md={4} key={strategy.name}>
-                      <Card variant="outlined">
-                        <CardContent>
-                          <Typography variant="h6" gutterBottom>
-                            {strategy.name}
-                          </Typography>
-                          <Typography variant="body2" color="text.secondary">
-                            Total Trades
-                          </Typography>
-                          <Typography variant="body1" gutterBottom>
-                            {strategy.trades}
-                          </Typography>
-                          <Typography variant="body2" color="text.secondary">
-                            Win Rate
-                          </Typography>
-                          <Typography variant="body1" gutterBottom>
-                            {formatPercentage(strategy.winRate * 100)}
-                          </Typography>
-                          <Typography variant="body2" color="text.secondary">
-                            Avg. Return
-                          </Typography>
-                          <Typography 
-                            variant="body1"
-                            color={strategy.avgReturn >= 0 ? 'success.main' : 'error.main'}
-                          >
-                            {formatPercentage(strategy.avgReturn, 2)}
-                          </Typography>
-                        </CardContent>
-                      </Card>
-                    </Grid>
-                  ))}
-                </Grid>
-              ) : (
-                <Box sx={{ height: 100, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-                  <Typography color="text.secondary">
-                    No strategy details available
-                  </Typography>
-                </Box>
-              )}
+            <Paper sx={{ p: 3 }}>
+              <Typography variant="h6" gutterBottom>Strategy P&L Comparison</Typography>
+              <Box sx={{ width: '100%', height: 400 }}>
+                <ResponsiveContainer>
+                  <BarChart data={topPerformersData.topStrategies.slice(0, 8)}>
+                    <CartesianGrid strokeDasharray="3 3" />
+                    <XAxis dataKey="strategy" angle={-45} textAnchor="end" height={100} />
+                    <YAxis tickFormatter={(value) => `$${value.toLocaleString()}`} />
+                    <RechartsTooltip formatter={(value: number) => [`$${value.toLocaleString()}`, 'Total P&L']} />
+                    <Bar dataKey="totalPnl" fill="#1976d2" />
+                  </BarChart>
+                </ResponsiveContainer>
+              </Box>
             </Paper>
           </Grid>
         </Grid>
       )}
 
-      {/* Setups Tab */}
-      {activeTab === 2 && (
+      {/* Top Performers Tab */}
+      {tabValue === 7 && (
         <Grid container spacing={3}>
-          <Grid item xs={12}>
-            <Paper sx={{ p: 2 }}>
-              <Typography variant="h6" gutterBottom>
-                Setup Performance
-              </Typography>
-              {hasSetupsData ? (
-                <Box sx={{ height: 400 }}>
-                  <ResponsiveContainer width="100%" height="100%">
-                    <BarChart
-                      data={analyticsData.setups}
-                      margin={{ top: 20, right: 30, left: 20, bottom: 5 }}
-                    >
-                      <CartesianGrid strokeDasharray="3 3" />
-                      <XAxis dataKey="name" />
-                      <YAxis yAxisId="left" orientation="left" stroke="#8884d8" />
-                      <YAxis yAxisId="right" orientation="right" stroke="#82ca9d" />
-                      <Tooltip 
-                        formatter={(value, name) => [
-                          typeof value === 'number' ? value.toFixed(2) : value,
-                          name
-                        ]}
-                      />
-                      <Legend />
-                      <Bar yAxisId="left" dataKey="trades" name="# of Trades" fill="#8884d8" />
-                      <Bar yAxisId="right" dataKey="winRate" name="Win Rate (%)" fill="#82ca9d" />
-                    </BarChart>
-                  </ResponsiveContainer>
-                </Box>
-              ) : (
-                <Box sx={{ height: 200, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-                  <Typography color="text.secondary">
-                    No setup performance data available
-                  </Typography>
-                </Box>
-              )}
+          {/* Best Trades */}
+          <Grid item xs={12} md={6}>
+            <Paper sx={{ p: 3 }}>
+              <Typography variant="h6" gutterBottom>🏆 Best Trades</Typography>
+              <TableContainer sx={{ maxHeight: 400 }}>
+                <Table stickyHeader>
+                  <TableHead>
+                    <TableRow>
+                      <TableCell>Ticker</TableCell>
+                      <TableCell align="right">P&L</TableCell>
+                      <TableCell align="right">Date</TableCell>
+                    </TableRow>
+                  </TableHead>
+                  <TableBody>
+                    {topPerformersData.bestTrades.map((trade, index) => (
+                      <TableRow key={`best-${trade.id || index}`}>
+                        <TableCell>
+                          <Typography variant="subtitle2">{trade.ticker}</Typography>
+                        </TableCell>
+                        <TableCell align="right" sx={{ color: 'success.main' }}>
+                          ${(trade.total_realized_pnl || 0).toLocaleString()}
+                        </TableCell>
+                        <TableCell align="right">
+                          {trade.closed_at ? new Date(trade.closed_at).toLocaleDateString() : 'N/A'}
+                        </TableCell>
+                      </TableRow>
+                    ))}
+                  </TableBody>
+                </Table>
+              </TableContainer>
             </Paper>
           </Grid>
 
+          {/* Worst Trades */}
+          <Grid item xs={12} md={6}>
+            <Paper sx={{ p: 3 }}>
+              <Typography variant="h6" gutterBottom>📉 Worst Trades</Typography>
+              <TableContainer sx={{ maxHeight: 400 }}>
+                <Table stickyHeader>
+                  <TableHead>
+                    <TableRow>
+                      <TableCell>Ticker</TableCell>
+                      <TableCell align="right">P&L</TableCell>
+                      <TableCell align="right">Date</TableCell>
+                    </TableRow>
+                  </TableHead>
+                  <TableBody>
+                    {topPerformersData.worstTrades.map((trade, index) => (
+                      <TableRow key={`worst-${trade.id || index}`}>
+                        <TableCell>
+                          <Typography variant="subtitle2">{trade.ticker}</Typography>
+                        </TableCell>
+                        <TableCell align="right" sx={{ color: 'error.main' }}>
+                          ${(trade.total_realized_pnl || 0).toLocaleString()}
+                        </TableCell>
+                        <TableCell align="right">
+                          {trade.closed_at ? new Date(trade.closed_at).toLocaleDateString() : 'N/A'}
+                        </TableCell>
+                      </TableRow>
+                    ))}
+                  </TableBody>
+                </Table>
+              </TableContainer>
+            </Paper>
+          </Grid>
+
+          {/* Top Performing Tickers */}
           <Grid item xs={12}>
-            <Paper sx={{ p: 2 }}>
-              <Typography variant="h6" gutterBottom>
-                Setup Details
-              </Typography>
-              <Divider sx={{ mb: 2 }} />
-              {hasSetupsData ? (
-                <Grid container spacing={2}>
-                  {analyticsData.setups.map((setup) => (
-                    <Grid item xs={12} sm={6} md={4} key={setup.name}>
-                      <Card variant="outlined">
-                        <CardContent>
-                          <Typography variant="h6" gutterBottom>
-                            {setup.name}
-                          </Typography>
-                          <Typography variant="body2" color="text.secondary">
-                            Total Trades
-                          </Typography>
-                          <Typography variant="body1" gutterBottom>
-                            {setup.trades}
-                          </Typography>
-                          <Typography variant="body2" color="text.secondary">
-                            Win Rate
-                          </Typography>
-                          <Typography variant="body1" gutterBottom>
-                            {formatPercentage(setup.winRate * 100)}
-                          </Typography>
-                          <Typography variant="body2" color="text.secondary">
-                            Avg. Return
-                          </Typography>
-                          <Typography 
-                            variant="body1"
-                            color={setup.avgReturn >= 0 ? 'success.main' : 'error.main'}
-                          >
-                            {formatPercentage(setup.avgReturn, 2)}
-                          </Typography>
-                        </CardContent>
-                      </Card>
-                    </Grid>
-                  ))}
-                </Grid>
-              ) : (
-                <Box sx={{ height: 100, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-                  <Typography color="text.secondary">
-                    No setup details available
-                  </Typography>
-                </Box>
-              )}
+            <Paper sx={{ p: 3 }}>
+              <Typography variant="h6" gutterBottom>🏆 Top Performing Tickers</Typography>
+              <TableContainer>
+                <Table>
+                  <TableHead>
+                    <TableRow>
+                      <TableCell>Ticker</TableCell>
+                      <TableCell align="right">Total Trades</TableCell>
+                      <TableCell align="right">Wins</TableCell>
+                      <TableCell align="right">Losses</TableCell>
+                      <TableCell align="right">Win Rate</TableCell>
+                      <TableCell align="right">Total P&L</TableCell>
+                      <TableCell align="right">Avg P&L</TableCell>
+                    </TableRow>
+                  </TableHead>
+                  <TableBody>
+                    {topPerformersData.topTickers.map((ticker, index) => (
+                      <TableRow key={`ticker-${ticker.ticker}-${index}`}>
+                        <TableCell component="th" scope="row">
+                          <Typography variant="subtitle2" fontWeight="bold">{ticker.ticker}</Typography>
+                        </TableCell>
+                        <TableCell align="right">{ticker.trades}</TableCell>
+                        <TableCell align="right" sx={{ color: 'success.main' }}>{ticker.wins}</TableCell>
+                        <TableCell align="right" sx={{ color: 'error.main' }}>{ticker.losses}</TableCell>
+                        <TableCell 
+                          align="right"
+                          sx={{ color: ticker.winRate >= 50 ? 'success.main' : 'error.main' }}
+                        >
+                          {ticker.winRate.toFixed(1)}%
+                        </TableCell>
+                        <TableCell 
+                          align="right"
+                          sx={{ color: ticker.totalPnl >= 0 ? 'success.main' : 'error.main' }}
+                        >
+                          ${ticker.totalPnl.toLocaleString()}
+                        </TableCell>
+                        <TableCell 
+                          align="right"
+                          sx={{ color: ticker.avgPnl >= 0 ? 'success.main' : 'error.main' }}
+                        >
+                          ${ticker.avgPnl.toLocaleString()}
+                        </TableCell>
+                      </TableRow>
+                    ))}
+                  </TableBody>
+                </Table>
+              </TableContainer>
+            </Paper>
+          </Grid>
+
+          {/* Top Tickers Performance Chart */}
+          <Grid item xs={12}>
+            <Paper sx={{ p: 3 }}>
+              <Typography variant="h6" gutterBottom>Top Tickers P&L Chart</Typography>
+              <Box sx={{ width: '100%', height: 400 }}>
+                <ResponsiveContainer>
+                  <BarChart data={topPerformersData.topTickers.slice(0, 10)}>
+                    <CartesianGrid strokeDasharray="3 3" />
+                    <XAxis dataKey="ticker" />
+                    <YAxis tickFormatter={(value) => `$${value.toLocaleString()}`} />
+                    <RechartsTooltip formatter={(value: number) => [`$${value.toLocaleString()}`, 'Total P&L']} />
+                    <Bar dataKey="totalPnl" fill="#1976d2" />
+                  </BarChart>
+                </ResponsiveContainer>
+              </Box>
             </Paper>
           </Grid>
         </Grid>

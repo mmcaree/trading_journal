@@ -7,7 +7,7 @@ from typing import Optional
 
 from app.core.config import settings
 from app.db.session import get_db
-from app.models.models import User
+from app.models import User
 from app.services.user_service import get_user_by_username
 
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/api/auth/login")

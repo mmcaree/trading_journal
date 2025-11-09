@@ -1,394 +1,473 @@
-// src/pages/Dashboard.tsx
-import React, { useEffect, useState } from 'react';
-import { Grid, Card, CardContent, Typography, Box, Button, Paper, Alert, ToggleButton, ToggleButtonGroup } from '@mui/material';
-import { Link } from 'react-router-dom';
-import { useAuth } from '../context/AuthContext';
-import { fetchDashboardData } from '../services/tradeService';
-import { testApiConnection } from '../services/debugService';
-import { formatCurrency, formatPercentage, formatProfitLoss } from '../utils/formatters';
-import { currencyTooltipFormatter, currencyTooltipFormatterWithDate, currencyTickFormatter } from '../utils/chartFormatters';
-import CurrencyDisplay from '../components/CurrencyDisplay';
+import React, { useState, useEffect } from 'react';
 import {
-  LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer,
-  PieChart, Pie, Cell
+  Box,
+  Grid,
+  Card,
+  CardContent,
+  Typography,
+  Button,
+  Paper,
+  Chip,
+  Alert,
+  LinearProgress
+} from '@mui/material';
+import {
+  TrendingUp as TrendingUpIcon,
+  TrendingDown as TrendingDownIcon,
+  Assessment as AssessmentIcon,
+  AccountBalance as AccountBalanceIcon,
+  Timeline as TimelineIcon,
+  Add as AddIcon
+} from '@mui/icons-material';
+import {
+  LineChart,
+  Line,
+  XAxis,
+  YAxis,
+  CartesianGrid,
+  Tooltip,
+  ResponsiveContainer,
+  PieChart,
+  Pie,
+  Cell
 } from 'recharts';
+import { Link, useLocation } from 'react-router-dom';
 
-interface DashboardData {
-  totalTrades: number;
-  openTrades: number;
+import { getAllPositions } from '../services/positionsService';
+import { accountService } from '../services/accountService';
+import { useCurrency } from '../context/CurrencyContext';
+import { Position } from '../services/positionsService';
+
+const COLORS = ['#1da0f0', '#00C49F', '#FFBB28', '#FF8042', '#8884D8'];
+
+interface DashboardMetrics {
+  totalPositions: number;
+  openPositions: number;
+  closedPositions: number;
+  totalInvested: number;
+  totalRealized: number;
+  totalUnrealized: number;
   winRate: number;
-  profitLoss: number;
-  equityCurve: Array<{ date: string; equity: number }>;
-  setupPerformance: Array<{ name: string; value: number; color: string }>;
-  recentTrades: Array<{
-    id: number;
-    ticker: string;
-    entryDate: string;
-    status: string;
-    profitLoss: number | null;
-  }>;
+  bestPerformer: { ticker: string; pnl: number } | null;
+  worstPerformer: { ticker: string; pnl: number } | null;
+  accountBalance: number;
+  accountGrowth: number;
 }
 
-const COLORS = [
-  '#4caf50', // Green
-  '#ff9800', // Orange  
-  '#f44336', // Red
-  '#2196f3', // Blue
-  '#9c27b0', // Purple
-  '#795548', // Brown
-  '#e91e63', // Pink
-  '#00bcd4', // Cyan
-  '#ff5722', // Deep Orange
-  '#607d8b', // Blue Grey
-  '#ffc107', // Amber
-  '#8bc34a'  // Light Green
-];
-
 const Dashboard: React.FC = () => {
-  const [dashboardData, setDashboardData] = useState<DashboardData | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [apiStatus, setApiStatus] = useState<{status: string, message: string} | null>(null);
-  const [timeRange, setTimeRange] = useState<string>('1M');
-  const { user } = useAuth();
+  const [metrics, setMetrics] = useState<DashboardMetrics | null>(null);
+  const [positions, setPositions] = useState<Position[]>([]);
+  const { formatCurrency } = useCurrency();
+  const location = useLocation();
 
   useEffect(() => {
-    const testConnection = async () => {
-      setLoading(true);
-      try {
-        // First test the API connection
-        const connectionResult = await testApiConnection();
-        setApiStatus(connectionResult);
-        
-        if (connectionResult.status === 'success') {
-          // If API connection is successful, load the dashboard data
-          console.log('Dashboard: API connection successful, now fetching dashboard data...');
-          const data = await fetchDashboardData();
-          setDashboardData(data);
-          console.log('Dashboard data loaded successfully:', data);
-          setError(null);
-        } else {
-          setError('Cannot connect to the API. Please check if the backend server is running.');
-        }
-      } catch (err: any) {
-        console.error('Error in dashboard initialization:', err);
-        setError(err.message || 'An error occurred while loading the dashboard');
-      } finally {
-        setLoading(false);
+    loadDashboardData();
+  }, []);
+
+  // Refresh data when navigating to dashboard
+  useEffect(() => {
+    if (location.pathname === '/') {
+      loadDashboardData();
+    }
+  }, [location.pathname]);
+
+  // Refresh data when user returns to the page/tab
+  useEffect(() => {
+    const handleVisibilityChange = () => {
+      if (!document.hidden) {
+        // Page became visible, refresh data
+        loadDashboardData();
       }
     };
 
-    testConnection();
+    const handleFocus = () => {
+      // Page gained focus, refresh data
+      loadDashboardData();
+    };
+
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+    window.addEventListener('focus', handleFocus);
+
+    return () => {
+      document.removeEventListener('visibilitychange', handleVisibilityChange);
+      window.removeEventListener('focus', handleFocus);
+    };
   }, []);
 
-  // Filter equity curve data based on selected time range
-  const getFilteredEquityCurve = () => {
-    if (!dashboardData?.equityCurve) {
-      console.log('No equity curve data available');
-      return [];
-    }
+  const loadDashboardData = async () => {
+    setLoading(true);
+    setError(null);
     
-    console.log('Original equity curve data:', dashboardData.equityCurve);
-    
-    let filteredData = dashboardData.equityCurve;
-    
-    if (timeRange !== 'ALL') {
-      const now = new Date();
-      let startDate: Date;
+    try {
+      // Load all positions
+      const allPositions = await getAllPositions({ limit: 100000 });
+      setPositions(allPositions);
+
+      // Calculate metrics
+      const openPositions = allPositions.filter(p => p.status === 'open');
+      const closedPositions = allPositions.filter(p => p.status === 'closed');
       
-      switch (timeRange) {
-        case '1M':
-          startDate = new Date(now.getFullYear(), now.getMonth() - 1, now.getDate());
-          break;
-        case '3M':
-          startDate = new Date(now.getFullYear(), now.getMonth() - 3, now.getDate());
-          break;
-        case '6M':
-          startDate = new Date(now.getFullYear(), now.getMonth() - 6, now.getDate());
-          break;
-        case 'YTD':
-          startDate = new Date(now.getFullYear(), 0, 1);
-          break;
-        default:
-          return filteredData;
-      }
+      const totalInvested = allPositions.reduce((sum, p) => sum + (p.total_cost || 0), 0);
+      const totalRealized = closedPositions.reduce((sum, p) => sum + (p.total_realized_pnl || 0), 0);
       
-      filteredData = dashboardData.equityCurve.filter(item => new Date(item.date) >= startDate);
-      console.log('Filtered data length:', filteredData.length, 'from', dashboardData.equityCurve.length);
+      // Calculate unrealized P&L for open positions (simplified - would need current prices)
+      const totalUnrealized = openPositions.reduce((sum, p) => {
+        // For now, assume no unrealized gains until we have current market prices
+        return sum + 0;
+      }, 0);
+      
+      // Win rate calculation
+      const profitableClosedPositions = closedPositions.filter(p => (p.total_realized_pnl || 0) > 0);
+      const winRate = closedPositions.length > 0 ? (profitableClosedPositions.length / closedPositions.length) * 100 : 0;
+      
+      // Best/Worst performers
+      const sortedByPnL = closedPositions
+        .filter(p => p.total_realized_pnl !== undefined && p.total_realized_pnl !== null)
+        .sort((a, b) => (b.total_realized_pnl || 0) - (a.total_realized_pnl || 0));
+      
+      const bestPerformer = sortedByPnL.length > 0 
+        ? { ticker: sortedByPnL[0].ticker, pnl: sortedByPnL[0].total_realized_pnl || 0 }
+        : null;
+      
+      const worstPerformer = sortedByPnL.length > 0
+        ? { ticker: sortedByPnL[sortedByPnL.length - 1].ticker, pnl: sortedByPnL[sortedByPnL.length - 1].total_realized_pnl || 0 }
+        : null;
+
+      // Account information
+      const accountBalance = accountService.getCurrentBalance();
+      const startingBalance = accountService.getAccountSettings().starting_balance;
+      const accountGrowth = ((accountBalance - startingBalance) / startingBalance) * 100;
+
+      setMetrics({
+        totalPositions: allPositions.length,
+        openPositions: openPositions.length,
+        closedPositions: closedPositions.length,
+        totalInvested,
+        totalRealized,
+        totalUnrealized,
+        winRate,
+        bestPerformer,
+        worstPerformer,
+        accountBalance,
+        accountGrowth
+      });
+      
+    } catch (err) {
+      console.error('Error loading dashboard data:', err);
+      setError(err instanceof Error ? err.message : 'Failed to load dashboard data');
+    } finally {
+      setLoading(false);
     }
-    
-    // Ensure data is sorted by date (should already be sorted from backend)
-    const sortedData = [...filteredData].sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime());
-    console.log('Final sorted equity curve data for chart:', sortedData);
-    
-    return sortedData;
   };
 
-  const handleTimeRangeChange = (event: React.MouseEvent<HTMLElement>, newRange: string) => {
-    if (newRange !== null) {
-      setTimeRange(newRange);
-    }
+  // Generate pie chart data for position status
+  const getPositionStatusData = () => {
+    if (!metrics) return [];
+    
+    return [
+      { name: 'Open', value: metrics.openPositions, color: COLORS[0] },
+      { name: 'Closed', value: metrics.closedPositions, color: COLORS[1] }
+    ];
   };
+
+  // Generate recent positions data
+  const getRecentPositions = () => {
+    return positions
+      .sort((a, b) => new Date(b.opened_at).getTime() - new Date(a.opened_at).getTime())
+      .slice(0, 5);
+  };
+
   if (loading) {
     return (
-      <Box display="flex" justifyContent="center" alignItems="center" minHeight="50vh">
-        <Typography variant="h6">Loading dashboard data...</Typography>
+      <Box>
+        <Typography variant="h4" gutterBottom>Dashboard</Typography>
+        <LinearProgress />
+        <Typography variant="body2" sx={{ mt: 2 }}>Loading dashboard data...</Typography>
       </Box>
     );
   }
 
   if (error) {
     return (
-      <Box display="flex" flexDirection="column" justifyContent="center" alignItems="center" minHeight="50vh">
-        <Typography variant="h6" color="error" gutterBottom>
+      <Box>
+        <Typography variant="h4" gutterBottom>Dashboard</Typography>
+        <Alert severity="error" sx={{ mb: 2 }}>
           {error}
-        </Typography>
-        {apiStatus && (
-          <Typography variant="body2" color="textSecondary">
-            API Status: {apiStatus.message}
-          </Typography>
-        )}
-        <Button 
-          variant="contained" 
-          color="primary" 
-          onClick={() => window.location.reload()} 
-          sx={{ mt: 2 }}
-        >
+        </Alert>
+        <Button variant="contained" onClick={loadDashboardData}>
           Retry
         </Button>
       </Box>
     );
   }
 
-  if (!dashboardData) {
+  if (!metrics) {
     return (
-      <Box display="flex" justifyContent="center" alignItems="center" minHeight="50vh">
-        <Typography variant="h6" color="error">
-          Failed to load dashboard data. Please try refreshing the page.
-        </Typography>
+      <Box>
+        <Typography variant="h4" gutterBottom>Dashboard</Typography>
+        <Alert severity="warning">
+          No data available. Start by creating your first position.
+        </Alert>
       </Box>
     );
   }
 
   return (
     <Box>
+      {/* Header */}
       <Box display="flex" justifyContent="space-between" alignItems="center" mb={3}>
-        <Typography variant="h4">Dashboard</Typography>
+        <Typography variant="h4">Trading Dashboard</Typography>
         <Button
           variant="contained"
-          color="primary"
+          startIcon={<AddIcon />}
           component={Link}
-          to="/trades/new"
+          to="/positions"
         >
-          New Trade
+          Create Position
         </Button>
       </Box>
 
       <Grid container spacing={3}>
-        {/* Stats Cards */}
-        <Grid item xs={12} sm={6} md={3}>
+        
+        {/* Account Overview */}
+        <Grid item xs={12} md={4}>
+          <Card>
+            <CardContent>
+              <Box display="flex" alignItems="center" mb={2}>
+                <AccountBalanceIcon color="primary" sx={{ mr: 1 }} />
+                <Typography variant="h6">Account Balance</Typography>
+              </Box>
+              <Typography variant="h3" color="primary">
+                {formatCurrency(metrics.accountBalance)}
+              </Typography>
+              <Box display="flex" alignItems="center" mt={1}>
+                {metrics.accountGrowth >= 0 ? (
+                  <TrendingUpIcon color="success" fontSize="small" />
+                ) : (
+                  <TrendingDownIcon color="error" fontSize="small" />
+                )}
+                <Typography 
+                  variant="body2" 
+                  color={metrics.accountGrowth >= 0 ? 'success.main' : 'error.main'}
+                  sx={{ ml: 0.5 }}
+                >
+                  {metrics.accountGrowth.toFixed(2)}% Total Growth
+                </Typography>
+              </Box>
+            </CardContent>
+          </Card>
+        </Grid>
+
+        {/* Total Positions */}
+        <Grid item xs={12} md={2}>
           <Card>
             <CardContent>
               <Typography color="textSecondary" gutterBottom>
-                Total Trades
+                Total Positions
               </Typography>
               <Typography variant="h3">
-                {dashboardData.totalTrades}
+                {metrics.totalPositions}
+              </Typography>
+              <Typography variant="body2" color="textSecondary">
+                {metrics.openPositions} open, {metrics.closedPositions} closed
               </Typography>
             </CardContent>
           </Card>
         </Grid>
 
-        <Grid item xs={12} sm={6} md={3}>
-          <Card>
-            <CardContent>
-              <Typography color="textSecondary" gutterBottom>
-                Open Positions
-              </Typography>
-              <Typography variant="h3">
-                {dashboardData.openTrades}
-              </Typography>
-            </CardContent>
-          </Card>
-        </Grid>
-
-        <Grid item xs={12} sm={6} md={3}>
+        {/* Win Rate */}
+        <Grid item xs={12} md={2}>
           <Card>
             <CardContent>
               <Typography color="textSecondary" gutterBottom>
                 Win Rate
               </Typography>
-              <Typography variant="h3">
-                {formatPercentage(dashboardData.winRate)}
+              <Typography variant="h3" color={metrics.winRate >= 50 ? 'success.main' : 'error.main'}>
+                {metrics.winRate.toFixed(1)}%
+              </Typography>
+              <Typography variant="body2" color="textSecondary">
+                {metrics.closedPositions} closed positions
               </Typography>
             </CardContent>
           </Card>
         </Grid>
 
-        <Grid item xs={12} sm={6} md={3}>
+        {/* Total Realized P&L */}
+        <Grid item xs={12} md={2}>
           <Card>
             <CardContent>
               <Typography color="textSecondary" gutterBottom>
-                P&L
+                Realized P&L
               </Typography>
-              <CurrencyDisplay 
-                value={dashboardData.profitLoss}
-                type="profit-loss"
+              <Typography 
                 variant="h3" 
-                color={dashboardData.profitLoss >= 0 ? 'primary' : 'secondary'}
-              />
+                color={metrics.totalRealized >= 0 ? 'success.main' : 'error.main'}
+              >
+                {formatCurrency(metrics.totalRealized)}
+              </Typography>
+              <Typography variant="body2" color="textSecondary">
+                From closed positions
+              </Typography>
             </CardContent>
           </Card>
         </Grid>
 
-        {/* Equity Curve Chart */}
-        <Grid item xs={12} md={8}>
-          <Paper sx={{ p: 2, height: 400 }}>
-            <Box display="flex" justifyContent="space-between" alignItems="center" mb={2}>
-              <Typography variant="h6">
-                Equity Curve
+        {/* Total Invested */}
+        <Grid item xs={12} md={2}>
+          <Card>
+            <CardContent>
+              <Typography color="textSecondary" gutterBottom>
+                Total Invested
               </Typography>
-              <ToggleButtonGroup
-                value={timeRange}
-                exclusive
-                onChange={handleTimeRangeChange}
-                aria-label="time range"
-                size="small"
-              >
-                <ToggleButton value="1M" aria-label="1 month">1M</ToggleButton>
-                <ToggleButton value="3M" aria-label="3 months">3M</ToggleButton>
-                <ToggleButton value="6M" aria-label="6 months">6M</ToggleButton>
-                <ToggleButton value="YTD" aria-label="year to date">YTD</ToggleButton>
-                <ToggleButton value="ALL" aria-label="all time">ALL</ToggleButton>
-              </ToggleButtonGroup>
-            </Box>
-            <ResponsiveContainer width="100%" height={300}>
-              <LineChart
-                data={getFilteredEquityCurve()}
-                margin={{ top: 5, right: 30, left: 20, bottom: 5 }}
-              >
-                <CartesianGrid strokeDasharray="3 3" />
-                <XAxis 
-                  dataKey="date" 
-                  tick={{ fontSize: 12 }}
-                  interval="preserveStartEnd"
-                />
-                <YAxis 
-                  tickFormatter={currencyTickFormatter}
-                  tick={{ fontSize: 12 }}
-                />
-                <Tooltip formatter={currencyTooltipFormatterWithDate} />
-                <Legend />
-                <Line 
-                  type="monotone" 
-                  dataKey="equity" 
-                  stroke="#4caf50" 
-                  strokeWidth={2}
-                  dot={false}
-                  activeDot={{ r: 6 }} 
-                />
-              </LineChart>
-            </ResponsiveContainer>
-          </Paper>
+              <Typography variant="h3">
+                {formatCurrency(metrics.totalInvested)}
+              </Typography>
+              <Typography variant="body2" color="textSecondary">
+                Across all positions
+              </Typography>
+            </CardContent>
+          </Card>
         </Grid>
 
-        {/* Setup Performance */}
-        <Grid item xs={12} md={4}>
-          <Paper sx={{ p: 2, height: 400 }}>            <Typography variant="h6" gutterBottom>
-              Strategy Performance
-            </Typography>
-            <ResponsiveContainer width="100%" height="90%">
-              <PieChart>
-                <Pie
-                  data={dashboardData.setupPerformance}
-                  cx="50%"
-                  cy="50%"
-                  labelLine={false}
-                  label={false}
-                  outerRadius={80}
-                  dataKey="value"
-                >
-                  {dashboardData.setupPerformance.map((entry, index) => (
-                    <Cell key={`cell-${index}`} fill={COLORS[index % COLORS.length]} />
-                  ))}
-                </Pie>
-                <Tooltip 
-                  formatter={(value, name, props) => {
-                    const total = dashboardData.setupPerformance.reduce((sum, item) => sum + item.value, 0);
-                    const percentage = total > 0 ? ((value as number) / total * 100).toFixed(1) : '0.0';
-                    return [`${percentage}%`, name];
-                  }}
-                />
-                <Legend 
-                  wrapperStyle={{ paddingTop: '20px' }}
-                  formatter={(value, entry) => {
-                    const data = entry?.payload;
-                    if (!data) return value;
-                    return `${value}: ${data.value.toFixed(1)}%`;
-                  }}
-                />
-              </PieChart>
-            </ResponsiveContainer>
-          </Paper>
+        {/* Position Status Chart */}
+        <Grid item xs={12} md={6}>
+          <Card>
+            <CardContent>
+              <Typography variant="h6" gutterBottom>Position Status</Typography>
+              <Box height={200}>
+                <ResponsiveContainer width="100%" height="100%">
+                  <PieChart>
+                    <Pie
+                      data={getPositionStatusData()}
+                      cx="50%"
+                      cy="50%"
+                      outerRadius={80}
+                      fill="#1da0f0"
+                      dataKey="value"
+                      label={({ name, value }) => `${name}: ${value}`}
+                    >
+                      {getPositionStatusData().map((entry, index) => (
+                        <Cell key={`cell-${index}`} fill={entry.color} />
+                      ))}
+                    </Pie>
+                    <Tooltip />
+                  </PieChart>
+                </ResponsiveContainer>
+              </Box>
+            </CardContent>
+          </Card>
         </Grid>
 
-        {/* Recent Trades */}
-        <Grid item xs={12}>
-          <Paper sx={{ p: 2 }}>
-            <Box display="flex" justifyContent="space-between" alignItems="center" mb={2}>
-              <Typography variant="h6">Recent Trades</Typography>
-              <Button component={Link} to="/trades">View All</Button>
-            </Box>
-            <Grid container spacing={2}>
-              {dashboardData.recentTrades.map((trade) => (
-                <Grid item xs={12} md={6} lg={4} key={trade.id}>
-                  <Card>
-                    <CardContent>
-                      <Box display="flex" justifyContent="space-between">
-                        <Typography variant="h6">{trade.ticker}</Typography>
-                        {trade.profitLoss !== null && (
-                          <CurrencyDisplay 
-                            value={trade.profitLoss}
-                            type="profit-loss"
-                            variant="body1" 
-                            color={trade.profitLoss >= 0 ? 'primary' : 'secondary'}
-                          />
-                        )}
-                      </Box>                      <Typography color="textSecondary">
-                        {trade.entryDate ? new Date(trade.entryDate).toLocaleDateString() : 'N/A'}
+        {/* Performance Highlights */}
+        <Grid item xs={12} md={6}>
+          <Card>
+            <CardContent>
+              <Typography variant="h6" gutterBottom>Performance Highlights</Typography>
+              <Box>
+                {metrics.bestPerformer && (
+                  <Box display="flex" justifyContent="space-between" alignItems="center" mb={2}>
+                    <Box display="flex" alignItems="center">
+                      <TrendingUpIcon color="success" sx={{ mr: 1 }} />
+                      <Typography variant="body1">Best Performer</Typography>
+                    </Box>
+                    <Box textAlign="right">
+                      <Typography variant="subtitle1">{metrics.bestPerformer.ticker}</Typography>
+                      <Typography variant="body2" color="success.main">
+                        {formatCurrency(metrics.bestPerformer.pnl)}
                       </Typography>
-                      <Box mt={1} display="flex" justifyContent="space-between">
-                        <Typography 
-                          variant="body2"
-                          sx={{
-                            backgroundColor: 
-                              trade.status === 'Open' ? 'info.main' : 
-                              trade.status === 'Closed' && trade.profitLoss !== null && trade.profitLoss > 0 ? 'success.main' : 
-                              trade.status === 'Closed' && trade.profitLoss !== null && trade.profitLoss < 0 ? 'error.main' :
-                              'grey.500',
-                            color: 'white',
-                            px: 1,
-                            py: 0.5,
-                            borderRadius: 1
-                          }}
-                        >
-                          {trade.status.toUpperCase()}
-                        </Typography>
-                        <Button 
-                          size="small" 
-                          component={Link} 
-                          to={`/trades/${trade.id}`}
-                        >
-                          Details
-                        </Button>
-                      </Box>
-                    </CardContent>
-                  </Card>
-                </Grid>
-              ))}
-            </Grid>
-          </Paper>
+                    </Box>
+                  </Box>
+                )}
+                
+                {metrics.worstPerformer && (
+                  <Box display="flex" justifyContent="space-between" alignItems="center">
+                    <Box display="flex" alignItems="center">
+                      <TrendingDownIcon color="error" sx={{ mr: 1 }} />
+                      <Typography variant="body1">Worst Performer</Typography>
+                    </Box>
+                    <Box textAlign="right">
+                      <Typography variant="subtitle1">{metrics.worstPerformer.ticker}</Typography>
+                      <Typography variant="body2" color="error.main">
+                        {formatCurrency(metrics.worstPerformer.pnl)}
+                      </Typography>
+                    </Box>
+                  </Box>
+                )}
+                
+                {!metrics.bestPerformer && !metrics.worstPerformer && (
+                  <Typography variant="body2" color="textSecondary">
+                    No closed positions yet to analyze performance.
+                  </Typography>
+                )}
+              </Box>
+            </CardContent>
+          </Card>
         </Grid>
+
+        {/* Recent Positions */}
+        <Grid item xs={12}>
+          <Card>
+            <CardContent>
+              <Box display="flex" justifyContent="space-between" alignItems="center" mb={2}>
+                <Typography variant="h6">Recent Positions</Typography>
+                <Button 
+                  component={Link} 
+                  to="/positions"
+                  endIcon={<AssessmentIcon />}
+                >
+                  View All
+                </Button>
+              </Box>
+              
+              <Grid container spacing={2}>
+                {getRecentPositions().map((position) => (
+                  <Grid item xs={12} sm={6} md={2.4} key={position.id}>
+                    <Paper sx={{ p: 2 }}>
+                      <Typography variant="h6">{position.ticker}</Typography>
+                      <Typography variant="body2" color="textSecondary">
+                        {position.strategy} • {position.setup_type}
+                      </Typography>
+                      <Typography variant="body2">
+                        {position.current_shares} shares @ {formatCurrency(position.avg_entry_price || 0)}
+                      </Typography>
+                      <Chip 
+                        label={position.status}
+                        color={position.status === 'open' ? 'primary' : 'default'}
+                        size="small"
+                        sx={{ mt: 1 }}
+                      />
+                      <Typography 
+                        variant="body2" 
+                        color={
+                          position.status === 'closed' 
+                            ? ((position.total_realized_pnl || 0) >= 0 ? 'success.main' : 'error.main')
+                            : 'textSecondary'
+                        }
+                        sx={{ mt: 0.5 }}
+                      >
+                        {position.status === 'closed' 
+                          ? `P&L: ${formatCurrency(position.total_realized_pnl || 0)}`
+                          : 'P&L: Unrealized'
+                        }
+                      </Typography>
+                    </Paper>
+                  </Grid>
+                ))}
+                
+                {getRecentPositions().length === 0 && (
+                  <Grid item xs={12}>
+                    <Typography variant="body2" color="textSecondary" textAlign="center">
+                      No positions yet. Start by creating your first position.
+                    </Typography>
+                  </Grid>
+                )}
+              </Grid>
+            </CardContent>
+          </Card>
+        </Grid>
+
       </Grid>
     </Box>
   );

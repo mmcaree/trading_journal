@@ -42,7 +42,7 @@ import {
   Save
 } from '@mui/icons-material';
 import { useAuth } from '../context/AuthContext';
-import { updateProfile, changePassword, UserUpdateData, ChangePasswordData, exportUserData, deleteUserAccount, clearAllUserData } from '../services/userService';
+import { updateProfile, changePassword, UserUpdateData, ChangePasswordData, exportUserData, deleteUserAccount, clearAllUserData, uploadProfilePicture, deleteProfilePicture } from '../services/userService';
 import { AccountSettings } from '../services/types';
 import { accountService } from '../services/accountService';
 import { 
@@ -383,21 +383,40 @@ const Settings: React.FC = () => {
       setTempAccountBalance('10000');
       setTempStartingBalance('10000');
       
-      // Clear any cached data in localStorage related to trading
+      // Clear ALL cached data in localStorage
       const keysToRemove = [
         'dashboardData',
         'analyticsData', 
         'tradesCache',
-        'chartData'
+        'chartData',
+        'positionsCache',
+        'importCache',
+        'portfolioCache',
+        'tradingPositionsCache',
+        'eventCache',
+        'userSettings',
+        'lastSync',
+        'cachedPositions',
+        'cachedEvents',
+        'performanceCache'
       ];
       
       keysToRemove.forEach(key => {
         localStorage.removeItem(key);
       });
       
+      // Clear any cached data with key patterns
+      const allKeys = Object.keys(localStorage);
+      allKeys.forEach(key => {
+        if (key.includes('trade') || key.includes('position') || key.includes('import') || 
+            key.includes('chart') || key.includes('portfolio') || key.includes('analytics')) {
+          localStorage.removeItem(key);
+        }
+      });
+      
       setAlert({ 
         type: 'success', 
-        message: 'All trading data cleared successfully! Your account balance has been reset to $10,000 and all trades/positions have been deleted.' 
+        message: 'All trading data cleared successfully! This includes all positions, trades, imports, charts, and cached data. Your account balance has been reset to $10,000.' 
       });
       
     } catch (error: any) {
@@ -427,6 +446,64 @@ const Settings: React.FC = () => {
     }
   };
 
+  // Profile picture handlers
+  const handleProfilePictureUpload = async (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    if (!file) return;
+
+    // Validate file type
+    const allowedTypes = ['image/jpeg', 'image/jpg', 'image/png', 'image/webp'];
+    if (!allowedTypes.includes(file.type)) {
+      setAlert({ type: 'error', message: 'Invalid file type. Only JPEG, PNG, and WebP images are allowed.' });
+      return;
+    }
+
+    // Validate file size (max 5MB)
+    const maxSize = 5 * 1024 * 1024; // 5MB
+    if (file.size > maxSize) {
+      setAlert({ type: 'error', message: 'File too large. Maximum size is 5MB.' });
+      return;
+    }
+
+    setLoading(true);
+    try {
+      const result = await uploadProfilePicture(file);
+      
+      // Update user context with new profile picture URL
+      if (user) {
+        setUser({ ...user, profile_picture_url: result.profile_picture_url });
+      }
+      
+      setAlert({ type: 'success', message: 'Profile picture updated successfully!' });
+    } catch (error: any) {
+      setAlert({ type: 'error', message: error.message });
+    } finally {
+      setLoading(false);
+      // Reset file input
+      event.target.value = '';
+    }
+  };
+
+  const handleDeleteProfilePicture = async () => {
+    if (!user?.profile_picture_url) return;
+
+    setLoading(true);
+    try {
+      await deleteProfilePicture();
+      
+      // Update user context to remove profile picture URL
+      if (user) {
+        setUser({ ...user, profile_picture_url: null });
+      }
+      
+      setAlert({ type: 'success', message: 'Profile picture deleted successfully!' });
+    } catch (error: any) {
+      setAlert({ type: 'error', message: error.message });
+    } finally {
+      setLoading(false);
+    }
+  };
+
   const timeOptions = Array.from({ length: 24 }, (_, i) => {
     const hour = i.toString().padStart(2, '0');
     return `${hour}:00`;
@@ -450,15 +527,43 @@ const Settings: React.FC = () => {
             <Box component="form" onSubmit={handleProfileUpdate}>
               <Grid container spacing={3}>
                 <Grid item xs={12} display="flex" alignItems="center" gap={2}>
-                  <Avatar sx={{ width: 80, height: 80 }}>
-                    {getAvatarInitials()}
+                  <Avatar 
+                    sx={{ width: 80, height: 80 }}
+                    src={user?.profile_picture_url ? `http://localhost:8000${user.profile_picture_url}` : undefined}
+                  >
+                    {!user?.profile_picture_url && getAvatarInitials()}
                   </Avatar>
                   <Box>
                     <Typography variant="h6">{getDisplayName()}</Typography>
                     <Typography variant="body2" color="text.secondary">@{user?.username}</Typography>
-                    <Button variant="outlined" size="small" sx={{ mt: 1 }}>
-                      Change Photo
-                    </Button>
+                    <Box sx={{ mt: 1, display: 'flex', gap: 1 }}>
+                      <Button 
+                        variant="outlined" 
+                        size="small" 
+                        onClick={() => document.getElementById('profile-picture-input')?.click()}
+                        disabled={loading}
+                      >
+                        {user?.profile_picture_url ? 'Change Photo' : 'Upload Photo'}
+                      </Button>
+                      {user?.profile_picture_url && (
+                        <Button 
+                          variant="outlined" 
+                          size="small" 
+                          color="error"
+                          onClick={handleDeleteProfilePicture}
+                          disabled={loading}
+                        >
+                          Remove
+                        </Button>
+                      )}
+                    </Box>
+                    <input
+                      id="profile-picture-input"
+                      type="file"
+                      accept="image/*"
+                      style={{ display: 'none' }}
+                      onChange={handleProfilePictureUpload}
+                    />
                   </Box>
                 </Grid>
 
@@ -942,17 +1047,7 @@ const Settings: React.FC = () => {
             <Divider sx={{ mb: 3 }} />
 
             <Grid container spacing={2}>
-              <Grid item xs={12}>
-                <Button 
-                  variant="outlined" 
-                  color="primary" 
-                  sx={{ mr: 2 }}
-                  onClick={handleExportData}
-                  disabled={loading}
-                >
-                  {loading ? 'Exporting...' : 'Export All Data'}
-                </Button>
-              </Grid>
+
               <Grid item xs={12} sx={{ mt: 2 }}>
                 <Typography variant="subtitle2" color="error" gutterBottom>
                   Danger Zone
@@ -976,7 +1071,7 @@ const Settings: React.FC = () => {
                   </Button>
                 </Box>
                 <Typography variant="caption" color="text.secondary" sx={{ mt: 1, display: 'block' }}>
-                  Clear All Data: Resets account balance and clears cached data (keeps your account)
+                  Clear All Data: Permanently deletes ALL trading data including positions, trades, imports, charts, events, and cached data. Resets account balance to $10,000. (Keeps your account and login)
                   <br />
                   Delete Account: Permanently removes your account and all data
                 </Typography>
@@ -1132,23 +1227,28 @@ const Settings: React.FC = () => {
         <DialogTitle color="warning">Clear All Data</DialogTitle>
         <DialogContent>
           <Typography variant="body1" paragraph>
-            Are you sure you want to clear all your trading data? This will give you a fresh start.
+            Are you sure you want to clear ALL your trading data? This action cannot be undone and will give you a completely fresh start.
           </Typography>
           <Typography variant="body2" color="text.secondary" paragraph>
             This will permanently delete:
           </Typography>
           <Typography variant="body2" color="text.secondary" component="div">
-            • All your trades and positions
+            • All trading positions (both old and new system)
             <br />
-            • All imported trading data and history
+            • All trades and trade entries  
             <br />
-            • All charts and trade analysis
+            • All imported data and import batches
             <br />
-            • Account balance will be reset to $10,000
+            • All position events and transaction history
+            <br />
+            • All charts and technical analysis data
+            <br />
+            • All cached data and performance metrics
+            <br />
+            • Reset account balance to $10,000
           </Typography>
-          <Typography variant="body2" color="error.main" sx={{ mt: 2 }}>
-            <strong>Warning:</strong> This action cannot be undone! All your trading data will be permanently deleted from the database.
-            Your profile and login credentials will remain intact.
+          <Typography variant="body2" color="warning.main" sx={{ mt: 2, fontWeight: 'bold' }}>
+            Your account, login, and profile settings will remain intact.
           </Typography>
         </DialogContent>
         <DialogActions>
