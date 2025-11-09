@@ -55,9 +55,7 @@ from app.api.routes.positions_v2 import router as positions_v2_router, journal_r
 app.include_router(positions_v2_router, prefix="/api/v2")
 app.include_router(journal_router, prefix="/api/v2")
 
-# Include admin routes
-from app.api.routes.admin import router as admin_router
-app.include_router(admin_router, prefix="/api/admin")
+# Admin routes are now included via the main api_router
 
 # Serve static files (React build) in production
 static_path = os.path.join(os.path.dirname(__file__), "..", "static")
