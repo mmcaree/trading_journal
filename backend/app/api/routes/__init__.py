@@ -1,5 +1,5 @@
 from fastapi import APIRouter
-from app.api.routes import users, auth, charts, analytics, debug, positions_v2, position_images, admin
+from . import users, auth, charts, analytics, debug, positions_v2, position_images, admin
 
 router = APIRouter()
 
