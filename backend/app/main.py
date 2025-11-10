@@ -59,8 +59,11 @@ app.include_router(journal_router, prefix="/api/v2")
 try:
     from app.api.routes.admin import router as admin_router
     app.include_router(admin_router, prefix="/api/admin")
-except ImportError as e:
-    print(f"Warning: Could not load admin routes: {e}")
+    print("✅ REAL admin routes loaded successfully")
+except Exception as e:
+    print(f"❌ CRITICAL: Could not load admin routes: {type(e).__name__}: {e}")
+    import traceback
+    print(f"❌ Full traceback: {traceback.format_exc()}")
     # Create a minimal fallback admin router
     from fastapi import APIRouter
     fallback_admin_router = APIRouter()
@@ -86,6 +89,7 @@ except ImportError as e:
         }
     
     app.include_router(fallback_admin_router, prefix="/api/admin")
+    print("⚠️  Using FALLBACK admin router - real admin routes failed to load")
 
 # Serve static files (React build) in production
 static_path = os.path.join(os.path.dirname(__file__), "..", "static")
