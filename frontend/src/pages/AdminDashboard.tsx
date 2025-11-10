@@ -87,7 +87,7 @@ const AdminDashboard: React.FC = () => {
     console.log('👤 Checking current user...');
     try {
       const token = localStorage.getItem('token');
-      const response = await fetch('/api/admin/debug/current-user', {
+      const response = await fetch('/api/admin/admin-debug/current-user', {
         headers: { 'Authorization': `Bearer ${token}` }
       });
       
@@ -111,7 +111,7 @@ const AdminDashboard: React.FC = () => {
       const token = localStorage.getItem('token');
       console.log('🔍 Token exists:', !!token);
       
-      const response = await fetch('/api/admin/debug/users', {
+      const response = await fetch('/api/admin/admin-debug/users', {
         headers: { 'Authorization': `Bearer ${token}` }
       });
       
