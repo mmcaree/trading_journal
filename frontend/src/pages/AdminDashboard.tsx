@@ -78,10 +78,33 @@ const AdminDashboard: React.FC = () => {
   const navigate = useNavigate();
 
   useEffect(() => {
+    testAdminEndpoint(); // Test simple endpoint first
     debugCurrentUser(); // Check current user first
     fetchData();
     debugUsers(); // Add debug call
   }, []);
+
+  const testAdminEndpoint = async () => {
+    console.log('🧪 Testing simple admin endpoint...');
+    try {
+      const token = localStorage.getItem('token');
+      const response = await fetch('/api/admin/test', {
+        headers: { 'Authorization': `Bearer ${token}` }
+      });
+      
+      console.log('🧪 Test endpoint response status:', response.status);
+      
+      if (response.ok) {
+        const testData = await response.json();
+        console.log('🧪 Test endpoint data:', testData);
+      } else {
+        const errorText = await response.text();
+        console.log('🧪 Test endpoint failed:', response.status, errorText);
+      }
+    } catch (err) {
+      console.log('🧪 Test endpoint error:', err);
+    }
+  };
 
   const debugCurrentUser = async () => {
     console.log('👤 Checking current user...');
