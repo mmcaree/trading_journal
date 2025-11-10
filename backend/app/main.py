@@ -68,7 +68,23 @@ except ImportError as e:
     
     @fallback_admin_router.get("/status")
     async def admin_status():
-        return {"status": "Admin routes not available"}
+        return {"status": "Admin routes not available", "error": str(e)}
+    
+    @fallback_admin_router.get("/students")
+    async def fallback_students():
+        return []  # Return empty array instead of error
+    
+    @fallback_admin_router.get("/analytics/class-overview")
+    async def fallback_analytics():
+        return {
+            "total_students": 0,
+            "active_students": 0,
+            "total_positions": 0,
+            "open_positions": 0,
+            "total_class_pnl": 0,
+            "flagged_students": 0,
+            "average_pnl_per_student": 0
+        }
     
     app.include_router(fallback_admin_router, prefix="/api/admin")
 

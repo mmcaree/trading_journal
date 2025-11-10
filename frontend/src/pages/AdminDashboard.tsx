@@ -96,16 +96,32 @@ const AdminDashboard: React.FC = () => {
         })
       ]);
 
-      if (!studentsRes.ok || !analyticsRes.ok) {
-        throw new Error('Failed to fetch data');
+      console.log('Students response status:', studentsRes.status);
+      console.log('Analytics response status:', analyticsRes.status);
+
+      if (!studentsRes.ok) {
+        const errorText = await studentsRes.text();
+        console.error('Students API error:', errorText);
+        throw new Error(`Failed to fetch students: ${studentsRes.status} - ${errorText}`);
+      }
+
+      if (!analyticsRes.ok) {
+        const errorText = await analyticsRes.text();
+        console.error('Analytics API error:', errorText);
+        throw new Error(`Failed to fetch analytics: ${analyticsRes.status} - ${errorText}`);
       }
 
       const studentsData = await studentsRes.json();
       const analyticsData = await analyticsRes.json();
 
-      setStudents(studentsData);
+      console.log('Students data:', studentsData);
+      console.log('Analytics data:', analyticsData);
+
+      // Ensure studentsData is an array
+      setStudents(Array.isArray(studentsData) ? studentsData : []);
       setClassAnalytics(analyticsData);
     } catch (err) {
+      console.error('Fetch error:', err);
       setError(err instanceof Error ? err.message : 'An error occurred');
     } finally {
       setLoading(false);
@@ -128,7 +144,7 @@ const AdminDashboard: React.FC = () => {
       }
 
       const studentsData = await response.json();
-      setStudents(studentsData);
+      setStudents(Array.isArray(studentsData) ? studentsData : []);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'An error occurred');
     }
@@ -308,7 +324,16 @@ const AdminDashboard: React.FC = () => {
               </TableRow>
             </TableHead>
             <TableBody>
-              {students.map((student) => (
+              {students.length === 0 ? (
+                <TableRow>
+                  <TableCell colSpan={8} align="center">
+                    <Typography variant="body2" color="text.secondary" sx={{ py: 4 }}>
+                      No students found. {searchTerm ? 'Try adjusting your search terms.' : 'There are currently no student accounts in the system.'}
+                    </Typography>
+                  </TableCell>
+                </TableRow>
+              ) : (
+                students.map((student) => (
                 <TableRow key={student.id} hover>
                   <TableCell>
                     <Box>
@@ -381,7 +406,8 @@ const AdminDashboard: React.FC = () => {
                     </Box>
                   </TableCell>
                 </TableRow>
-              ))}
+                ))
+              )}
             </TableBody>
           </Table>
         </TableContainer>
