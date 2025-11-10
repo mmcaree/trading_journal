@@ -246,10 +246,12 @@ def get_positions(
                 detail=f"Invalid status: {status_filter}"
             )
     
+    # Get positions with events preloaded to avoid N+1 queries
     positions = position_service.get_user_positions(
         user_id=current_user.id,
         status=status_enum,
-        ticker=ticker
+        ticker=ticker,
+        include_events=True
     )
     
     # Apply additional filters
@@ -259,10 +261,10 @@ def get_positions(
     # Apply pagination
     positions = positions[skip:skip + limit]
     
-    # Format responses
+    # Format responses (events already loaded)
     responses = []
     for position in positions:
-        events_count = len(position_service.get_position_events(position.id))
+        events_count = len(position.events) if hasattr(position, 'events') else 0
         
         # Calculate return percentage for closed positions
         return_percent = None

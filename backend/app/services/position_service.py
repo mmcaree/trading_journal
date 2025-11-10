@@ -349,10 +349,17 @@ class PositionService:
         self,
         user_id: int,
         status: Optional[PositionStatus] = None,
-        ticker: Optional[str] = None
+        ticker: Optional[str] = None,
+        include_events: bool = False
     ) -> List[TradingPosition]:
-        """Get positions for a user"""
+        """Get positions for a user with optimized queries"""
+        from sqlalchemy.orm import joinedload
+        
         query = self.db.query(TradingPosition).filter(TradingPosition.user_id == user_id)
+        
+        # Eager load events if requested to avoid N+1 queries
+        if include_events:
+            query = query.options(joinedload(TradingPosition.events))
         
         if status:
             query = query.filter(TradingPosition.status == status)

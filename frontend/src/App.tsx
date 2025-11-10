@@ -35,8 +35,21 @@ import ProtectedRoute from './components/ProtectedRoute';
 import { AuthProvider } from './context/AuthContext';
 import { CurrencyProvider } from './context/CurrencyContext';
 
-// Create a client
-const queryClient = new QueryClient();
+// Create a client with performance optimizations
+const queryClient = new QueryClient({
+  defaultOptions: {
+    queries: {
+      staleTime: 30000,        // 30 seconds before data considered stale
+      cacheTime: 300000,       // 5 minutes in cache after component unmounts
+      refetchOnWindowFocus: false, // Don't refetch on window focus
+      refetchOnMount: false,   // Don't always refetch on mount if data exists
+      retry: 1,                // Only retry once on failure
+    },
+    mutations: {
+      retry: 1,
+    },
+  },
+});
 
 // Create a theme
 const theme = createTheme({

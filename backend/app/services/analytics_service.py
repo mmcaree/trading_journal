@@ -17,8 +17,12 @@ def get_performance_metrics(
     end_date: Optional[str] = None
 ) -> PerformanceMetrics:
     """Calculate performance metrics for the user using v2 Position models"""
-    # Start with base query for the user's closed positions
-    query = db.query(TradingPosition).filter(
+    from sqlalchemy.orm import joinedload
+    
+    # Start with base query for the user's closed positions with eager loading
+    query = db.query(TradingPosition).options(
+        joinedload(TradingPosition.events)
+    ).filter(
         TradingPosition.user_id == user_id,
         TradingPosition.status == PositionStatus.CLOSED
     )
@@ -126,8 +130,12 @@ def get_setup_performance(
     end_date: Optional[str] = None
 ) -> List[SetupPerformance]:
     """Calculate performance metrics by setup type using v2 Position models"""
-    # Start with base query for the user's closed positions
-    query = db.query(TradingPosition).filter(
+    from sqlalchemy.orm import joinedload
+    
+    # Start with base query for the user's closed positions with eager loading
+    query = db.query(TradingPosition).options(
+        joinedload(TradingPosition.events)
+    ).filter(
         TradingPosition.user_id == user_id,
         TradingPosition.status == PositionStatus.CLOSED,
         TradingPosition.setup_type.isnot(None)  # Only positions with setup types

@@ -101,8 +101,8 @@ const Dashboard: React.FC = () => {
     setError(null);
     
     try {
-      // Load all positions
-      const allPositions = await getAllPositions({ limit: 100000 });
+      // Load positions with reasonable limit for dashboard
+      const allPositions = await getAllPositions({ limit: 1000 }); // Reduced from 100000
       setPositions(allPositions);
 
       // Calculate metrics

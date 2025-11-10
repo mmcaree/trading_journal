@@ -76,6 +76,9 @@ const AdminDashboard: React.FC = () => {
   const [error, setError] = useState<string | null>(null);
   const [noteDialog, setNoteDialog] = useState<NoteDialogData | null>(null);
   const navigate = useNavigate();
+  
+  // Debouncing for search
+  const [searchTimeout, setSearchTimeout] = useState<NodeJS.Timeout | null>(null);
 
   useEffect(() => {
     testAdminEndpoint(); // Test simple endpoint first
@@ -229,12 +232,17 @@ const AdminDashboard: React.FC = () => {
     const value = event.target.value;
     setSearchTerm(value);
     
-    // Debounced search
-    setTimeout(() => {
-      if (value === searchTerm) {
-        fetchStudentsWithSearch(value);
-      }
-    }, 300);
+    // Clear existing timeout
+    if (searchTimeout) {
+      clearTimeout(searchTimeout);
+    }
+    
+    // Set new timeout for debounced search
+    const newTimeout = setTimeout(() => {
+      fetchStudentsWithSearch(value);
+    }, 500); // Increased to 500ms for better performance
+    
+    setSearchTimeout(newTimeout);
   };
 
   const handleViewStudent = (studentId: number) => {

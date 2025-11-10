@@ -1,5 +1,6 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.middleware.gzip import GZipMiddleware
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse
 from app.api.routes import router as api_router
@@ -20,6 +21,9 @@ mimetypes.add_type('text/css', '.css')
 Base.metadata.create_all(bind=engine)
 
 app = FastAPI(title="SwingTrader API", description="Trading journal API inspired by swing trading strategies")
+
+# Add GZip compression middleware for better performance
+app.add_middleware(GZipMiddleware, minimum_size=1000)
 
 # Configure CORS - use the cors_origins_list property
 app.add_middleware(

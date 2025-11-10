@@ -134,11 +134,24 @@ async def get_all_students(
     # Get students with pagination
     students = query.offset(offset).limit(limit).all()
     
+    # Get all positions for all students in a single query to avoid N+1
+    student_ids = [s.id for s in students]
+    all_positions = db.query(TradingPosition).filter(
+        TradingPosition.user_id.in_(student_ids)
+    ).all() if student_ids else []
+    
+    # Group positions by user_id for efficient lookup
+    positions_by_user = {}
+    for position in all_positions:
+        if position.user_id not in positions_by_user:
+            positions_by_user[position.user_id] = []
+        positions_by_user[position.user_id].append(position)
+    
     # Build response with trading stats
     student_summaries = []
     for student in students:
-        # Get position statistics
-        positions = db.query(TradingPosition).filter(TradingPosition.user_id == student.id).all()
+        # Get position statistics from pre-loaded data
+        positions = positions_by_user.get(student.id, [])
         
         total_positions = len(positions)
         open_positions = len([p for p in positions if p.status == 'OPEN'])

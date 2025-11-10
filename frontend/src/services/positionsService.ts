@@ -6,6 +6,36 @@ import api from './apiConfig';
 // Replaces all tradeService.ts functionality
 // =====================================================
 
+// Simple in-memory cache for performance
+const cache = new Map<string, { data: any; timestamp: number; ttl: number }>();
+const CACHE_TTL = 30000; // 30 seconds cache TTL
+
+function getCacheKey(endpoint: string, params?: any): string {
+  return `${endpoint}_${JSON.stringify(params || {})}`;
+}
+
+function getFromCache<T>(key: string): T | null {
+  const cached = cache.get(key);
+  if (cached && Date.now() - cached.timestamp < cached.ttl) {
+    return cached.data as T;
+  }
+  cache.delete(key);
+  return null;
+}
+
+function setCache<T>(key: string, data: T, ttl: number = CACHE_TTL): void {
+  cache.set(key, { data, timestamp: Date.now(), ttl });
+}
+
+// Clear cache when data changes
+function clearPositionsCache(): void {
+  for (const key of cache.keys()) {
+    if (key.includes('positions')) {
+      cache.delete(key);
+    }
+  }
+}
+
 // Core interfaces that match our new API
 export interface Position {
   id: number;
@@ -130,6 +160,13 @@ export async function getAllPositions(filters?: {
   limit?: number;
 }): Promise<Position[]> {
   try {
+    // Check cache first for common requests
+    const cacheKey = getCacheKey('positions', filters);
+    const cached = getFromCache<Position[]>(cacheKey);
+    if (cached) {
+      return cached;
+    }
+
     const params = new URLSearchParams();
     
     if (filters?.status) params.append('status', filters.status);
@@ -140,6 +177,9 @@ export async function getAllPositions(filters?: {
     
     const url = `/api/v2/positions/${params.toString() ? `?${params.toString()}` : ''}`;
     const response = await api.get(url);
+    
+    // Cache the result
+    setCache(cacheKey, response.data);
     
     return response.data;
   } catch (error) {
@@ -169,6 +209,8 @@ export async function getPositionDetails(positionId: number): Promise<PositionDe
 export async function createPosition(positionData: CreatePositionData): Promise<Position> {
   try {
     const response = await api.post('/api/v2/positions/', positionData);
+    // Clear cache after creating new position
+    clearPositionsCache();
     return response.data;
   } catch (error) {
     console.error('Error creating position:', error);
@@ -184,6 +226,8 @@ export async function addToPosition(positionId: number, eventData: Omit<AddEvent
   try {
     const buyEventData = { ...eventData, event_type: 'buy' as const };
     const response = await api.post(`/api/v2/positions/${positionId}/events`, buyEventData);
+    // Clear cache after position changes
+    clearPositionsCache();
     return response.data;
   } catch (error) {
     console.error('Error adding to position:', error);
