@@ -59,7 +59,6 @@ app.include_router(journal_router, prefix="/api/v2")
 try:
     from app.api.routes.admin import router as admin_router
     app.include_router(admin_router, prefix="/api/admin")
-    print("Admin routes loaded successfully")
 except ImportError as e:
     print(f"Warning: Could not load admin routes: {e}")
     # Create a minimal fallback admin router
@@ -107,20 +106,10 @@ if os.path.exists(static_path):
             return FileResponse(favicon_path)
         return {"error": "Favicon not found"}
     
-    # Serve index.html for root and all SPA routes
+    # Serve index.html for root and SPA routes
     @app.get("/")
-    @app.get("/{full_path:path}")
-    async def serve_spa(full_path: str = ""):
-        """Serve React SPA for all non-API routes"""
-        # Don't interfere with API routes, assets, or docs
-        if (full_path.startswith("api/") or 
-            full_path.startswith("assets/") or 
-            full_path.startswith("static/") or
-            full_path.startswith("docs") or 
-            full_path.startswith("openapi.json")):
-            return {"error": "Not found"}
-        
-        # Serve index.html for all React Router routes
+    async def serve_root():
+        """Serve React SPA for root"""
         index_path = os.path.join(static_path, "index.html")
         if os.path.exists(index_path):
             return FileResponse(index_path)
@@ -135,6 +124,27 @@ else:
     @app.get("/{full_path:path}")
     async def serve_spa_fallback(full_path: str):        
         return {"error": "Static files not found - run in production mode"}
+
+# Add SPA catch-all route LAST (only in production when static files exist)
+if os.path.exists(static_path):
+    @app.get("/{full_path:path}")
+    async def serve_spa_catchall(full_path: str):
+        """Serve React SPA for non-API routes - REGISTERED LAST"""
+        # Don't interfere with API routes - they should have been handled already
+        if (full_path.startswith("api/") or 
+            full_path.startswith("assets/") or 
+            full_path.startswith("static/") or
+            full_path.startswith("docs") or 
+            full_path.startswith("openapi.json")):
+            from fastapi import HTTPException
+            raise HTTPException(status_code=404, detail="API route not found")
+        
+        # Serve index.html for React Router routes
+        index_path = os.path.join(static_path, "index.html")
+        if os.path.exists(index_path):
+            return FileResponse(index_path)
+        from fastapi import HTTPException
+        raise HTTPException(status_code=404, detail="Page not found")
 
 if __name__ == "__main__":
     import uvicorn
