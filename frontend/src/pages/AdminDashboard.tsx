@@ -78,8 +78,56 @@ const AdminDashboard: React.FC = () => {
   const navigate = useNavigate();
 
   useEffect(() => {
+    debugCurrentUser(); // Check current user first
     fetchData();
+    debugUsers(); // Add debug call
   }, []);
+
+  const debugCurrentUser = async () => {
+    console.log('👤 Checking current user...');
+    try {
+      const token = localStorage.getItem('token');
+      const response = await fetch('/api/admin/debug/current-user', {
+        headers: { 'Authorization': `Bearer ${token}` }
+      });
+      
+      console.log('👤 Current user response status:', response.status);
+      
+      if (response.ok) {
+        const userData = await response.json();
+        console.log('👤 Current user data:', userData);
+      } else {
+        const errorText = await response.text();
+        console.log('👤 Current user failed:', response.status, errorText);
+      }
+    } catch (err) {
+      console.log('👤 Current user error:', err);
+    }
+  };
+
+  const debugUsers = async () => {
+    console.log('🔍 Starting debug users call...');
+    try {
+      const token = localStorage.getItem('token');
+      console.log('🔍 Token exists:', !!token);
+      
+      const response = await fetch('/api/admin/debug/users', {
+        headers: { 'Authorization': `Bearer ${token}` }
+      });
+      
+      console.log('🔍 Debug users response status:', response.status);
+      
+      if (response.ok) {
+        const debugData = await response.json();
+        console.log('🔍 Debug users data:', debugData);
+      } else {
+        const errorText = await response.text();
+        console.log('🔍 Debug users failed:', response.status, errorText);
+      }
+    } catch (err) {
+      console.log('🔍 Debug users error:', err);
+    }
+  };
 
   const fetchData = async () => {
     try {
@@ -98,6 +146,10 @@ const AdminDashboard: React.FC = () => {
 
       console.log('Students response status:', studentsRes.status);
       console.log('Analytics response status:', analyticsRes.status);
+      
+      // Check response headers for debugging
+      console.log('Students response headers:', studentsRes.headers);
+      console.log('Analytics response headers:', analyticsRes.headers);
 
       if (!studentsRes.ok) {
         const errorText = await studentsRes.text();
