@@ -146,4 +146,3 @@ backend\migrations\add_trade_groups.py
 backend/make_instructor.py
 backend/assign_instructor_role.py
 INSTRUCTOR_SETUP.md
-backend/app/api/routes/admin.py
