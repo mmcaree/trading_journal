@@ -33,6 +33,14 @@ class EventUpdate(BaseModel):
     take_profit: Optional[float] = None
     notes: Optional[str] = None
 
+class EventUpdateComprehensive(BaseModel):
+    shares: Optional[int] = None
+    price: Optional[float] = None
+    event_date: Optional[datetime] = None
+    stop_loss: Optional[float] = None
+    take_profit: Optional[float] = None
+    notes: Optional[str] = None
+
 class PositionCreate(BaseModel):
     ticker: str
     strategy: Optional[str] = None
@@ -101,6 +109,7 @@ class PositionResponse(BaseModel):
     current_risk_percent: Optional[float]   # Current risk % based on current stop
     original_shares: Optional[int]          # Shares when position opened
     account_value_at_entry: Optional[float] # Account value when opened
+    events: Optional[List['EventResponse']] = None  # Optional events for analytics
 
 class EventResponse(BaseModel):
     id: int
@@ -227,6 +236,7 @@ def get_positions(
     status_filter: Optional[str] = Query(None, alias="status"),
     ticker: Optional[str] = Query(None),
     strategy: Optional[str] = Query(None),
+    include_events: bool = Query(False, description="Include position events for analytics"),
     skip: int = Query(0, ge=0),
     limit: int = Query(100, ge=1, le=100000),
     db: Session = Depends(get_db),
@@ -246,12 +256,12 @@ def get_positions(
                 detail=f"Invalid status: {status_filter}"
             )
     
-    # Get positions with events preloaded to avoid N+1 queries
+    # Get positions with events preloaded to avoid N+1 queries (only if requested)
     positions = position_service.get_user_positions(
         user_id=current_user.id,
         status=status_enum,
         ticker=ticker,
-        include_events=True
+        include_events=include_events
     )
     
     # Apply additional filters
@@ -277,6 +287,27 @@ def get_positions(
                 if original_investment > 0:
                     return_percent = round((position.total_realized_pnl / original_investment) * 100, 2)
         
+        # Include events in response if requested
+        events_list = None
+        if include_events and hasattr(position, 'events'):
+            events_list = [
+                EventResponse(
+                    id=event.id,
+                    event_type=event.event_type.value,
+                    event_date=event.event_date,
+                    shares=event.shares,
+                    price=event.price,
+                    stop_loss=event.stop_loss,
+                    take_profit=event.take_profit,
+                    notes=event.notes,
+                    source=event.source.value,
+                    realized_pnl=event.realized_pnl,
+                    position_shares_before=event.position_shares_before,
+                    position_shares_after=event.position_shares_after
+                )
+                for event in position.events
+            ]
+
         responses.append(PositionResponse(
             id=position.id,
             ticker=position.ticker,
@@ -300,7 +331,8 @@ def get_positions(
             original_risk_percent=position.original_risk_percent,
             current_risk_percent=position.current_risk_percent,
             original_shares=position.original_shares,
-            account_value_at_entry=position.account_value_at_entry
+            account_value_at_entry=position.account_value_at_entry,
+            events=events_list
         ))
     
     return responses
@@ -448,6 +480,50 @@ def update_position(
             detail=f"Failed to update position: {str(e)}"
         )
 
+@router.delete("/{position_id}")
+def delete_position(
+    position_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    """Delete a position and all its related data (events, journal entries, charts, etc.)"""
+    position_service = PositionService(db)
+    
+    position = position_service.get_position(position_id)
+    if not position:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Position not found"
+        )
+    
+    if position.user_id != current_user.id:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Not authorized to delete this position"
+        )
+    
+    try:
+        success = position_service.delete_position(position_id)
+        
+        if success:
+            return {"success": True, "message": "Position deleted successfully"}
+        else:
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail="Failed to delete position"
+            )
+        
+    except ValueError as e:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=str(e)
+        )
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to delete position: {str(e)}"
+        )
+
 
 # === Event Management ===
 
@@ -491,6 +567,8 @@ def add_position_event(
                 shares=event_data.shares,
                 price=event_data.price,
                 event_date=event_data.event_date,
+                stop_loss=event_data.stop_loss,
+                take_profit=event_data.take_profit,
                 notes=event_data.notes
             )
         else:
@@ -666,6 +744,112 @@ def update_position_event(
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Failed to update event: {str(e)}"
+        )
+
+
+@router.put("/events/{event_id}/comprehensive", response_model=EventResponse)
+def update_position_event_comprehensive(
+    event_id: int,
+    event_update: EventUpdateComprehensive,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    """Comprehensive event update - modify shares, price, date, and risk management"""
+    position_service = PositionService(db)
+    
+    # Get the event to check permissions
+    event = db.query(TradingPositionEvent).get(event_id)
+    if not event:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Event not found"
+        )
+    
+    # Check that user owns the position
+    position = position_service.get_position(event.position_id)
+    if not position or position.user_id != current_user.id:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Position not found"
+        )
+    
+    try:
+        updated_event = position_service.update_event_comprehensive(
+            event_id=event_id,
+            shares=event_update.shares,
+            price=event_update.price,
+            event_date=event_update.event_date,
+            stop_loss=event_update.stop_loss,
+            take_profit=event_update.take_profit,
+            notes=event_update.notes
+        )
+        
+        return EventResponse(
+            id=updated_event.id,
+            event_type=updated_event.event_type.value,
+            event_date=updated_event.event_date,
+            shares=updated_event.shares,
+            price=updated_event.price,
+            stop_loss=updated_event.stop_loss,
+            take_profit=updated_event.take_profit,
+            notes=updated_event.notes,
+            source=updated_event.source.value,
+            realized_pnl=updated_event.realized_pnl,
+            position_shares_before=updated_event.position_shares_before,
+            position_shares_after=updated_event.position_shares_after
+        )
+        
+    except ValueError as e:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=str(e)
+        )
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to update event comprehensively: {str(e)}"
+        )
+
+
+@router.delete("/events/{event_id}")
+def delete_position_event(
+    event_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    """Delete a specific event"""
+    position_service = PositionService(db)
+    
+    # Get the event to check permissions
+    event = db.query(TradingPositionEvent).get(event_id)
+    if not event:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Event not found"
+        )
+    
+    # Check that user owns the position
+    position = position_service.get_position(event.position_id)
+    if not position or position.user_id != current_user.id:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Position not found"
+        )
+    
+    try:
+        position_service.delete_event(event_id)
+        
+        return {"success": True, "message": "Event deleted successfully"}
+        
+    except ValueError as e:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=str(e)
+        )
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to delete event: {str(e)}"
         )
 
 

@@ -134,6 +134,8 @@ class PositionService:
         shares: int,
         price: float,
         event_date: Optional[datetime] = None,
+        stop_loss: Optional[float] = None,
+        take_profit: Optional[float] = None,
         notes: Optional[str] = None,
         source: EventSource = EventSource.MANUAL,
         source_id: Optional[str] = None
@@ -159,6 +161,8 @@ class PositionService:
             event_date=event_date or utc_now(),
             shares=-shares,  # Always negative
             price=price,
+            stop_loss=stop_loss,
+            take_profit=take_profit,
             notes=notes,
             source=source,
             source_id=source_id,
@@ -185,7 +189,7 @@ class PositionService:
         take_profit: Optional[float] = None,
         notes: Optional[str] = None
     ) -> TradingPositionEvent:
-        """Update stop loss, take profit, or notes for a specific event"""
+        """Update stop loss, take profit, or notes for a specific event (legacy method)"""
         event = self.db.query(TradingPositionEvent).get(event_id)
         if not event:
             raise ValueError(f"Event {event_id} not found")
@@ -202,6 +206,127 @@ class PositionService:
         self.db.refresh(event)
         
         return event
+    
+    def update_event_comprehensive(
+        self,
+        event_id: int,
+        shares: Optional[int] = None,
+        price: Optional[float] = None,
+        event_date: Optional[datetime] = None,
+        stop_loss: Optional[float] = None,
+        take_profit: Optional[float] = None,
+        notes: Optional[str] = None
+    ) -> TradingPositionEvent:
+        """Comprehensive event update - modifies shares, price, date, and risk management"""
+        event = self.db.query(TradingPositionEvent).get(event_id)
+        if not event:
+            raise ValueError(f"Event {event_id} not found")
+        
+        position_id = event.position_id
+        
+        # Validate shares for buy/sell events
+        if shares is not None and shares <= 0:
+            raise ValueError("Shares must be positive")
+        
+        # Validate price
+        if price is not None and price <= 0:
+            raise ValueError("Price must be positive")
+        
+        # Update event fields
+        if shares is not None:
+            event.shares = shares
+        if price is not None:
+            event.price = price
+        if event_date is not None:
+            event.event_date = event_date
+        if stop_loss is not None:
+            event.stop_loss = stop_loss
+        if take_profit is not None:
+            event.take_profit = take_profit
+        if notes is not None:
+            event.notes = notes
+        
+        # Set updated timestamp
+        event.created_at = utc_now()  # Track when the modification was made
+        
+        self.db.commit()
+        
+        # Recalculate position metrics since financial data may have changed
+        self._recalculate_position(position_id)
+        
+        self.db.refresh(event)
+        return event
+    
+    def delete_event(self, event_id: int) -> bool:
+        """Delete a specific event and recalculate position"""
+        event = self.db.query(TradingPositionEvent).get(event_id)
+        if not event:
+            raise ValueError(f"Event {event_id} not found")
+        
+        position_id = event.position_id
+        
+        # Check if this is the only event in the position
+        events_count = self.db.query(TradingPositionEvent).filter_by(position_id=position_id).count()
+        if events_count <= 1:
+            raise ValueError("Cannot delete the only event in a position. Delete the entire position instead.")
+        
+        # Delete the event
+        self.db.delete(event)
+        self.db.commit()
+        
+        # Recalculate position metrics
+        self._recalculate_position(position_id)
+        
+        return True
+    
+    def delete_position(self, position_id: int) -> bool:
+        """Delete a position and all its related data (events, journal entries, charts, etc.)"""
+        position = self.db.query(TradingPosition).get(position_id)
+        if not position:
+            raise ValueError(f"Position {position_id} not found")
+        
+        try:
+            # Delete related data in the correct order to avoid foreign key constraints
+            
+            # 1. Delete journal entries
+            from app.models.position_models import TradingPositionJournalEntry
+            journal_entries = self.db.query(TradingPositionJournalEntry).filter_by(position_id=position_id).all()
+            for entry in journal_entries:
+                self.db.delete(entry)
+            
+            # 2. Delete charts
+            from app.models.position_models import TradingPositionChart
+            charts = self.db.query(TradingPositionChart).filter_by(position_id=position_id).all()
+            for chart in charts:
+                self.db.delete(chart)
+            
+            # 3. Delete pending orders (if they exist)
+            try:
+                from app.models.import_models import ImportedPendingOrder
+                pending_orders = self.db.query(ImportedPendingOrder).filter_by(position_id=position_id).all()
+                for order in pending_orders:
+                    self.db.delete(order)
+            except ImportError:
+                # ImportedPendingOrder might not exist in all setups
+                pass
+            
+            # 4. Delete all events
+            events = self.db.query(TradingPositionEvent).filter_by(position_id=position_id).all()
+            for event in events:
+                self.db.delete(event)
+            
+            # 5. Finally, delete the position itself
+            self.db.delete(position)
+            
+            # Commit all deletions
+            self.db.commit()
+            
+            return True
+            
+        except Exception as e:
+            # Rollback in case of error
+            self.db.rollback()
+            raise ValueError(f"Failed to delete position: {str(e)}")
     
     # === Position Calculations ===
     

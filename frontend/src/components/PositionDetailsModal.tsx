@@ -55,7 +55,8 @@ import {
   Save as SaveIcon,
   Delete as DeleteIcon,
   Add as AddIcon,
-  Timeline as ChartIcon
+  Timeline as ChartIcon,
+  Edit as EditIcon
 } from '@mui/icons-material';
 import { 
   LineChart, 
@@ -84,6 +85,8 @@ import EventBreakdown from './EventBreakdown';
 import { positionImageService, PositionChart } from '../services/positionImageService';
 import { SmartJournal } from './SmartJournal';
 import ErrorBoundary from './ErrorBoundary';
+import EditPositionModal from './EditPositionModal';
+import EditEventModal from './EditEventModal';
 
 export interface PositionDetailsModalProps {
   open: boolean;
@@ -139,6 +142,11 @@ const PositionDetailsModal: React.FC<PositionDetailsModalProps> = ({
   const [chartDialog, setChartDialog] = useState(false);
   const [selectedChart, setSelectedChart] = useState<string | null>(null);
   const [selectedChartInfo, setSelectedChartInfo] = useState<PositionChart | null>(null);
+  
+  // Edit modals state
+  const [editPositionModalOpen, setEditPositionModalOpen] = useState(false);
+  const [editEventModalOpen, setEditEventModalOpen] = useState(false);
+  const [selectedEvent, setSelectedEvent] = useState<PositionEvent | null>(null);
 
   // Load position details when modal opens
   useEffect(() => {
@@ -258,6 +266,31 @@ const PositionDetailsModal: React.FC<PositionDetailsModalProps> = ({
     setSelectedChart(chartUrl);
     setSelectedChartInfo(chartInfo || null);
     setChartDialog(true);
+  };
+
+  // Edit modal handlers
+  const handleEditPosition = () => {
+    setEditPositionModalOpen(true);
+  };
+
+  const handleEditEvent = (event: PositionEvent) => {
+    setSelectedEvent(event);
+    setEditEventModalOpen(true);
+  };
+
+  const handleEditPositionSuccess = (updatedPosition: Position) => {
+    // Refresh the position details to reflect changes
+    loadPositionDetails();
+    onRefresh?.(); // Also refresh parent component
+    setEditPositionModalOpen(false);
+  };
+
+  const handleEditEventSuccess = (updatedEvent: PositionEvent) => {
+    // Refresh the position details to reflect event changes
+    loadPositionDetails();
+    onRefresh?.(); // Also refresh parent component
+    setEditEventModalOpen(false);
+    setSelectedEvent(null);
   };
 
   const handleUpdateEventStopLoss = async (eventId: number, newStopLoss: number | null) => {
@@ -577,7 +610,14 @@ const PositionDetailsModal: React.FC<PositionDetailsModalProps> = ({
         <Grid container spacing={2} sx={{ mb: 3 }}>
           <Grid item xs={12} sm={3}>
             <Card>
-              <CardContent sx={{ textAlign: 'center' }}>
+              <CardContent sx={{ textAlign: 'center', position: 'relative' }}>
+                <Box sx={{ position: 'absolute', top: 8, right: 8 }}>
+                  <Tooltip title="Edit Position">
+                    <IconButton size="small" onClick={handleEditPosition}>
+                      <EditIcon fontSize="small" />
+                    </IconButton>
+                  </Tooltip>
+                </Box>
                 <Avatar sx={{ bgcolor: 'primary.main', mx: 'auto', mb: 1 }}>
                   {position.ticker.charAt(0)}
                 </Avatar>
@@ -876,6 +916,7 @@ const PositionDetailsModal: React.FC<PositionDetailsModalProps> = ({
                 position={position}
                 events={positionDetails?.events || []}
                 onUpdateStopLoss={handleUpdateEventStopLoss}
+                onEditEvent={handleEditEvent}
                 disabled={loading}
                 accountBalance={accountBalance}
               />
@@ -994,16 +1035,20 @@ const PositionDetailsModal: React.FC<PositionDetailsModalProps> = ({
             <Grid item xs={12} md={6}>
               <Paper sx={{ p: 2 }}>
                 <Typography variant="h6" gutterBottom>
-                  � Risk Analytics
+                  🛡️ Risk Analytics
                 </Typography>
                 <Grid container spacing={2}>
                   <Grid item xs={12}>
-                    <Typography variant="body2" color="text.secondary">Risk-Adjusted Return</Typography>
+                    <Tooltip title="Measures return per unit of risk (volatility). Calculated as Average Return / Standard Deviation of returns. Higher values indicate better risk-adjusted performance. Similar to Sharpe Ratio but without risk-free rate.">
+                      <Typography variant="body2" color="text.secondary" sx={{ cursor: 'help' }}>
+                        Risk-Adjusted Return ℹ️
+                      </Typography>
+                    </Tooltip>
                     <Typography variant="h6" sx={{ mt: 1 }}>
                       {lifetimeAnalytics?.riskAdjustedReturn?.toFixed(2) || 'N/A'}
                     </Typography>
                     <Typography variant="caption" color="text.secondary">
-                      Return per unit of volatility
+                      Return per unit of volatility (Avg Return / Std Dev)
                     </Typography>
                   </Grid>
                   <Grid item xs={12}>
@@ -1036,7 +1081,7 @@ const PositionDetailsModal: React.FC<PositionDetailsModalProps> = ({
                   <Grid item xs={6} sm={3}>
                     <Typography variant="body2" color="text.secondary">Total Bought</Typography>
                     <Typography variant="h6" sx={{ color: 'info.main' }}>
-                      {formatCurrency(positionDetails?.metrics?.total_bought || 0)}
+                      {positionDetails?.metrics?.total_bought || 0}
                     </Typography>
                   </Grid>
                   <Grid item xs={6} sm={3}>
@@ -1309,6 +1354,28 @@ const PositionDetailsModal: React.FC<PositionDetailsModalProps> = ({
         <Button onClick={() => setChartDialog(false)}>Close</Button>
       </DialogActions>
     </Dialog>
+
+    {/* Edit Position Modal */}
+    <EditPositionModal
+      open={editPositionModalOpen}
+      onClose={() => setEditPositionModalOpen(false)}
+      position={position}
+      onSuccess={handleEditPositionSuccess}
+    />
+
+    {/* Edit Event Modal */}
+    {selectedEvent && (
+      <EditEventModal
+        open={editEventModalOpen}
+        onClose={() => {
+          setEditEventModalOpen(false);
+          setSelectedEvent(null);
+        }}
+        event={selectedEvent}
+        isOptions={position.instrument_type === 'OPTIONS'}
+        onSuccess={handleEditEventSuccess}
+      />
+    )}
     </>
   );
 };

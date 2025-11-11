@@ -146,3 +146,5 @@ backend\migrations\add_trade_groups.py
 backend/make_instructor.py
 backend/assign_instructor_role.py
 INSTRUCTOR_SETUP.md
+backend/scripts/requirements.txt
+backend/scripts/railway_add_indexes.py

@@ -1,5 +1,10 @@
 // Advanced Analytics Utilities for Trading Journal
-import { Position } from '../services/positionsService';
+import { Position, PositionEvent } from '../services/positionsService';
+
+// Extended position interface for analytics that includes optional events
+interface PositionWithEvents extends Position {
+  events?: PositionEvent[];
+}
 
 export interface RiskMetrics {
   maxDrawdown: number;
@@ -66,14 +71,181 @@ export interface AdvancedMetrics {
   jensenAlpha: number;
 }
 
+// Portfolio value timeline point interface
+// This represents the portfolio value at a specific point in time
+interface PortfolioValuePoint {
+  date: Date;
+  portfolioValue: number;  // Total portfolio value (account balance + realized + unrealized P&L)
+  realizedPnL: number;     // Cumulative realized P&L up to this date
+  unrealizedPnL: number;   // Estimated unrealized P&L at this date
+  accountBalance: number;  // Account balance (initial + realized P&L)
+}
+
+// Calculate portfolio value timeline for proper drawdown analysis
+// This creates a timeline of portfolio values at significant trading events (entries, exits, partial sells)
+// instead of just calculating cumulative P&L at trade close dates. This gives a more accurate
+// representation of when the portfolio actually experienced gains/losses for max drawdown calculation.
+const calculatePortfolioTimeline = (positions: PositionWithEvents[], initialBalance: number): PortfolioValuePoint[] => {
+  // Collect all significant dates (entries, exits, and events if available)
+  const significantDates = new Set<string>();
+  
+  positions.forEach(pos => {
+    if (pos.opened_at) {
+      significantDates.add(pos.opened_at.split('T')[0]); // Add date part only
+    }
+    if (pos.closed_at) {
+      significantDates.add(pos.closed_at.split('T')[0]);
+    }
+    
+    // Add event dates if available (for positions with events)
+    if (pos.events) {
+      pos.events.forEach((event: PositionEvent) => {
+        if (event.event_date) {
+          significantDates.add(event.event_date.split('T')[0]);
+        }
+      });
+    }
+  });
+  
+  // Convert to sorted array of dates
+  const sortedDates = Array.from(significantDates)
+    .map(dateStr => new Date(dateStr))
+    .sort((a, b) => a.getTime() - b.getTime());
+  
+  // Calculate portfolio value at each significant date
+  const timeline: PortfolioValuePoint[] = [];
+  
+  sortedDates.forEach(currentDate => {
+    let realizedPnL = 0;
+    let unrealizedPnL = 0;
+    
+    positions.forEach(pos => {
+      const posOpenDate = pos.opened_at ? new Date(pos.opened_at.split('T')[0]) : null;
+      const posCloseDate = pos.closed_at ? new Date(pos.closed_at.split('T')[0]) : null;
+      
+      // Skip positions that haven't opened yet
+      if (!posOpenDate || currentDate < posOpenDate) {
+        return;
+      }
+      
+      // Handle positions with events (partial sells)
+      if (pos.events && pos.events.length > 0) {
+        pos.events.forEach((event: PositionEvent) => {
+          if (event.event_type === 'sell' && event.event_date) {
+            const eventDate = new Date(event.event_date.split('T')[0]);
+            if (eventDate <= currentDate) {
+              realizedPnL += event.realized_pnl || 0;
+            }
+          }
+        });
+        
+        // For open positions, estimate unrealized P&L
+        if (pos.status === 'open') {
+          // Get the latest event date to estimate current position
+          const latestEventDate = pos.events
+            .map((e: PositionEvent) => e.event_date ? new Date(e.event_date.split('T')[0]) : new Date(0))
+            .sort((a: Date, b: Date) => b.getTime() - a.getTime())[0];
+          
+          if (latestEventDate <= currentDate) {
+            // Conservative approximation for unrealized P&L
+            // Use a small percentage of the remaining position value as potential unrealized movement
+            const remainingShares = pos.current_shares || 0;
+            const avgEntryPrice = pos.avg_entry_price || 0;
+            const remainingCost = remainingShares * avgEntryPrice;
+            
+            if (remainingShares > 0 && remainingCost > 0) {
+              // Conservative assumption: open positions are roughly break-even on unrealized P&L
+              // In a real implementation, you'd calculate: (current_price - avg_entry_price) * remaining_shares
+              // For now, assume 0 unrealized P&L for open positions to avoid inflating drawdown calculations
+              unrealizedPnL += 0; // Conservative approach - assume break-even
+            }
+          }
+        }
+      } else {
+        // Handle positions without events (traditional closed/open positions)
+        if (pos.status === 'closed' && posCloseDate && posCloseDate <= currentDate) {
+          realizedPnL += pos.total_realized_pnl || 0;
+        } else if (pos.status === 'open') {
+          // Estimate unrealized P&L for open positions
+          const daysSinceOpen = Math.floor((currentDate.getTime() - posOpenDate.getTime()) / (1000 * 60 * 60 * 24));
+          const currentShares = pos.current_shares || 0;
+          const avgEntryPrice = pos.avg_entry_price || 0;
+          const positionCost = currentShares * avgEntryPrice;
+          
+          if (positionCost > 0) {
+            // Conservative assumption: open positions are roughly break-even on unrealized P&L
+            // In reality, you'd calculate (current_price - avg_entry_price) * shares
+            // For now, assume 0 unrealized P&L to avoid inflating drawdown calculations without real market data
+            unrealizedPnL += 0; // Conservative approach - assume break-even
+          }
+        }
+      }
+    });
+    
+    const portfolioValue = initialBalance + realizedPnL + unrealizedPnL;
+    
+    timeline.push({
+      date: currentDate,
+      portfolioValue,
+      realizedPnL,
+      unrealizedPnL,
+      accountBalance: initialBalance + realizedPnL
+    });
+  });
+  
+  return timeline;
+};
+
+// Calculate proper max drawdown from portfolio value timeline
+const calculateMaxDrawdownFromTimeline = (timeline: PortfolioValuePoint[]): { maxDrawdown: number; maxDrawdownPercent: number } => {
+  if (timeline.length === 0) {
+    return { maxDrawdown: 0, maxDrawdownPercent: 0 };
+  }
+  
+  let peak = timeline[0].portfolioValue;
+  let maxDrawdown = 0;
+  
+  timeline.forEach(point => {
+    // Update peak if we have a new high
+    if (point.portfolioValue > peak) {
+      peak = point.portfolioValue;
+    }
+    
+    // Calculate current drawdown from peak
+    const currentDrawdown = peak - point.portfolioValue;
+    if (currentDrawdown > maxDrawdown) {
+      maxDrawdown = currentDrawdown;
+    }
+  });
+  
+  const maxDrawdownPercent = peak > 0 ? (maxDrawdown / peak) * 100 : 0;
+  
+  return { maxDrawdown, maxDrawdownPercent };
+};
+
 // Risk Management Calculations
-export const calculateRiskMetrics = (positions: Position[], accountBalance: number = 10000): RiskMetrics => {
+export const calculateRiskMetrics = (positions: PositionWithEvents[], accountBalance: number = 10000): RiskMetrics => {
   const closedPositions = positions.filter(p => p.status === 'closed' && p.total_realized_pnl !== null);
   
-  if (closedPositions.length === 0) {
+  if (positions.length === 0) {
     return {
       maxDrawdown: 0, maxDrawdownPercent: 0, sharpeRatio: 0, profitFactor: 0,
       recoveryFactor: 0, calmarRatio: 0, sortinoRatio: 0, expectancy: 0,
+      kellyPercentage: 0, winRate: 0, avgWin: 0, avgLoss: 0,
+      largestWin: 0, largestLoss: 0, consecutiveWins: 0, consecutiveLosses: 0,
+      maxConsecutiveWins: 0, maxConsecutiveLosses: 0
+    };
+  }
+
+  // Calculate proper max drawdown using portfolio value timeline
+  const portfolioTimeline = calculatePortfolioTimeline(positions, accountBalance);
+  const { maxDrawdown, maxDrawdownPercent } = calculateMaxDrawdownFromTimeline(portfolioTimeline);
+
+  // Continue with other metrics using closed positions for trade-based calculations
+  if (closedPositions.length === 0) {
+    return {
+      maxDrawdown, maxDrawdownPercent,
+      sharpeRatio: 0, profitFactor: 0, recoveryFactor: 0, calmarRatio: 0, sortinoRatio: 0, expectancy: 0,
       kellyPercentage: 0, winRate: 0, avgWin: 0, avgLoss: 0,
       largestWin: 0, largestLoss: 0, consecutiveWins: 0, consecutiveLosses: 0,
       maxConsecutiveWins: 0, maxConsecutiveLosses: 0
@@ -96,28 +268,8 @@ export const calculateRiskMetrics = (positions: Position[], accountBalance: numb
   const largestWin = Math.max(...winningTrades, 0);
   const largestLoss = Math.abs(Math.min(...losingTrades, 0));
 
-  // Calculate cumulative P&L for drawdown calculation
-  let runningPnL = 0;
-  let peak = 0;
-  let maxDrawdown = 0;
-  const cumulativePnL: number[] = [];
-
-  sortedPositions.forEach(pos => {
-    runningPnL += pos.total_realized_pnl || 0;
-    cumulativePnL.push(runningPnL);
-    
-    if (runningPnL > peak) {
-      peak = runningPnL;
-    } else {
-      const drawdown = peak - runningPnL;
-      if (drawdown > maxDrawdown) {
-        maxDrawdown = drawdown;
-      }
-    }
-  });
-
-  const totalReturn = runningPnL;
-  const maxDrawdownPercent = peak > 0 ? (maxDrawdown / peak) * 100 : 0;
+  // Calculate total return for other metrics
+  const totalReturn = returns.reduce((sum, ret) => sum + ret, 0);
 
   // Profit Factor
   const grossProfit = winningTrades.reduce((a, b) => a + b, 0);
@@ -213,7 +365,7 @@ export const calculateRiskMetrics = (positions: Position[], accountBalance: numb
 };
 
 // Time-Based Analysis
-export const calculateTimeBasedMetrics = (positions: Position[]): TimeBasedMetrics => {
+export const calculateTimeBasedMetrics = (positions: PositionWithEvents[]): TimeBasedMetrics => {
   const closedPositions = positions.filter(p => p.status === 'closed' && p.closed_at && p.total_realized_pnl !== null);
   
   // Sort by closed date
@@ -347,7 +499,7 @@ export const calculateTimeBasedMetrics = (positions: Position[]): TimeBasedMetri
 };
 
 // Portfolio Analysis
-export const calculatePortfolioMetrics = (positions: Position[], accountBalance: number = 10000): PortfolioMetrics => {
+export const calculatePortfolioMetrics = (positions: PositionWithEvents[], accountBalance: number = 10000): PortfolioMetrics => {
   const allPositions = positions.filter(p => p.total_cost && p.total_cost > 0);
   
   // Average Position Size
@@ -412,7 +564,7 @@ export const calculatePortfolioMetrics = (positions: Position[], accountBalance:
 };
 
 // Entry/Exit Analysis
-export const calculateEntryExitMetrics = (positions: Position[]): EntryExitMetrics => {
+export const calculateEntryExitMetrics = (positions: PositionWithEvents[]): EntryExitMetrics => {
   const closedPositions = positions.filter(p => p.status === 'closed' && p.opened_at && p.closed_at);
   
   // Entry Time Analysis (by hour of day)
@@ -492,7 +644,7 @@ export const calculateEntryExitMetrics = (positions: Position[]): EntryExitMetri
 };
 
 // Export all calculation functions
-export const calculateAllMetrics = (positions: Position[], accountBalance: number = 10000) => {
+export const calculateAllMetrics = (positions: PositionWithEvents[], accountBalance: number = 10000) => {
   return {
     risk: calculateRiskMetrics(positions, accountBalance),
     timeBased: calculateTimeBasedMetrics(positions),

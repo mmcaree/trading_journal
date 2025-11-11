@@ -149,6 +149,39 @@ export interface AddEventData {
 // =====================================================
 
 /**
+ * Get all positions with events for analytics
+ * Returns positions with their event history for time-based analysis
+ */
+export async function getAllPositionsWithEvents(filters?: {
+  status?: 'open' | 'closed';
+  ticker?: string;
+  strategy?: string;
+  skip?: number;
+  limit?: number;
+}): Promise<(Position & { events?: PositionEvent[] })[]> {
+  try {
+    const params = new URLSearchParams();
+    
+    // Always request events for analytics
+    params.append('include_events', 'true');
+    
+    if (filters?.status) params.append('status', filters.status);
+    if (filters?.ticker) params.append('ticker', filters.ticker);
+    if (filters?.strategy) params.append('strategy', filters.strategy);
+    if (filters?.skip) params.append('skip', filters.skip.toString());
+    if (filters?.limit) params.append('limit', filters.limit.toString());
+    
+    const url = `/api/v2/positions/?${params.toString()}`;
+    const response = await api.get(url);
+    
+    return response.data;
+  } catch (error) {
+    console.error('Error fetching positions with events:', error);
+    throw error;
+  }
+}
+
+/**
  * Get all positions with optional filtering
  * Replaces: getPositions(), fetchTrades()
  */
@@ -278,8 +311,65 @@ export async function updatePosition(positionId: number, updates: {
 export async function deletePosition(positionId: number): Promise<void> {
   try {
     await api.delete(`/api/v2/positions/${positionId}`);
+    clearPositionsCache(); // Clear from cache
   } catch (error) {
     console.error('Error deleting position:', error);
+    throw error;
+  }
+}
+
+// =====================================================
+// EVENT EDITING FUNCTIONS
+// =====================================================
+
+/**
+ * Update event with comprehensive editing (shares, price, date, risk management)
+ */
+export async function updateEventComprehensive(eventId: number, updates: {
+  shares?: number;
+  price?: number;
+  event_date?: string;
+  stop_loss?: number;
+  take_profit?: number;
+  notes?: string;
+}): Promise<PositionEvent> {
+  try {
+    const response = await api.put(`/api/v2/positions/events/${eventId}/comprehensive`, updates);
+    clearPositionsCache(); // Clear cache since event changed
+    return response.data;
+  } catch (error) {
+    console.error('Error updating event comprehensively:', error);
+    throw error;
+  }
+}
+
+/**
+ * Update event risk management only (legacy method)
+ */
+export async function updateEventRiskManagement(eventId: number, updates: {
+  stop_loss?: number;
+  take_profit?: number;
+  notes?: string;
+}): Promise<PositionEvent> {
+  try {
+    const response = await api.put(`/api/v2/positions/events/${eventId}`, updates);
+    clearPositionsCache(); // Clear cache since event changed
+    return response.data;
+  } catch (error) {
+    console.error('Error updating event risk management:', error);
+    throw error;
+  }
+}
+
+/**
+ * Delete a specific event
+ */
+export async function deleteEvent(eventId: number): Promise<void> {
+  try {
+    await api.delete(`/api/v2/positions/events/${eventId}`);
+    clearPositionsCache(); // Clear cache since event was deleted
+  } catch (error) {
+    console.error('Error deleting event:', error);
     throw error;
   }
 }
@@ -701,6 +791,7 @@ export async function updatePositionEvent(eventId: number, eventData: EventUpdat
 export default {
   // Main functions
   getAllPositions,
+  getAllPositionsWithEvents,
   getPositionDetails,
   createPosition,
   addToPosition,

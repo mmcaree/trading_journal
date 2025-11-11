@@ -41,7 +41,7 @@ import {
   TrendingUp as TrendingUpIcon,
   TrendingDown as TrendingDownIcon
 } from '@mui/icons-material';
-import { getAllPositions } from '../services/positionsService';
+import { getAllPositions, getAllPositionsWithEvents, PositionEvent } from '../services/positionsService';
 import { accountService } from '../services/accountService';
 import { useCurrency } from '../context/CurrencyContext';
 import { Position } from '../services/positionsService';
@@ -90,7 +90,7 @@ const Analytics: React.FC = () => {
   const [tabValue, setTabValue] = useState(0);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [positions, setPositions] = useState<Position[]>([]);
+  const [positions, setPositions] = useState<(Position & { events?: PositionEvent[] })[]>([]);
   const [accountBalance, setAccountBalance] = useState(0);
   const [selectedTimeScale, setSelectedTimeScale] = useState<TimeScale>('ALL');
   const { formatCurrency } = useCurrency();
@@ -112,7 +112,7 @@ const Analytics: React.FC = () => {
     setError(null);
     try {
       const [positionsData, balance] = await Promise.all([
-        getAllPositions({ limit: 100000 }),  // Get all positions for analytics, not just 100
+        getAllPositionsWithEvents({ limit: 100000 }),  // Get all positions with events for Time Analysis
         accountService.getCurrentBalance()
       ]);
       
@@ -151,30 +151,71 @@ const Analytics: React.FC = () => {
     
     const cutoffDate = getTimeScaleDate(selectedTimeScale);
     return positions.filter(position => {
-      const positionDate = new Date(position.opened_at);
-      return positionDate >= cutoffDate;
+      // For closed positions, filter by close date for P&L calculations
+      // For open positions, filter by open date for analysis
+      if (position.status === 'closed' && position.closed_at) {
+        const closeDate = new Date(position.closed_at);
+        return closeDate >= cutoffDate;
+      } else {
+        const openDate = new Date(position.opened_at);
+        return openDate >= cutoffDate;
+      }
     });
   }, [positions, selectedTimeScale]);
 
+  // Helper function to calculate event-based realized P&L (includes partial exits from open positions)
+  const getEventBasedRealizedPnL = useMemo(() => {
+    return filteredPositions
+      .flatMap(position => {
+        if (!position.events || position.events.length === 0) return [];
+        return position.events
+          .filter(event => event.event_type === 'sell' && event.realized_pnl != null)
+          .map(event => event.realized_pnl || 0);
+      })
+      .reduce((total, pnl) => total + pnl, 0);
+  }, [filteredPositions]);
+
   // Time Analysis calculations
   const timeAnalysisData = useMemo(() => {
-    const closedPositions = filteredPositions.filter(p => p.status === 'closed' && p.closed_at);
-    
-    // Cumulative Returns Data
-    const cumulativeReturns = closedPositions
-      .sort((a, b) => new Date(a.closed_at!).getTime() - new Date(b.closed_at!).getTime())
-      .reduce((acc, position, index) => {
-        const runningTotal = index === 0 ? (position.total_realized_pnl || 0) : 
-          acc[index - 1].cumulative + (position.total_realized_pnl || 0);
+    // Get all sell events from all positions (not just closed ones)
+    const allSellEvents = filteredPositions
+      .flatMap(position => {
+        // Only include positions that have events data
+        if (!position.events || position.events.length === 0) return [];
         
-        acc.push({
-          date: new Date(position.closed_at!).toLocaleDateString(),
-          pnl: position.total_realized_pnl || 0,
-          cumulative: runningTotal,
-          tradeNumber: index + 1
-        });
-        return acc;
-      }, [] as Array<{date: string, pnl: number, cumulative: number, tradeNumber: number}>);
+        return position.events
+          .filter(event => event.event_type === 'sell' && event.realized_pnl != null)
+          .map(event => ({
+            event_date: event.event_date,
+            realized_pnl: event.realized_pnl || 0,
+            ticker: position.ticker,
+            event_id: event.id
+          }));
+      })
+      .filter(event => event.realized_pnl !== 0); // Filter out zero P&L events
+    
+    // Sort sell events by date for accurate time-based analysis
+    const sortedSellEvents = allSellEvents.sort((a, b) => 
+      new Date(a.event_date).getTime() - new Date(b.event_date).getTime()
+    );
+    
+    // Cumulative Returns Data - built from individual sell events
+    const cumulativeReturns = sortedSellEvents.reduce((acc, event, index) => {
+      const runningTotal = index === 0 ? event.realized_pnl : 
+        acc[index - 1].cumulative + event.realized_pnl;
+      
+      acc.push({
+        date: new Date(event.event_date).toLocaleDateString(),
+        pnl: event.realized_pnl,
+        cumulative: runningTotal,
+        tradeNumber: index + 1,
+        ticker: event.ticker
+      });
+      return acc;
+    }, [] as Array<{date: string, pnl: number, cumulative: number, tradeNumber: number, ticker: string}>);
+
+    // For other analyses, keep using closed positions for compatibility
+    const closedPositions = filteredPositions.filter(p => p.status === 'closed' && p.closed_at);
 
     // Holding Period Analysis
     const holdingPeriodData = closedPositions.map(position => {
@@ -241,7 +282,8 @@ const Analytics: React.FC = () => {
       cumulativeReturns,
       holdingPeriodChart,
       pnlDistributionChart,
-      totalTrades: closedPositions.length,
+      totalTrades: closedPositions.length, // Still count closed positions for this metric
+      totalSellEvents: sortedSellEvents.length, // New metric for actual sell events
       avgHoldingDays: holdingPeriodData.length > 0 ? 
         holdingPeriodData.reduce((sum, trade) => sum + trade.days, 0) / holdingPeriodData.length : 0
     };
@@ -375,12 +417,16 @@ const Analytics: React.FC = () => {
       return acc;
     }, {} as Record<string, {count: number, totalPnl: number, avgPnl: number}>);
 
-    const entryDayChart = Object.entries(entryDayPerformance).map(([day, data]) => ({
-      day,
-      count: data.count,
-      avgPnl: data.avgPnl,
-      totalPnl: data.totalPnl
-    }));
+    // Sort days in proper weekday order (Monday to Sunday)
+    const weekdayOrder = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'];
+    const entryDayChart = weekdayOrder
+      .filter(day => entryDayPerformance[day]) // Only include days that have data
+      .map(day => ({
+        day,
+        count: entryDayPerformance[day].count,
+        avgPnl: entryDayPerformance[day].avgPnl,
+        totalPnl: entryDayPerformance[day].totalPnl
+      }));
 
     // Entry hour analysis
     const entryHourPerformance = entryTimingData.reduce((acc, trade) => {
@@ -587,10 +633,11 @@ const Analytics: React.FC = () => {
   // Calculate advanced metrics whenever filtered positions change
   useEffect(() => {
     if (filteredPositions.length > 0) {
-      const metrics = calculateAllMetrics(filteredPositions, accountBalance || 10000);
+      // Use positions with events for more accurate metrics (positions already includes events)
+      const metrics = calculateAllMetrics(positions, accountBalance || 10000);
       setAdvancedMetrics(metrics);
     }
-  }, [filteredPositions, accountBalance]);
+  }, [filteredPositions, positions, accountBalance]);
 
   if (loading) {
     return (
@@ -631,7 +678,9 @@ const Analytics: React.FC = () => {
             ))}
           </ButtonGroup>
           <Typography variant="caption" sx={{ ml: 2, color: 'text.secondary' }}>
-            Time Period: {selectedTimeScale === 'ALL' ? 'All Time' : selectedTimeScale}
+            {selectedTimeScale === 'ALL' 
+              ? 'Showing all positions and trades' 
+              : `Showing positions closed in ${selectedTimeScale} period`}
           </Typography>
         </Paper>
       </Box>
@@ -681,15 +730,17 @@ const Analytics: React.FC = () => {
           <Grid item xs={12} sm={6} md={3}>
             <Card sx={{ height: '100%' }}>
               <CardContent>
-                <Typography color="text.secondary" gutterBottom>Total P&L</Typography>
+                <Typography color="text.secondary" gutterBottom>
+                  {selectedTimeScale === 'ALL' ? 'Total P&L' : `P&L (${selectedTimeScale})`}
+                </Typography>
                 <Typography 
                   variant="h4" 
-                  color={filteredPositions.reduce((sum, p) => sum + (p.total_realized_pnl || 0), 0) >= 0 ? 'success.main' : 'error.main'}
+                  color={getEventBasedRealizedPnL >= 0 ? 'success.main' : 'error.main'}
                 >
-                  ${filteredPositions.reduce((sum, p) => sum + (p.total_realized_pnl || 0), 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                  ${getEventBasedRealizedPnL.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                 </Typography>
                 <Typography variant="body2" color="text.secondary">
-                  Realized P&L
+                  {selectedTimeScale === 'ALL' ? 'All realized P&L (incl. partial exits)' : `From sell events in ${selectedTimeScale} period`}
                 </Typography>
               </CardContent>
             </Card>
@@ -698,7 +749,11 @@ const Analytics: React.FC = () => {
           <Grid item xs={12} sm={6} md={3}>
             <Card sx={{ height: '100%' }}>
               <CardContent>
-                <Typography color="text.secondary" gutterBottom>Win Rate</Typography>
+                <Tooltip title="Percentage of trades that are profitable. Formula: (Winning Trades / Total Trades) × 100. Different from Win/Loss Ratio (which compares average $ amounts). Shows how often you win.">
+                  <Typography color="text.secondary" gutterBottom sx={{ cursor: 'help' }}>
+                    Win Rate ℹ️
+                  </Typography>
+                </Tooltip>
                 <Typography 
                   variant="h4" 
                   color={advancedMetrics && advancedMetrics.risk.winRate >= 50 ? 'success.main' : 'error.main'}
@@ -813,7 +868,7 @@ const Analytics: React.FC = () => {
                       <Typography variant="h6" color={advancedMetrics.risk.maxDrawdownPercent > -20 ? 'success.main' : 'error.main'}>
                         -{advancedMetrics.risk.maxDrawdownPercent.toFixed(1)}%
                       </Typography>
-                      <Tooltip title="Maximum peak-to-trough decline. Shows worst losing streak as % of peak portfolio value">
+                      <Tooltip title="Maximum decline in portfolio value from peak to trough. Calculated using event-based portfolio timeline including all realized P&L from sell events.">
                         <Typography variant="body2" color="text.secondary" sx={{ cursor: 'help' }}>
                           Max Drawdown ℹ️
                         </Typography>
@@ -845,7 +900,11 @@ const Analytics: React.FC = () => {
                       <Typography variant="h6" color={entryExitAnalysisData.winLossRatio > 1 ? 'success.main' : 'error.main'}>
                         {entryExitAnalysisData.winLossRatio.toFixed(2)}
                       </Typography>
-                      <Typography variant="body2" color="text.secondary">Win/Loss Ratio</Typography>
+                      <Tooltip title="Average size of wins vs losses. Formula: Average Win $ / Average Loss $. Different from Win Rate (which is % of trades that win). Values > 1 mean you make more on wins than you lose on losses.">
+                        <Typography variant="body2" color="text.secondary" sx={{ cursor: 'help' }}>
+                          Win/Loss Ratio ℹ️
+                        </Typography>
+                      </Tooltip>
                     </Box>
                   </Grid>
                 </Grid>
@@ -994,7 +1053,11 @@ const Analytics: React.FC = () => {
           <Grid item xs={12} md={3}>
             <Card sx={{ height: '100%' }}>
               <CardContent>
-                <Typography color="text.secondary" gutterBottom>Max Drawdown</Typography>
+                <Tooltip title="Maximum decline in portfolio value from peak to trough. Calculated using event-based portfolio timeline that includes all realized P&L from individual sell events. This provides a more accurate measure of maximum portfolio decline than traditional methods. Values above -20% indicate high risk.">
+                  <Typography color="text.secondary" gutterBottom sx={{ cursor: 'help' }}>
+                    Max Drawdown ℹ️
+                  </Typography>
+                </Tooltip>
                 <Typography variant="h5" color="error.main">
                   {formatCurrency(advancedMetrics.risk.maxDrawdown)}
                 </Typography>
@@ -1008,7 +1071,11 @@ const Analytics: React.FC = () => {
           <Grid item xs={12} md={3}>
             <Card sx={{ height: '100%' }}>
               <CardContent>
-                <Typography color="text.secondary" gutterBottom>Sharpe Ratio</Typography>
+                <Tooltip title="Measures risk-adjusted returns. Values > 1 are good, > 2 are excellent. Formula: (Return - Risk-free rate) / Standard deviation">
+                  <Typography color="text.secondary" gutterBottom sx={{ cursor: 'help' }}>
+                    Sharpe Ratio ℹ️
+                  </Typography>
+                </Tooltip>
                 <Typography 
                   variant="h5" 
                   color={advancedMetrics.risk.sharpeRatio > 1 ? 'success.main' : advancedMetrics.risk.sharpeRatio > 0 ? 'warning.main' : 'error.main'}
@@ -1025,7 +1092,11 @@ const Analytics: React.FC = () => {
           <Grid item xs={12} md={3}>
             <Card sx={{ height: '100%' }}>
               <CardContent>
-                <Typography color="text.secondary" gutterBottom>Recovery Factor</Typography>
+                <Tooltip title="Measures how much profit you made relative to maximum drawdown. Higher values indicate better recovery ability. Formula: Net Profit / Maximum Drawdown">
+                  <Typography color="text.secondary" gutterBottom sx={{ cursor: 'help' }}>
+                    Recovery Factor ℹ️
+                  </Typography>
+                </Tooltip>
                 <Typography 
                   variant="h5" 
                   color={advancedMetrics.risk.recoveryFactor > 3 ? 'success.main' : 'warning.main'}
@@ -1042,7 +1113,11 @@ const Analytics: React.FC = () => {
           <Grid item xs={12} md={3}>
             <Card sx={{ height: '100%' }}>
               <CardContent>
-                <Typography color="text.secondary" gutterBottom>Kelly %</Typography>
+                <Tooltip title="Optimal position size for maximizing long-term growth. Formula: (Win% × Avg Win - Loss% × Avg Loss) / Avg Win. Values > 2% suggest good edge">
+                  <Typography color="text.secondary" gutterBottom sx={{ cursor: 'help' }}>
+                    Kelly % ℹ️
+                  </Typography>
+                </Tooltip>
                 <Typography 
                   variant="h5" 
                   color={advancedMetrics.risk.kellyPercentage > 0 ? 'success.main' : 'error.main'}
@@ -1062,25 +1137,41 @@ const Analytics: React.FC = () => {
               <Typography variant="h6" gutterBottom>Advanced Risk Ratios</Typography>
               <Grid container spacing={2}>
                 <Grid item xs={6}>
-                  <Typography variant="body2" color="text.secondary">Calmar Ratio</Typography>
+                  <Tooltip title="Annual return divided by maximum drawdown. Measures return relative to worst losses. Values > 1 are good, > 3 are excellent.">
+                    <Typography variant="body2" color="text.secondary" sx={{ cursor: 'help' }}>
+                      Calmar Ratio ℹ️
+                    </Typography>
+                  </Tooltip>
                   <Typography variant="h6" color={advancedMetrics.risk.calmarRatio > 1 ? 'success.main' : 'warning.main'}>
                     {advancedMetrics.risk.calmarRatio === 999 ? '8' : advancedMetrics.risk.calmarRatio.toFixed(2)}
                   </Typography>
                 </Grid>
                 <Grid item xs={6}>
-                  <Typography variant="body2" color="text.secondary">Sortino Ratio</Typography>
+                  <Tooltip title="Like Sharpe ratio but only considers downside volatility. Better measure for asymmetric returns. Values > 1 are good, > 2 are excellent.">
+                    <Typography variant="body2" color="text.secondary" sx={{ cursor: 'help' }}>
+                      Sortino Ratio ℹ️
+                    </Typography>
+                  </Tooltip>
                   <Typography variant="h6" color={advancedMetrics.risk.sortinoRatio > 1 ? 'success.main' : 'warning.main'}>
                     {advancedMetrics.risk.sortinoRatio.toFixed(2)}
                   </Typography>
                 </Grid>
                 <Grid item xs={6}>
-                  <Typography variant="body2" color="text.secondary">Expectancy</Typography>
+                  <Tooltip title="Average amount you can expect to win or lose per trade. Formula: (Win Rate × Avg Win) - (Loss Rate × Avg Loss). Positive values indicate profitable system.">
+                    <Typography variant="body2" color="text.secondary" sx={{ cursor: 'help' }}>
+                      Expectancy ℹ️
+                    </Typography>
+                  </Tooltip>
                   <Typography variant="h6" color={advancedMetrics.risk.expectancy > 0 ? 'success.main' : 'error.main'}>
                     {formatCurrency(advancedMetrics.risk.expectancy)}
                   </Typography>
                 </Grid>
                 <Grid item xs={6}>
-                  <Typography variant="body2" color="text.secondary">Profit Factor</Typography>
+                  <Tooltip title="Gross profit divided by gross loss. Measures how much you make on winners vs lose on losers. Values > 1.5 are good, > 2 are excellent.">
+                    <Typography variant="body2" color="text.secondary" sx={{ cursor: 'help' }}>
+                      Profit Factor ℹ️
+                    </Typography>
+                  </Tooltip>
                   <Typography variant="h6" color={advancedMetrics.risk.profitFactor > 1.5 ? 'success.main' : 'warning.main'}>
                     {advancedMetrics.risk.profitFactor.toFixed(2)}
                   </Typography>
@@ -1095,25 +1186,41 @@ const Analytics: React.FC = () => {
               <Typography variant="h6" gutterBottom>Streak Analysis</Typography>
               <Grid container spacing={2}>
                 <Grid item xs={6}>
-                  <Typography variant="body2" color="text.secondary">Current Win Streak</Typography>
+                  <Tooltip title="Number of consecutive winning trades you're currently on. Helps track momentum and potential overconfidence.">
+                    <Typography variant="body2" color="text.secondary" sx={{ cursor: 'help' }}>
+                      Current Win Streak ℹ️
+                    </Typography>
+                  </Tooltip>
                   <Typography variant="h6" color="success.main">
                     {advancedMetrics.risk.consecutiveWins}
                   </Typography>
                 </Grid>
                 <Grid item xs={6}>
-                  <Typography variant="body2" color="text.secondary">Current Loss Streak</Typography>
+                  <Tooltip title="Number of consecutive losing trades you're currently experiencing. Important for risk management and emotional control.">
+                    <Typography variant="body2" color="text.secondary" sx={{ cursor: 'help' }}>
+                      Current Loss Streak ℹ️
+                    </Typography>
+                  </Tooltip>
                   <Typography variant="h6" color="error.main">
                     {advancedMetrics.risk.consecutiveLosses}
                   </Typography>
                 </Grid>
                 <Grid item xs={6}>
-                  <Typography variant="body2" color="text.secondary">Max Win Streak</Typography>
+                  <Tooltip title="Your longest winning streak ever. Shows your system's potential but also risk of overconfidence during hot streaks.">
+                    <Typography variant="body2" color="text.secondary" sx={{ cursor: 'help' }}>
+                      Max Win Streak ℹ️
+                    </Typography>
+                  </Tooltip>
                   <Typography variant="h6" color="success.main">
                     {advancedMetrics.risk.maxConsecutiveWins}
                   </Typography>
                 </Grid>
                 <Grid item xs={6}>
-                  <Typography variant="body2" color="text.secondary">Max Loss Streak</Typography>
+                  <Tooltip title="Your worst losing streak. Critical for position sizing - you need enough capital to survive this happening again.">
+                    <Typography variant="body2" color="text.secondary" sx={{ cursor: 'help' }}>
+                      Max Loss Streak ℹ️
+                    </Typography>
+                  </Tooltip>
                   <Typography variant="h6" color="error.main">
                     {advancedMetrics.risk.maxConsecutiveLosses}
                   </Typography>
@@ -1131,8 +1238,11 @@ const Analytics: React.FC = () => {
           <Grid item xs={12} md={4}>
             <Card>
               <CardContent>
-                <Typography color="text.secondary" gutterBottom>Total Closed Trades</Typography>
-                <Typography variant="h4">{timeAnalysisData.totalTrades}</Typography>
+                <Typography color="text.secondary" gutterBottom>Total Sell Events</Typography>
+                <Typography variant="h4">{timeAnalysisData.totalSellEvents || 0}</Typography>
+                <Typography variant="body2" color="text.secondary">
+                  {timeAnalysisData.totalTrades} closed positions
+                </Typography>
               </CardContent>
             </Card>
           </Grid>
@@ -1157,6 +1267,9 @@ const Analytics: React.FC = () => {
                   ${timeAnalysisData.cumulativeReturns.length > 0 ? 
                     timeAnalysisData.cumulativeReturns[timeAnalysisData.cumulativeReturns.length - 1]?.cumulative.toLocaleString() : '0'}
                 </Typography>
+                <Typography variant="body2" color="text.secondary">
+                  From all sell events
+                </Typography>
               </CardContent>
             </Card>
           </Grid>
@@ -1164,21 +1277,25 @@ const Analytics: React.FC = () => {
           {/* Cumulative Returns Chart */}
           <Grid item xs={12}>
             <Paper sx={{ p: 3 }}>
-              <Typography variant="h6" gutterBottom>Cumulative Returns</Typography>
+              <Typography variant="h6" gutterBottom>Cumulative Returns (Event-Based)</Typography>
+              <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
+                Now showing P&L attributed to actual sell dates (not final position close dates)
+              </Typography>
               <Box sx={{ width: '100%', height: 400 }}>
                 <ResponsiveContainer>
                   <LineChart data={timeAnalysisData.cumulativeReturns}>
                     <CartesianGrid strokeDasharray="3 3" />
                     <YAxis 
-                      label={{ value: 'Cumulative P&L ($)', angle: -90, position: 'insideLeft' }}
+                      label={{ value: 'Cumulative P&L ($)', angle: -90, position: 'insideLeft', style: { textAnchor: 'middle' } }}
                       tickFormatter={(value) => `$${value.toLocaleString()}`}
+                      width={80}
                     />
                     <RechartsTooltip 
                       formatter={(value: number, name: string) => [
                         name === 'cumulative' ? `$${value.toLocaleString()}` : `$${value.toLocaleString()}`,
-                        name === 'cumulative' ? 'Cumulative P&L' : 'Trade P&L'
+                        name === 'cumulative' ? 'Cumulative P&L' : 'Sell Event P&L'
                       ]}
-                      labelFormatter={(value) => `Trade #${value}`}
+                      labelFormatter={(value) => `Sell Event #${value}`}
                     />
                     <Line 
                       type="monotone" 
@@ -1540,7 +1657,7 @@ const Analytics: React.FC = () => {
               <CardContent>
                 <Typography color="text.secondary" gutterBottom>Avg Win</Typography>
                 <Typography variant="h4" color="success.main">
-                  ${entryExitAnalysisData.avgWin.toLocaleString()}
+                  ${entryExitAnalysisData.avgWin.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                 </Typography>
               </CardContent>
             </Card>
@@ -1550,7 +1667,7 @@ const Analytics: React.FC = () => {
               <CardContent>
                 <Typography color="text.secondary" gutterBottom>Avg Loss</Typography>
                 <Typography variant="h4" color="error.main">
-                  ${entryExitAnalysisData.avgLoss.toLocaleString()}
+                  ${entryExitAnalysisData.avgLoss.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                 </Typography>
               </CardContent>
             </Card>
@@ -1827,7 +1944,7 @@ const Analytics: React.FC = () => {
                           <Typography variant="subtitle2">{trade.ticker}</Typography>
                         </TableCell>
                         <TableCell align="right" sx={{ color: 'success.main' }}>
-                          ${(trade.total_realized_pnl || 0).toLocaleString()}
+                          ${(trade.total_realized_pnl || 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                         </TableCell>
                         <TableCell align="right">
                           {trade.closed_at ? new Date(trade.closed_at).toLocaleDateString() : 'N/A'}
@@ -1860,7 +1977,7 @@ const Analytics: React.FC = () => {
                           <Typography variant="subtitle2">{trade.ticker}</Typography>
                         </TableCell>
                         <TableCell align="right" sx={{ color: 'error.main' }}>
-                          ${(trade.total_realized_pnl || 0).toLocaleString()}
+                          ${(trade.total_realized_pnl || 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                         </TableCell>
                         <TableCell align="right">
                           {trade.closed_at ? new Date(trade.closed_at).toLocaleDateString() : 'N/A'}
@@ -1876,7 +1993,11 @@ const Analytics: React.FC = () => {
           {/* Top Performing Tickers */}
           <Grid item xs={12}>
             <Paper sx={{ p: 3 }}>
-              <Typography variant="h6" gutterBottom>🏆 Top Performing Tickers</Typography>
+              <Tooltip title="Shows tickers you've traded more than once, ranked by total P&L across all trades. Helps identify your most consistently profitable stocks.">
+                <Typography variant="h6" gutterBottom sx={{ cursor: 'help' }}>
+                  🏆 Top Performing Tickers ℹ️
+                </Typography>
+              </Tooltip>
               <TableContainer>
                 <Table>
                   <TableHead>
@@ -1909,13 +2030,13 @@ const Analytics: React.FC = () => {
                           align="right"
                           sx={{ color: ticker.totalPnl >= 0 ? 'success.main' : 'error.main' }}
                         >
-                          ${ticker.totalPnl.toLocaleString()}
+                          ${ticker.totalPnl.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                         </TableCell>
                         <TableCell 
                           align="right"
                           sx={{ color: ticker.avgPnl >= 0 ? 'success.main' : 'error.main' }}
                         >
-                          ${ticker.avgPnl.toLocaleString()}
+                          ${ticker.avgPnl.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                         </TableCell>
                       </TableRow>
                     ))}
@@ -1934,8 +2055,8 @@ const Analytics: React.FC = () => {
                   <BarChart data={topPerformersData.topTickers.slice(0, 10)}>
                     <CartesianGrid strokeDasharray="3 3" />
                     <XAxis dataKey="ticker" />
-                    <YAxis tickFormatter={(value) => `$${value.toLocaleString()}`} />
-                    <RechartsTooltip formatter={(value: number) => [`$${value.toLocaleString()}`, 'Total P&L']} />
+                    <YAxis tickFormatter={(value) => `$${value.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`} />
+                    <RechartsTooltip formatter={(value: number) => [`$${value.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`, 'Total P&L']} />
                     <Bar dataKey="totalPnl" fill="#1976d2" />
                   </BarChart>
                 </ResponsiveContainer>

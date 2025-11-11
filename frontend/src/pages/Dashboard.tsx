@@ -33,7 +33,7 @@ import {
 } from 'recharts';
 import { Link, useLocation } from 'react-router-dom';
 
-import { getAllPositions } from '../services/positionsService';
+import { getAllPositions, getAllPositionsWithEvents } from '../services/positionsService';
 import { accountService } from '../services/accountService';
 import { useCurrency } from '../context/CurrencyContext';
 import { Position } from '../services/positionsService';
@@ -52,6 +52,7 @@ interface DashboardMetrics {
   worstPerformer: { ticker: string; pnl: number } | null;
   accountBalance: number;
   accountGrowth: number;
+  eventBasedRealizedPnL: number;
 }
 
 const Dashboard: React.FC = () => {
@@ -59,6 +60,7 @@ const Dashboard: React.FC = () => {
   const [error, setError] = useState<string | null>(null);
   const [metrics, setMetrics] = useState<DashboardMetrics | null>(null);
   const [positions, setPositions] = useState<Position[]>([]);
+  const [positionsWithEvents, setPositionsWithEvents] = useState<Position[]>([]);
   const { formatCurrency } = useCurrency();
   const location = useLocation();
 
@@ -102,8 +104,17 @@ const Dashboard: React.FC = () => {
     
     try {
       // Load positions with reasonable limit for dashboard
-      const allPositions = await getAllPositions({ limit: 1000 }); // Reduced from 100000
+      const allPositions = await getAllPositions({ limit: 100000 });
       setPositions(allPositions);
+
+      // Load positions with events for event-based P&L calculation
+      const allPositionsWithEvents = await getAllPositionsWithEvents({ limit: 100000 });
+      setPositionsWithEvents(allPositionsWithEvents);
+
+      // Calculate event-based realized P&L (sum of all sell events)
+      const eventBasedRealizedPnL = allPositionsWithEvents
+        .flatMap(position => position.events?.filter(event => event.event_type === 'sell') || [])
+        .reduce((sum, event) => sum + (event.realized_pnl || 0), 0);
 
       // Calculate metrics
       const openPositions = allPositions.filter(p => p.status === 'open');
@@ -151,7 +162,8 @@ const Dashboard: React.FC = () => {
         bestPerformer,
         worstPerformer,
         accountBalance,
-        accountGrowth
+        accountGrowth,
+        eventBasedRealizedPnL
       });
       
     } catch (err) {
@@ -299,16 +311,16 @@ const Dashboard: React.FC = () => {
           <Card>
             <CardContent>
               <Typography color="textSecondary" gutterBottom>
-                Realized P&L
+                Total Realized P&L
               </Typography>
               <Typography 
                 variant="h3" 
-                color={metrics.totalRealized >= 0 ? 'success.main' : 'error.main'}
+                color={metrics.eventBasedRealizedPnL >= 0 ? 'success.main' : 'error.main'}
               >
-                {formatCurrency(metrics.totalRealized)}
+                {formatCurrency(metrics.eventBasedRealizedPnL)}
               </Typography>
               <Typography variant="body2" color="textSecondary">
-                From closed positions
+                All realized sell events
               </Typography>
             </CardContent>
           </Card>
@@ -364,44 +376,54 @@ const Dashboard: React.FC = () => {
         <Grid item xs={12} md={6}>
           <Card>
             <CardContent>
-              <Typography variant="h6" gutterBottom>Performance Highlights</Typography>
-              <Box>
+                <Box display="flex" justifyContent="space-between" alignItems="center" mb={1}>
+                <Typography variant="h6" gutterBottom>Performance Highlights</Typography>
+                <Typography 
+                  variant="caption" 
+                  color="textSecondary"
+                  title="Note: The top and worst performers shown are individual positions (single trades), not aggregated by ticker."
+                  sx={{ display: 'flex', alignItems: 'left', gap: 0.5 }}
+                >
+                  ℹ️ <span>Shown per position, not by ticker</span>
+                </Typography>
+                </Box>
+                <Box>
                 {metrics.bestPerformer && (
                   <Box display="flex" justifyContent="space-between" alignItems="center" mb={2}>
-                    <Box display="flex" alignItems="center">
-                      <TrendingUpIcon color="success" sx={{ mr: 1 }} />
-                      <Typography variant="body1">Best Performer</Typography>
-                    </Box>
-                    <Box textAlign="right">
-                      <Typography variant="subtitle1">{metrics.bestPerformer.ticker}</Typography>
-                      <Typography variant="body2" color="success.main">
-                        {formatCurrency(metrics.bestPerformer.pnl)}
-                      </Typography>
-                    </Box>
+                  <Box display="flex" alignItems="center">
+                    <TrendingUpIcon color="success" sx={{ mr: 1 }} />
+                    <Typography variant="body1">Best Performer</Typography>
+                  </Box>
+                  <Box textAlign="right">
+                    <Typography variant="subtitle1">{metrics.bestPerformer.ticker}</Typography>
+                    <Typography variant="body2" color="success.main">
+                    {formatCurrency(metrics.bestPerformer.pnl)}
+                    </Typography>
+                  </Box>
                   </Box>
                 )}
                 
                 {metrics.worstPerformer && (
                   <Box display="flex" justifyContent="space-between" alignItems="center">
-                    <Box display="flex" alignItems="center">
-                      <TrendingDownIcon color="error" sx={{ mr: 1 }} />
-                      <Typography variant="body1">Worst Performer</Typography>
-                    </Box>
-                    <Box textAlign="right">
-                      <Typography variant="subtitle1">{metrics.worstPerformer.ticker}</Typography>
-                      <Typography variant="body2" color="error.main">
-                        {formatCurrency(metrics.worstPerformer.pnl)}
-                      </Typography>
-                    </Box>
+                  <Box display="flex" alignItems="center">
+                    <TrendingDownIcon color="error" sx={{ mr: 1 }} />
+                    <Typography variant="body1">Worst Performer</Typography>
+                  </Box>
+                  <Box textAlign="right">
+                    <Typography variant="subtitle1">{metrics.worstPerformer.ticker}</Typography>
+                    <Typography variant="body2" color="error.main">
+                    {formatCurrency(metrics.worstPerformer.pnl)}
+                    </Typography>
+                  </Box>
                   </Box>
                 )}
                 
                 {!metrics.bestPerformer && !metrics.worstPerformer && (
                   <Typography variant="body2" color="textSecondary">
-                    No closed positions yet to analyze performance.
+                  No closed positions yet to analyze performance.
                   </Typography>
                 )}
-              </Box>
+                </Box>
             </CardContent>
           </Card>
         </Grid>

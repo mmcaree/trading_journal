@@ -34,6 +34,7 @@ interface EventBreakdownProps {
   position: Position;
   events: PositionEvent[];
   onUpdateStopLoss?: (eventId: number, newStopLoss: number | null) => void;
+  onEditEvent?: (eventId: PositionEvent) => void;
   disabled?: boolean;
   accountBalance?: number;
 }
@@ -71,6 +72,7 @@ const EventBreakdown: React.FC<EventBreakdownProps> = ({
   position,
   events,
   onUpdateStopLoss,
+  onEditEvent,
   disabled = false,
   accountBalance
 }) => {
@@ -103,6 +105,24 @@ const EventBreakdown: React.FC<EventBreakdownProps> = ({
     }
   }, [position.id, events]);
 
+  // Get the original stop loss from the first buy event for Original Risk calculations
+  const getOriginalStopLoss = () => {
+    // Find the first buy event chronologically
+    const firstBuyEvent = events
+      .filter(e => e.event_type === 'buy')
+      .sort((a, b) => new Date(a.event_date).getTime() - new Date(b.event_date).getTime())[0];
+    
+    if (!firstBuyEvent) return null;
+    
+    // Use the stop loss from the first buy event, or find it from pending orders if imported
+    let originalStopLoss = firstBuyEvent.stop_loss;
+    if (!originalStopLoss && firstBuyEvent.source === 'import' && pendingOrders.length > 0) {
+      originalStopLoss = findStopLossForImportedEvent(firstBuyEvent);
+    }
+    
+    return originalStopLoss;
+  };
+
   // Calculate risk metrics for each event
   const calculateEventRisk = (event: PositionEvent, currentPrice?: number) => {
     const eventValue = Math.abs(event.shares || 0) * (event.price || 0);
@@ -114,9 +134,10 @@ const EventBreakdown: React.FC<EventBreakdownProps> = ({
       stopLoss = findStopLossForImportedEvent(event);
     }
 
-    // Calculate original risk (at time of entry)
-    const originalRisk = stopLoss 
-      ? Math.abs((event.price || 0) - stopLoss) * Math.abs(event.shares || 0)
+    // Calculate original risk using the ORIGINAL stop loss from first buy event (never changes)
+    const originalStopLoss = getOriginalStopLoss();
+    const originalRisk = originalStopLoss && event.event_type === 'buy'
+      ? Math.abs((event.price || 0) - originalStopLoss) * Math.abs(event.shares || 0)
       : 0;
     
     // Calculate risk percentage based on account balance at time of entry (snapshot)
@@ -242,8 +263,10 @@ const EventBreakdown: React.FC<EventBreakdownProps> = ({
           // Found stop loss from pending orders for imported event
         }
         
-        const originalRisk = stopLoss 
-          ? Math.abs(event.price - stopLoss) * Math.abs(event.shares)
+        // Use original stop loss from first buy event for consistent Original Risk calculation
+        const originalStopLoss = getOriginalStopLoss();
+        const originalRisk = originalStopLoss 
+          ? Math.abs(event.price - originalStopLoss) * Math.abs(event.shares)
           : 0;
         
         const snapshotAccountValue = position.account_value_at_entry || accountBalance || 0;
@@ -350,8 +373,10 @@ const EventBreakdown: React.FC<EventBreakdownProps> = ({
       
       const stopLoss = mostRecentStopLoss?.stop_loss || mostRecentStopLoss?.price;
       
-      const originalRisk = stopLoss 
-        ? Math.abs(avgEntryPrice - stopLoss) * currentShares
+      // Use original stop loss from first buy event for consistent Original Risk calculation
+      const originalStopLoss = getOriginalStopLoss();
+      const originalRisk = originalStopLoss 
+        ? Math.abs(avgEntryPrice - originalStopLoss) * currentShares
         : 0;
       const originalRiskPercent = originalRisk > 0 && snapshotAccountValue > 0
         ? (originalRisk / snapshotAccountValue) * 100 
@@ -388,7 +413,11 @@ const EventBreakdown: React.FC<EventBreakdownProps> = ({
     const snapshotAccountValue = position.account_value_at_entry || accountBalance || 0;
     
     const subLots = Array.from(ordersByStopLoss.entries()).map(([stopLoss, shares]) => {
-      const originalRisk = Math.abs(avgEntryPrice - stopLoss) * shares;
+      // Use original stop loss from first buy event for consistent Original Risk calculation
+      const originalStopLoss = getOriginalStopLoss();
+      const originalRisk = originalStopLoss 
+        ? Math.abs(avgEntryPrice - originalStopLoss) * shares
+        : 0;
       const originalRiskPercent = originalRisk > 0 && snapshotAccountValue > 0
         ? (originalRisk / snapshotAccountValue) * 100 
         : 0;
@@ -446,9 +475,10 @@ const EventBreakdown: React.FC<EventBreakdownProps> = ({
     allEvents.forEach((event, index) => {
       console.log(`📈 Processing event ${index + 1}:`, event.event_type, event.shares, 'shares at', event.price);
       if (event.event_type === 'buy') {
-        // Create new sub-lot for buy
-        const originalRisk = event.stop_loss 
-          ? Math.abs(event.price - event.stop_loss) * Math.abs(event.shares)
+        // Create new sub-lot for buy - Use original stop loss from first buy event
+        const originalStopLoss = getOriginalStopLoss();
+        const originalRisk = originalStopLoss 
+          ? Math.abs(event.price - originalStopLoss) * Math.abs(event.shares)
           : 0;
         
         const snapshotAccountValue = position.account_value_at_entry || accountBalance || 0;
@@ -1055,16 +1085,30 @@ const EventBreakdown: React.FC<EventBreakdownProps> = ({
                         </IconButton>
                       </Box>
                     ) : (
-                      <Tooltip title="Edit historical stop loss data">
-                        <IconButton 
-                          size="small" 
-                          onClick={() => handleStartEdit(event.id, event.stop_loss || undefined)}
-                          disabled={disabled}
-                          color="secondary"
-                        >
-                          <EditIcon fontSize="small" />
-                        </IconButton>
-                      </Tooltip>
+                      <Box sx={{ display: 'flex', gap: 0.5 }}>
+                        <Tooltip title="Edit historical stop loss data">
+                          <IconButton 
+                            size="small" 
+                            onClick={() => handleStartEdit(event.id, event.stop_loss || undefined)}
+                            disabled={disabled}
+                            color="secondary"
+                          >
+                            <StopLossIcon fontSize="small" />
+                          </IconButton>
+                        </Tooltip>
+                        {onEditEvent && (
+                          <Tooltip title="Edit event details (shares, price, date)">
+                            <IconButton 
+                              size="small" 
+                              onClick={() => onEditEvent(event)}
+                              disabled={disabled}
+                              color="primary"
+                            >
+                              <EditIcon fontSize="small" />
+                            </IconButton>
+                          </Tooltip>
+                        )}
+                      </Box>
                     )}
                   </TableCell>
                 </TableRow>
