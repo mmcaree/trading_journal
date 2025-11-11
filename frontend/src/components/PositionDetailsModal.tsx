@@ -794,7 +794,7 @@ const PositionDetailsModal: React.FC<PositionDetailsModalProps> = ({
               <Grid item xs={12} md={6}>
                 <Paper sx={{ p: 2 }}>
                   <Typography variant="h6" gutterBottom>
-                    🎯 {position.ticker} Lifetime Performance
+                    🎯 {position.ticker} Lifetime Historical Data
                   </Typography>
                   {lifetimeAnalytics ? (
                     <Grid container spacing={2}>
@@ -1051,22 +1051,6 @@ const PositionDetailsModal: React.FC<PositionDetailsModalProps> = ({
                       Return per unit of volatility (Avg Return / Std Dev)
                     </Typography>
                   </Grid>
-                  <Grid item xs={12}>
-                    <Alert severity={position.current_stop_loss ? 'success' : 'warning'}>
-                      {position.current_stop_loss 
-                        ? `Current Stop Loss: ${formatCurrency(position.current_stop_loss)}`
-                        : 'No Stop Loss Set'
-                      }
-                    </Alert>
-                  </Grid>
-                  <Grid item xs={12}>
-                    <Alert severity={position.current_take_profit ? 'info' : 'info'}>
-                      {position.current_take_profit 
-                        ? `Current Take Profit: ${formatCurrency(position.current_take_profit)}`
-                        : 'No Take Profit Set'
-                      }
-                    </Alert>
-                  </Grid>
                 </Grid>
               </Paper>
             </Grid>
@@ -1087,7 +1071,7 @@ const PositionDetailsModal: React.FC<PositionDetailsModalProps> = ({
                   <Grid item xs={6} sm={3}>
                     <Typography variant="body2" color="text.secondary">Total Sold</Typography>
                     <Typography variant="h6" sx={{ color: 'warning.main' }}>
-                      {formatCurrency(positionDetails?.metrics?.total_sold || 0)}
+                      {positionDetails?.metrics?.total_sold || 0}
                     </Typography>
                   </Grid>
                   <Grid item xs={6} sm={3}>

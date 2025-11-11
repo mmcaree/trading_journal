@@ -453,6 +453,17 @@ def update_position(
         
         events_count = len(position_service.get_position_events(position_id))
         
+        # Calculate return percentage for closed positions (same logic as in other endpoints)
+        return_percent = None
+        if updated_position.status.value == 'closed' and updated_position.total_realized_pnl is not None:
+            # Calculate original investment from buy events
+            buy_events = [e for e in updated_position.events if e.event_type.value == 'buy']
+            if buy_events and updated_position.avg_entry_price:
+                total_shares_bought = sum(event.shares for event in buy_events)
+                original_investment = updated_position.avg_entry_price * total_shares_bought
+                if original_investment > 0:
+                    return_percent = round((updated_position.total_realized_pnl / original_investment) * 100, 2)
+        
         return PositionResponse(
             id=updated_position.id,
             ticker=updated_position.ticker,
@@ -471,7 +482,12 @@ def update_position(
             notes=updated_position.notes,
             lessons=updated_position.lessons,
             mistakes=updated_position.mistakes,
-            events_count=events_count
+            events_count=events_count,
+            return_percent=return_percent,
+            original_risk_percent=updated_position.original_risk_percent,
+            current_risk_percent=updated_position.current_risk_percent,
+            original_shares=updated_position.original_shares,
+            account_value_at_entry=updated_position.account_value_at_entry
         )
         
     except Exception as e:
