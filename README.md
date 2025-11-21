@@ -2,54 +2,54 @@
 
 Professional trading journal for tracking both stock and options trades. Built with React/TypeScript and FastAPI.
 
-## ✨ Features
+## Features
 
-### 📊 **Trading**
+### **Trading**
 - **Stock Trading**: Full position lifecycle tracking with P&L calculations
 - **Options Trading**: Complete options support with contract-based pricing
 - **Risk Management**: Stop loss tracking and risk percentage calculations
 - **Position Events**: Detailed event history for all trading activities
 
-### 📈 **Analytics**
+### **Analytics**
 - Real-time P&L calculations with currency formatting
 - Position performance metrics and return percentages
 - Risk analysis with original and current risk percentages
 - Historical trade analysis and patterns
 
-### 🔄 **Import System**
+### **Import System**
 - **CSV Import**: Automated Webull CSV import with options auto-detection
 - **Smart Parsing**: Automatic options symbol parsing and price conversion
 - **Stop Loss Detection**: Intelligent stop loss matching from cancelled orders
 - **Data Validation**: Comprehensive import validation and error reporting
 
-### 🎯 **Options Trading Support**
+### **Options Trading Support**
 - **Manual Creation**: Create options positions via dropdown selection
 - **Contract Pricing**: Automatic 100x multiplier for options contracts
 - **Strike & Expiration**: Track strike prices and expiration dates
 - **Call/Put Support**: Full support for both call and put options
 - **Contract Management**: Add and sell contracts with proper pricing
 
-### 🖼️ **Media & Notes**
+### **Media & Notes**
 - Chart upload and management
 - Position notes and trade lessons
 - Mistake tracking for continuous improvement
 
-## 🚀 Recent Updates (v2.0)
+## Recent Updates (v0.2)
 
-### ✅ **Options Trading System**
+### **Options Trading System**
 - Complete manual options trading through UI
 - Dropdown-based instrument type selection (Stock/Options)
 - Automatic contract price calculations (×100 multiplier)
 - Options details display (strike, expiration, type)
 - Enhanced import service with options auto-detection
 
-### ✅ **Production Ready**
+### **Production Ready**
 - Cleaned codebase with removed debug files
 - Railway deployment optimization
 - Security vulnerability fixes
 - Comprehensive error handling
 
-## 🛠️ To Do
+## To Do
 
 - Fix chart formatting issues  
 - Better historical data integration
@@ -57,7 +57,7 @@ Professional trading journal for tracking both stock and options trades. Built w
 - Mobile responsive design
 - Advanced analytics dashboard
 
-## 💻 Tech Stack
+## Tech Stack
 
 ### Backend
 - **FastAPI** - High-performance Python web framework
@@ -79,7 +79,7 @@ Professional trading journal for tracking both stock and options trades. Built w
 - **PostgreSQL** - Production database
 - **Docker** - Containerized deployment
 
-## 🚀 Local Development
+## Local Development
 
 ```bash
 # Backend Setup
@@ -95,7 +95,7 @@ npm install
 npm run dev
 ```
 
-## 📦 Deployment
+## Deployment
 
 The application is configured for automatic deployment on Railway:
 
@@ -112,11 +112,11 @@ CORS_ORIGINS=["https://your-domain.com"]
 ENVIRONMENT=production
 ```
 
-## 🔗 Links
+## Links
 - [Live App](https://tradejournal.trade)
 - [API Documentation](https://tradingjournal.up.railway.app/docs)
 
-## 📊 Options Trading Guide
+## Options Trading Guide
 
 ### Creating Options Positions
 1. Select "Options" from instrument type dropdown
