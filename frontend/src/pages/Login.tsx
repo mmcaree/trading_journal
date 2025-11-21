@@ -104,7 +104,7 @@ const Login: React.FC = () => {
             <LockOutlinedIcon />
           </Avatar>
           <Typography component="h1" variant="h5">
-            Sign in to SwingTrader
+            Sign in to SAR Trade Journal
           </Typography>
           
           {error && (

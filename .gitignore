@@ -148,3 +148,10 @@ backend/assign_instructor_role.py
 INSTRUCTOR_SETUP.md
 backend/scripts/requirements.txt
 backend/scripts/railway_add_indexes.py
+FEATURE_REQUESTS.md
+GITHUB_PROJECTS_SETUP.md
+IMPROVEMENT_ROADMAP.md
+.github/ISSUE_TEMPLATE/improvement-task.md
+scripts/add_universal_import_issue.py
+scripts/create_github_issues.py
+QUICKSTART_CHECKLIST.md
