@@ -7,7 +7,6 @@ import {
   TextField,
   Button,
   Paper,
-  Avatar,
   Grid,
   Checkbox,
   FormControlLabel,
@@ -16,7 +15,6 @@ import {
   Alert
 } from '@mui/material';
 import {
-  LockOutlined as LockOutlinedIcon,
   Visibility as VisibilityIcon,
   VisibilityOff as VisibilityOffIcon
 } from '@mui/icons-material';
@@ -100,9 +98,17 @@ const Login: React.FC = () => {
             width: '100%',
           }}
         >
-          <Avatar sx={{ m: 1, bgcolor: 'primary.main' }}>
-            <LockOutlinedIcon />
-          </Avatar>
+          <Box
+            component="img"
+            src="/assets/sar-logo.png"
+            alt="SAR Logo"
+            sx={{
+              width: 140,
+              height: 80,
+              m: 1,
+              objectFit: 'contain'
+            }}
+          />
           <Typography component="h1" variant="h5">
             Sign in to SAR Trade Journal
           </Typography>
