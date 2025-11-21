@@ -1,30 +1,40 @@
 """
-Models package - exports all SQLAlchemy models
+Models package - exports only current, active SQLAlchemy models
+Legacy models have been removed (Trade, Chart, PartialExit, etc.)
 """
 
-# Import Base from position models (current models only)
-from .position_models import Base, User
-
-# Import deprecated models from models.py 
-from .models import (
-    Trade,
-    TradeEntry,
-    PartialExit,
-    TradeType,
-    TradeStatus,
+from .position_models import (
+    Base,
+    User,
+    TradingPosition,
+    TradingPositionEvent,
+    TradingPositionChart,
+    TradingPositionJournalEntry,
+    ImportedPendingOrder,
+    InstructorNote,
+    PositionStatus,
+    EventType,
     InstrumentType,
-    OptionType
+    OptionType,
+    EventSource,
+    JournalEntryType,
+    OrderStatus,
 )
 
-# Make all models available at package level
 __all__ = [
     "Base",
     "User",
-    "Trade", 
-    "TradeEntry",
-    "PartialExit",
-    "TradeType",
-    "TradeStatus",
+    "TradingPosition",
+    "TradingPositionEvent",
+    "TradingPositionChart",
+    "TradingPositionJournalEntry",
+    "ImportedPendingOrder",
+    "InstructorNote",
+    "PositionStatus",
+    "EventType",
     "InstrumentType",
-    "OptionType"
+    "OptionType",
+    "EventSource",
+    "JournalEntryType",
+    "OrderStatus",
 ]

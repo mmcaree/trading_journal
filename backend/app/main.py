@@ -6,7 +6,6 @@ from fastapi.responses import FileResponse
 from app.api.routes import router as api_router
 from app.core.config import settings
 from app.models.position_models import Base
-from app.models import models  # Import models to register deprecated ones if needed
 from app.db.session import engine
 import datetime
 import os
