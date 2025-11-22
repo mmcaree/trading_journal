@@ -1,4 +1,4 @@
-from fastapi import FastAPI
+from fastapi import FastAPI, HTTPException, APIRouter
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.middleware.gzip import GZipMiddleware
 from fastapi.staticfiles import StaticFiles
@@ -10,6 +10,7 @@ from app.db.session import engine
 import datetime
 import os
 import mimetypes
+import traceback
 
 # Configure MIME types for JavaScript modules.
 mimetypes.add_type('application/javascript', '.js')
@@ -65,10 +66,8 @@ try:
     print("✅ REAL admin routes loaded successfully")
 except Exception as e:
     print(f"❌ CRITICAL: Could not load admin routes: {type(e).__name__}: {e}")
-    import traceback
     print(f"❌ Full traceback: {traceback.format_exc()}")
     # Create a minimal fallback admin router
-    from fastapi import APIRouter
     fallback_admin_router = APIRouter()
     
     @fallback_admin_router.get("/status")
@@ -143,14 +142,12 @@ if os.path.exists(static_path):
             full_path.startswith("static/") or
             full_path.startswith("docs") or 
             full_path.startswith("openapi.json")):
-            from fastapi import HTTPException
             raise HTTPException(status_code=404, detail="API route not found")
         
         # Serve index.html for React Router routes
         index_path = os.path.join(static_path, "index.html")
         if os.path.exists(index_path):
             return FileResponse(index_path)
-        from fastapi import HTTPException
         raise HTTPException(status_code=404, detail="Page not found")
 
 if __name__ == "__main__":
