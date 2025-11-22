@@ -158,3 +158,4 @@ QUICKSTART_CHECKLIST.md
 LOCAL_SETUP_GUIDE.md
 start-dev.sh
 backend/static/uploads/
+scripts/create_additional_issues.py
