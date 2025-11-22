@@ -53,7 +53,7 @@ import {
   EntryExitMetrics 
 } from '../utils/analyticsUtils';
 import { getTickerSector } from '../utils/tickerSectorMapping';
-import { CHART_COLORS, currencyTickFormatter, CustomTooltip } from '../components/CustomChartComponents';
+import { CHART_COLORS, PIE_CHART_COLORS, currencyTickFormatter, CustomTooltip } from '../components/CustomChartComponents';
 
 interface AnalyticsMetrics {
   totalTrades: number;
@@ -1493,9 +1493,9 @@ const Analytics: React.FC = () => {
                       label={({ name, percent }) => `${name} ${(percent * 100).toFixed(0)}%`}
                     >
                       {portfolioAnalysisData.sectorChart.map((entry, index) => (
-                        <Cell 
-                          key={`sector-${index}`} 
-                          fill={CHART_COLORS.primary[index % 8]} opacity={1 - index * 0.1} 
+                        <Cell
+                          key={`sector-${index}`}
+                          fill={PIE_CHART_COLORS[index % PIE_CHART_COLORS.length]}
                         />
                       ))}
                     </Pie>

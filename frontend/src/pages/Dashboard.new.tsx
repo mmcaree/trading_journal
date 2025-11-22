@@ -37,7 +37,7 @@ import { getAllPositions } from '../services/positionsService';
 import { accountService } from '../services/accountService';
 import { useCurrency } from '../context/CurrencyContext';
 import { Position } from '../services/positionsService';
-import { CustomTooltip } from '../components/CustomChartComponents';
+import { CustomTooltip, PIE_CHART_COLORS } from '../components/CustomChartComponents';
 
 const COLORS = ['#1da0f0', '#00C49F', '#FFBB28', '#FF8042', '#8884D8'];
 
@@ -313,7 +313,6 @@ const Dashboard: React.FC = () => {
                       outerRadius={100}
                       innerRadius={60}
                       paddingAngle={5}
-                      // fill="#1da0f0"
                       dataKey="value"
                       label={({ name, value }) => `${name}: ${value}`}
                     >
@@ -321,7 +320,7 @@ const Dashboard: React.FC = () => {
                         <Cell key={`cell-${index}`} fill={entry.color} />
                       ))}
                     </Pie>
-                    <Tooltip content={CustomTooltip}/>
+                    <Tooltip content={<CustomTooltip />} />
                   </PieChart>
                 </ResponsiveContainer>
               </Box>

@@ -16,6 +16,11 @@ export const CHART_COLORS = {
   card: '#1f2937',
 };
 
+export const PIE_CHART_COLORS = [
+  '#3b82f6', '#10b981', '#f59e0b', '#8b5cf6',
+  '#ef4444', '#06b6d4', '#84cc16', '#f97316'
+];
+
 export const currencyTickFormatter = (value: number): string => {
   const abs = Math.abs(value);
   if (abs >= 1_000_000) return `$${(value / 1_000_000).toFixed(1)}M`;
@@ -30,7 +35,7 @@ export const CustomTooltip: React.FC<TooltipProps<ValueType, NameType>> = ({
 }) => {
   if (!active || !payload || payload.length === 0) return null;
 
-  const formatLabel = (label: any) => {
+  const formatLabel = (label: string | number | Date): string => {
     if (typeof label === 'string' && /^\d{4}-\d{2}-\d{2}/.test(label)) {
       const date = new Date(label);
       if (!isNaN(date.getTime())) {
@@ -41,7 +46,7 @@ export const CustomTooltip: React.FC<TooltipProps<ValueType, NameType>> = ({
         });
       }
     }
-    return label;
+    return String(label);
   };
 
   return (
