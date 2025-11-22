@@ -159,3 +159,8 @@ LOCAL_SETUP_GUIDE.md
 start-dev.sh
 backend/static/uploads/
 scripts/create_additional_issues.py
+backend/pyproject.toml
+.gitignore
+backend/tests/README.md
+backend/tests/requirements-test.txt
+backend/tests/conftest.py
