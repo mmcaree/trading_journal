@@ -30,16 +30,15 @@ export const CustomTooltip: React.FC<TooltipProps<ValueType, NameType>> = ({
 }) => {
   if (!active || !payload || payload.length === 0) return null;
 
-  const formatDate = (label: any) => {
-    if (typeof label === 'string' && label.includes('-')) {
-      try {
-        return new Date(label).toLocaleDateString('en-US', {
+  const formatLabel = (label: any) => {
+    if (typeof label === 'string' && /^\d{4}-\d{2}-\d{2}/.test(label)) {
+      const date = new Date(label);
+      if (!isNaN(date.getTime())) {
+        return date.toLocaleDateString('en-US', {
           month: 'short',
           day: 'numeric',
           year: 'numeric',
         });
-      } catch {
-        return label;
       }
     }
     return label;
@@ -59,7 +58,7 @@ export const CustomTooltip: React.FC<TooltipProps<ValueType, NameType>> = ({
       }}
     >
       <Typography variant="subtitle2" fontWeight="bold" gutterBottom>
-        {formatDate(label)}
+        {formatLabel(label)}
       </Typography>
       {payload.map((entry, i) => (
         <Box key={i} sx={{ mt: 0.5 }}>
