@@ -1,7 +1,13 @@
 // src/services/debugService.ts
 import api from './apiConfig';
+import { 
+  ApiConnectionStatus, 
+  AuthStatusResponse, 
+  AnalyticsDebugData,
+  AxiosErrorResponse 
+} from '../types/api';
 
-export const testApiConnection = async (): Promise<{status: string, message: string}> => {
+export const testApiConnection = async (): Promise<ApiConnectionStatus> => {
   try {
     console.log('Testing API connection...');
     const response = await api.get('/api/debug');
@@ -10,28 +16,30 @@ export const testApiConnection = async (): Promise<{status: string, message: str
       status: 'success',
       message: `API connection successful: ${response.data.message}`
     };
-  } catch (error: any) {
-    console.error('API connection test failed:', error);
+  } catch (error) {
+    const axiosError = error as AxiosErrorResponse;
+    console.error('API connection test failed:', axiosError);
     return {
       status: 'error',
-      message: `API connection failed: ${error.message}`
+      message: `API connection failed: ${axiosError.message}`
     };
   }
 };
 
-export const debugAnalyticsData = async (): Promise<any> => {
+export const debugAnalyticsData = async (): Promise<AnalyticsDebugData> => {
   try {
     console.log('Fetching analytics debug data...');
     const response = await api.get('/api/debug/analytics-data');
     console.log('Analytics debug data:', response.data);
     return response.data;
-  } catch (error: any) {
-    console.error('Failed to fetch analytics debug data:', error);
+  } catch (error) {
+    const axiosError = error as AxiosErrorResponse;
+    console.error('Failed to fetch analytics debug data:', axiosError);
     throw error;
   }
 };
 
-export const checkAuthStatus = async (): Promise<any> => {
+export const checkAuthStatus = async (): Promise<AuthStatusResponse> => {
   try {
     console.log('Checking authentication status...');
     
@@ -54,19 +62,21 @@ export const checkAuthStatus = async (): Promise<any> => {
         tokenExists: true,
         tokenValue: token.substring(0, 10) + '...' // Show only part of the token for security
       };
-    } catch (error: any) {
+    } catch (error) {
+      const axiosError = error as AxiosErrorResponse;
       return {
         status: 'error',
-        message: `Authentication token may be invalid: ${error.message}`,
+        message: `Authentication token may be invalid: ${axiosError.message}`,
         tokenExists: true,
-        error: error.message
+        error: axiosError.message
       };
     }
-  } catch (error: any) {
-    console.error('Auth status check failed:', error);
+  } catch (error) {
+    const axiosError = error as AxiosErrorResponse;
+    console.error('Auth status check failed:', axiosError);
     return {
       status: 'error',
-      message: `Failed to check auth status: ${error.message}`
+      message: `Failed to check auth status: ${axiosError.message}`
     };
   }
 };

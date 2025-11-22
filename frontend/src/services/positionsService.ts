@@ -1,4 +1,28 @@
 import api from './apiConfig';
+import {
+  Position,
+  PositionEvent,
+  PositionDetails,
+  CreatePositionData,
+  AddEventData,
+  EventUpdateData,
+  PositionUpdateData,
+  PendingOrder,
+  CacheEntry,
+  PartialExit
+} from '../types/api';
+
+// Re-export types for backward compatibility
+export type {
+  Position,
+  PositionEvent,
+  PositionDetails,
+  CreatePositionData,
+  AddEventData,
+  EventUpdateData,
+  PositionUpdateData,
+  PendingOrder
+};
 
 // =====================================================
 // NEW UNIFIED POSITIONS SERVICE 
@@ -7,10 +31,10 @@ import api from './apiConfig';
 // =====================================================
 
 // Simple in-memory cache for performance
-const cache = new Map<string, { data: any; timestamp: number; ttl: number }>();
+const cache = new Map<string, CacheEntry<unknown>>();
 const CACHE_TTL = 30000; // 30 seconds cache TTL
 
-function getCacheKey(endpoint: string, params?: any): string {
+function getCacheKey(endpoint: string, params?: Record<string, unknown>): string {
   return `${endpoint}_${JSON.stringify(params || {})}`;
 }
 
@@ -36,114 +60,6 @@ function clearPositionsCache(): void {
   }
 }
 
-// Core interfaces that match our new API
-export interface Position {
-  id: number;
-  ticker: string;
-  instrument_type?: 'STOCK' | 'OPTIONS';
-  strategy?: string;
-  setup_type?: string;
-  timeframe?: string;
-  status: 'open' | 'closed';
-  current_shares: number;
-  avg_entry_price?: number;
-  total_cost: number;
-  total_realized_pnl: number;
-  current_stop_loss?: number;
-  current_take_profit?: number;
-  opened_at: string;
-  closed_at?: string;
-  notes?: string;
-  lessons?: string;
-  mistakes?: string;
-  events_count: number;
-  return_percent?: number; // Return percentage for closed positions
-  original_risk_percent?: number; // Original risk % when opened
-  current_risk_percent?: number;  // Current risk % based on current stop
-  original_shares?: number;       // Shares when position opened
-  account_value_at_entry?: number; // Account value when opened
-  // Options-specific fields
-  strike_price?: number;
-  expiration_date?: string;
-  option_type?: 'CALL' | 'PUT';
-}
-
-export interface PositionEvent {
-  id: number;
-  event_type: 'buy' | 'sell';
-  event_date: string;
-  shares: number;
-  price: number;
-  stop_loss?: number;
-  take_profit?: number;
-  notes?: string;
-  source: string;
-  realized_pnl?: number;
-  position_shares_before?: number;
-  position_shares_after?: number;
-}
-
-export interface PendingOrder {
-  id: number;
-  symbol: string;
-  side: string; // Buy/Sell
-  status: string; // pending/cancelled/etc
-  shares: number;
-  price?: number;
-  order_type?: string;
-  placed_time: string;
-  stop_loss?: number;
-  take_profit?: number;
-  notes?: string;
-}
-
-export interface PositionDetails {
-  position: Position;
-  events: PositionEvent[];
-  metrics: {
-    total_bought: number;
-    total_sold: number;
-    avg_buy_price: number;
-    avg_sell_price: number;
-    realized_pnl: number;
-    current_value: number;
-    total_events: number;
-  };
-}
-
-export interface CreatePositionData {
-  ticker: string;
-  instrument_type?: 'STOCK' | 'OPTIONS';
-  strategy?: string;
-  setup_type?: string;
-  timeframe?: string;
-  notes?: string;
-  account_balance_at_entry?: number;  // Account balance when position is created
-  // Options-specific fields
-  strike_price?: number;
-  expiration_date?: string;
-  option_type?: 'CALL' | 'PUT';
-  initial_event: {
-    event_type: 'buy';
-    shares: number;
-    price: number;
-    event_date?: string;
-    stop_loss?: number;
-    take_profit?: number;
-    notes?: string;
-  };
-}
-
-export interface AddEventData {
-  event_type: 'buy' | 'sell';
-  shares: number;
-  price: number;
-  event_date?: string;
-  stop_loss?: number;
-  take_profit?: number;
-  notes?: string;
-}
-
 // =====================================================
 // CORE POSITION FUNCTIONS
 // =====================================================
@@ -158,7 +74,7 @@ export async function getAllPositionsWithEvents(filters?: {
   strategy?: string;
   skip?: number;
   limit?: number;
-}): Promise<(Position & { events?: PositionEvent[] })[]> {
+}): Promise<(Position & { events?: PositionEvent [] })[]> {
   try {
     const params = new URLSearchParams();
     
@@ -434,7 +350,7 @@ export async function getAllPositionsForAnalytics(): Promise<Position[]> {
  * Transform Position to legacy Trade interface for gradual migration
  * This allows existing components to work while we migrate them
  */
-export function positionToLegacyTrade(position: Position): any {
+export function positionToLegacyTrade(position: Position): Record<string, unknown> {
   return {
     id: position.id,
     ticker: position.ticker,
@@ -457,7 +373,7 @@ export function positionToLegacyTrade(position: Position): any {
 /**
  * Transform PositionEvent to legacy PartialExit interface
  */
-export function eventToPartialExit(event: PositionEvent): any {
+export function eventToPartialExit(event: PositionEvent): PartialExit | null {
   if (event.event_type !== 'sell') return null;
   
   return {
