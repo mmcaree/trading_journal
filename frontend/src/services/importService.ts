@@ -1,36 +1,9 @@
 // src/services/importService.ts
 import api from './apiConfig';
+import { ValidationError, ValidationResult, ImportResult } from '../types/api';
 
-export interface ValidationError {
-  type: string;
-  message: string;
-  details?: any;
-}
-
-export interface ValidationResult {
-  valid: boolean;
-  total_events: number;
-  filled_events?: number;
-  pending_events?: number;
-  unique_symbols: number;
-  date_range: {
-    earliest: string | null;
-    latest: string | null;
-  };
-  errors: ValidationError[];
-  warnings: ValidationError[];
-}
-
-export interface ImportResult {
-  success: boolean;
-  message: string;
-  stats?: {
-    positionsProcessed: number;
-    eventsCreated: number;
-    duration: number;
-  };
-  errors?: string[];
-}
+// Re-export types for backward compatibility
+export type { ValidationError, ValidationResult, ImportResult };
 
 /**
  * Validate a CSV file before importing

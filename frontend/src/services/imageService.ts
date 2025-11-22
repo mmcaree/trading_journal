@@ -1,15 +1,11 @@
 import { API_URL } from './apiConfig';
+import {
+  ImageUploadResponse,
+  ImageUpdateResponse
+} from '../types/api';
 
-export interface ImageUploadResponse {
-  success: boolean;
-  image_url: string;
-  filename: string;
-}
-
-export interface ImageUpdateResponse {
-  success: boolean;
-  message: string;
-}
+// Re-export types for backward compatibility
+export type { ImageUploadResponse, ImageUpdateResponse };
 
 class ImageService {
   private baseUrl = `${API_URL}/api/images`;
