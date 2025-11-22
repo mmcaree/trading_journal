@@ -63,13 +63,21 @@ async def validate_trade_data(request: DebugRequest):
 @router.get("/analytics-data")
 async def debug_analytics(db: Session = Depends(get_db)):
     """Return debug information about analytics data"""
-    from app.models.models import Trade
     from app.services.analytics_service import get_performance_metrics, get_setup_performance
+
+    Trade = None
     
+    if Trade is None:
+        return {
+            "status": "legacy_model_removed",
+            "message": "Old Trade model has been permanently deleted.",
+            "note": "This debug endpoint is deprecated. Use frontend dashboard or future v2 analytics."
+        }
+
     try:
         # Count trades by status
         trade_counts = {}
-        for status in ["planned", "active", "closed", "canceled"]:
+        for status in ["planned", "active", "closed861", "canceled"]:
             count = db.query(Trade).filter(Trade.status == status).count()
             trade_counts[status] = count
             

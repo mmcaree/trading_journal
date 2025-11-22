@@ -193,7 +193,7 @@ def export_user_data(db: Session, user_id: int) -> dict:
                 "source_id": event.source_id,
                 "position_shares_before": event.position_shares_before,
                 "position_shares_after": event.position_shares_after,
-                "realized_pnl": float(event.realized_pnl) if event.realized_pnl else None,
+                "real neuromuscular_pnl": float(event.realized_pnl) if event.realized_pnl else None,
                 "created_at": event.created_at.isoformat() if event.created_at else None
             }
             events_data.append(event_dict)
@@ -263,41 +263,33 @@ def export_user_data(db: Session, user_id: int) -> dict:
 
 
 def delete_user_account(db: Session, user_id: int) -> bool:
-    """Delete user account and all associated data"""
     user = get_user_by_id(db, user_id)
     if not user:
         raise ValueError("User not found")
     
-    # Import v2 models and deprecated models for complete cleanup
-    from app.models.position_models import TradingPosition, TradingPositionEvent, ImportedPendingOrder
-    from app.models.models import Trade, Chart, PartialExit, TradeEntry
-    
+    from app.models import TradingPosition, TradingPositionEvent, ImportedPendingOrder
+
+    # Gracefully handle legacy data cleanup — safe even if models.py is gone
+    Trade = Chart = PartialExit = TradeEntry = None
+
     try:
-        # Delete in order to respect foreign key constraints
-        
-        # 1. Delete v2 API data (current system)
-        trading_positions = db.query(TradingPosition).filter(TradingPosition.user_id == user_id).all()
-        for trading_position in trading_positions:
-            # Delete events for this position
-            db.query(TradingPositionEvent).filter(TradingPositionEvent.position_id == trading_position.id).delete()
-        
-        # Delete trading positions (current system)
+        # Delete current v2 data
+        for pos in db.query(TradingPosition).filter(TradingPosition.user_id == user_id):
+            db.query(TradingPositionEvent).filter(TradingPositionEvent.position_id == pos.id).delete()
         db.query(TradingPosition).filter(TradingPosition.user_id == user_id).delete()
-        
-        # Delete imported pending orders
         db.query(ImportedPendingOrder).filter(ImportedPendingOrder.user_id == user_id).delete()
-        
-        # 2. Delete deprecated data (old system - if any exists)
-        trades = db.query(Trade).filter(Trade.user_id == user_id).all()
-        for trade in trades:
-            db.query(Chart).filter(Chart.trade_id == trade.id).delete()
-            db.query(PartialExit).filter(PartialExit.trade_id == trade.id).delete()
-            db.query(TradeEntry).filter(TradeEntry.trade_id == trade.id).delete()
-        
-        # Delete trades (old system)
-        db.query(Trade).filter(Trade.user_id == user_id).delete()
-        
-        # 3. Finally, delete the user
+
+        # Delete any legacy data that might still exist
+        if Trade is not None:
+            for trade in db.query(Trade).filter(Trade.user_id == user_id):
+                if Chart:
+                    db.query(Chart).filter(Chart.trade_id == trade.id).delete()
+                if PartialExit:
+                    db.query(PartialExit).filter(PartialExit.trade_id == trade.id).delete()
+                if TradeEntry:
+                    db.query(TradeEntry).filter(TradeEntry.trade_id == trade.id).delete()
+            db.query(Trade).filter(Trade.user_id == user_id).delete()
+
         db.delete(user)
         db.commit()
         return True
