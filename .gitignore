@@ -155,3 +155,6 @@ IMPROVEMENT_ROADMAP.md
 scripts/add_universal_import_issue.py
 scripts/create_github_issues.py
 QUICKSTART_CHECKLIST.md
+LOCAL_SETUP_GUIDE.md
+start-dev.sh
+backend/static/uploads/
