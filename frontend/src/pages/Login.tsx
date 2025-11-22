@@ -20,7 +20,7 @@ import {
 } from '@mui/icons-material';
 import { useAuth } from '../context/AuthContext';
 import { useFormik } from 'formik';
-import { loginFormSchema } from '../utils/validationSchemas';
+import { loginFormSchema, HELPER_TEXT } from '../utils/validationSchemas';
 
 const Login: React.FC = () => {
   const navigate = useNavigate();
@@ -137,7 +137,7 @@ const Login: React.FC = () => {
               onChange={formik.handleChange}
               onBlur={formik.handleBlur}
               error={formik.touched.password && Boolean(formik.errors.password)}
-              helperText={formik.touched.password && formik.errors.password}
+              helperText={(formik.touched.password && formik.errors.password) || HELPER_TEXT.password}
               InputProps={{
                 endAdornment: (
                   <InputAdornment position="end">

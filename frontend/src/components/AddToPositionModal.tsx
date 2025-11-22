@@ -24,6 +24,7 @@ import PerEventStopLossManager, { PerEventRiskLevels } from './PerEventStopLossM
 
 import { getCurrentLocalDateTime, parseLocalDateTimeToISO } from '../utils/dateUtils';
 import { accountService } from '../services/accountService';
+import { HELPER_TEXT } from '../utils/validationSchemas';
 
 export interface AddToPositionFormData {
   shares: number;
@@ -294,7 +295,7 @@ const AddToPositionModal: React.FC<AddToPositionModalProps> = ({
                   fullWidth
                   required
                   error={!!errors.shares}
-                  helperText={errors.shares?.message}
+                  helperText={errors.shares?.message || HELPER_TEXT.shares}
                   inputProps={{ 
                     min: 1, 
                     max: 100000,
@@ -331,7 +332,7 @@ const AddToPositionModal: React.FC<AddToPositionModalProps> = ({
                   helperText={
                     isOptions 
                       ? "Price per contract (will be multiplied by 100)"
-                      : errors.price?.message || `Use current avg: ${formatCurrency(position.avg_entry_price || 0)}`
+                      : errors.price?.message || HELPER_TEXT.price
                   }
                   inputProps={{ 
                     min: 0.01, 

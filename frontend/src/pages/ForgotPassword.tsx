@@ -16,7 +16,7 @@ import {
 } from '@mui/icons-material';
 import { useFormik } from 'formik';
 import api from '../services/apiConfig';
-import { forgotPasswordSchema } from '../utils/validationSchemas';
+import { forgotPasswordSchema, HELPER_TEXT } from '../utils/validationSchemas';
 
 const ForgotPassword: React.FC = () => {
   const navigate = useNavigate();
@@ -150,7 +150,7 @@ const ForgotPassword: React.FC = () => {
               value={formik.values.email}
               onChange={formik.handleChange}
               error={formik.touched.email && Boolean(formik.errors.email)}
-              helperText={formik.touched.email && formik.errors.email}
+              helperText={(formik.touched.email && formik.errors.email) || HELPER_TEXT.email}
             />
             
             <Button

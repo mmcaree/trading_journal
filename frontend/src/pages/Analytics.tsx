@@ -1491,7 +1491,6 @@ const Analytics: React.FC = () => {
                       innerRadius={60}
                       paddingAngle={2}
                       dataKey="value"
-                      label={({ name, percent }) => `${name} ${(percent * 100).toFixed(0)}%`}
                     >
                       {portfolioAnalysisData.sectorChart.map((entry, index) => (
                         <Cell
@@ -1500,7 +1499,7 @@ const Analytics: React.FC = () => {
                         />
                       ))}
                     </Pie>
-                    <RechartsTooltip formatter={(value: number) => [`$${value.toLocaleString()}`, 'Value']} cursor={{ strokeDasharray: '5 5' }} animationDuration={150} />
+                    <RechartsTooltip content={<CustomTooltip />} cursor={{ strokeDasharray: '5 5' }} animationDuration={150} />
                     <Legend />
                   </PieChart>
                 </ResponsiveContainer>

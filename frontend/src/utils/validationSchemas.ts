@@ -11,6 +11,20 @@ export const PASSWORD_MAX_LENGTH = 128;
 export const USERNAME_MIN_LENGTH = 3;
 export const USERNAME_MAX_LENGTH = 20;
 
+// Helper text constants for form fields
+export const HELPER_TEXT = {
+  email: 'Enter a valid email address (e.g., user@example.com)',
+  username: `${USERNAME_MIN_LENGTH}-${USERNAME_MAX_LENGTH} characters, letters/numbers/underscores only`,
+  password: `Minimum ${PASSWORD_MIN_LENGTH} characters required`,
+  confirmPassword: 'Re-enter your password to confirm',
+  ticker: '1-10 characters, automatically converted to uppercase',
+  shares: 'Must be a positive whole number',
+  price: 'Must be a positive number',
+  stopLoss: 'Price level to limit losses',
+  takeProfit: 'Target price for profits',
+  riskPercent: 'Percentage of account at risk (0-100)',
+};
+
 /**
  * Reusable Yup schema for email validation
  */

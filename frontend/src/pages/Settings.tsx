@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { PASSWORD_MIN_LENGTH } from '../utils/validationSchemas';
+import { PASSWORD_MIN_LENGTH, HELPER_TEXT } from '../utils/validationSchemas';
 import { 
   Box, 
   Typography, 
@@ -690,6 +690,7 @@ const Settings: React.FC = () => {
                     onChange={(e) => setPasswordData({ ...passwordData, new_password: e.target.value })}
                     variant="outlined"
                     required
+                    helperText={HELPER_TEXT.password}
                   />
                 </Grid>
                 <Grid item xs={12}>
@@ -701,6 +702,7 @@ const Settings: React.FC = () => {
                     onChange={(e) => setConfirmPassword(e.target.value)}
                     variant="outlined"
                     required
+                    helperText={HELPER_TEXT.confirmPassword}
                   />
                 </Grid>
                 <Grid item xs={12}>

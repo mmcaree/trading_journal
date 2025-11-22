@@ -20,7 +20,7 @@ import {
 } from '@mui/icons-material';
 import { useFormik } from 'formik';
 import api from '../services/apiConfig';
-import { passwordResetSchema } from '../utils/validationSchemas';
+import { passwordResetSchema, HELPER_TEXT } from '../utils/validationSchemas';
 
 const ResetPassword: React.FC = () => {
   const navigate = useNavigate();
@@ -216,7 +216,7 @@ const ResetPassword: React.FC = () => {
               value={formik.values.password}
               onChange={formik.handleChange}
               error={formik.touched.password && Boolean(formik.errors.password)}
-              helperText={formik.touched.password && formik.errors.password}
+              helperText={(formik.touched.password && formik.errors.password) || HELPER_TEXT.password}
               InputProps={{
                 endAdornment: (
                   <InputAdornment position="end">
@@ -244,7 +244,7 @@ const ResetPassword: React.FC = () => {
               value={formik.values.confirmPassword}
               onChange={formik.handleChange}
               error={formik.touched.confirmPassword && Boolean(formik.errors.confirmPassword)}
-              helperText={formik.touched.confirmPassword && formik.errors.confirmPassword}
+              helperText={(formik.touched.confirmPassword && formik.errors.confirmPassword) || HELPER_TEXT.confirmPassword}
               InputProps={{
                 endAdornment: (
                   <InputAdornment position="end">

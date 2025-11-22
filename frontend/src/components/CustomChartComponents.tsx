@@ -49,6 +49,28 @@ export const CustomTooltip: React.FC<TooltipProps<ValueType, NameType>> = ({
     return String(label);
   };
 
+  // Check if the value should be formatted as a count/integer (not currency)
+  const isCountMetric = (name: string): boolean => {
+    const countKeywords = ['count', 'trade', 'wins', 'losses', 'position'];
+    const nameLower = String(name).toLowerCase();
+    return countKeywords.some(keyword => nameLower.includes(keyword));
+  };
+
+  const formatValue = (value: any, name: string): string => {
+    if (typeof value !== 'number') return String(value);
+    
+    // If it's a count metric, format as integer
+    if (isCountMetric(name)) {
+      return value.toLocaleString(undefined, { maximumFractionDigits: 0 });
+    }
+    
+    // Otherwise format as currency
+    if (value >= 1000 || value <= -1000) {
+      return `$${value.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+    }
+    return `$${value.toFixed(2)}`;
+  };
+
   return (
     <Paper
       elevation={12}
@@ -72,11 +94,7 @@ export const CustomTooltip: React.FC<TooltipProps<ValueType, NameType>> = ({
               {entry.name}:
             </span>
             <span style={{ fontFamily: 'monospace', fontWeight: 500 }}>
-              {typeof entry.value === 'number'
-                ? entry.value >= 1000 || entry.value <= -1000
-                  ? `$${entry.value.toLocaleString(undefined, { minimumFractionDigits: 2 })}`
-                  : `$${entry.value.toFixed(2)}`
-                : entry.value}
+              {formatValue(entry.value, String(entry.name))}
             </span>
           </Typography>
         </Box>

@@ -25,7 +25,7 @@ import {
 } from '@mui/icons-material';
 import { useAuth } from '../context/AuthContext';
 import { useFormik } from 'formik';
-import { personalInfoSchema, accountInfoSchema } from '../utils/validationSchemas';
+import { personalInfoSchema, accountInfoSchema, HELPER_TEXT } from '../utils/validationSchemas';
 
 const steps = ['Account Information', 'Password Setup', 'Finish'];
 
@@ -162,7 +162,7 @@ const Register: React.FC = () => {
                     onChange={formik.handleChange}
                     onBlur={formik.handleBlur}
                     error={formik.touched.username && Boolean(formik.errors.username)}
-                    helperText={formik.touched.username && formik.errors.username}
+                    helperText={(formik.touched.username && formik.errors.username) || HELPER_TEXT.username}
                   />
                 </Grid>
                 <Grid item xs={12}>
@@ -176,7 +176,7 @@ const Register: React.FC = () => {
                     onChange={formik.handleChange}
                     onBlur={formik.handleBlur}
                     error={formik.touched.email && Boolean(formik.errors.email)}
-                    helperText={formik.touched.email && formik.errors.email}
+                    helperText={(formik.touched.email && formik.errors.email) || HELPER_TEXT.email}
                   />
                 </Grid>
               </Grid>
@@ -196,7 +196,7 @@ const Register: React.FC = () => {
                     onChange={formik.handleChange}
                     onBlur={formik.handleBlur}
                     error={formik.touched.password && Boolean(formik.errors.password)}
-                    helperText={formik.touched.password && formik.errors.password}
+                    helperText={(formik.touched.password && formik.errors.password) || HELPER_TEXT.password}
                     InputProps={{
                       endAdornment: (
                         <InputAdornment position="end">
@@ -224,7 +224,7 @@ const Register: React.FC = () => {
                     onChange={formik.handleChange}
                     onBlur={formik.handleBlur}
                     error={formik.touched.confirmPassword && Boolean(formik.errors.confirmPassword)}
-                    helperText={formik.touched.confirmPassword && formik.errors.confirmPassword}
+                    helperText={(formik.touched.confirmPassword && formik.errors.confirmPassword) || HELPER_TEXT.confirmPassword}
                   />
                 </Grid>
               </Grid>

@@ -31,6 +31,7 @@ import { useCurrency } from '../context/CurrencyContext';
 import { useAuth } from '../context/AuthContext';
 import { accountService } from '../services/accountService';
 import { getCurrentLocalDateTime, parseLocalDateTimeToISO } from '../utils/dateUtils';
+import { HELPER_TEXT } from '../utils/validationSchemas';
 
 
 export interface CreatePositionFormData {
@@ -442,7 +443,7 @@ const CreatePositionModal: React.FC<CreatePositionModalProps> = ({
                   label="Ticker Symbol"
                   fullWidth
                   error={!!errors.ticker}
-                  helperText={errors.ticker?.message || 'e.g., AAPL, SPY, etc.'}
+                  helperText={errors.ticker?.message || HELPER_TEXT.ticker}
                   placeholder="AAPL"
                   onChange={(e) => field.onChange(e.target.value.toUpperCase())}
                 />
@@ -543,7 +544,7 @@ const CreatePositionModal: React.FC<CreatePositionModalProps> = ({
                   label={isOptions ? "Contracts" : "Shares"}
                   fullWidth
                   error={!!errors.shares}
-                  helperText={errors.shares?.message}
+                  helperText={errors.shares?.message || HELPER_TEXT.shares}
                   inputProps={{ min: 1, step: 1 }}
                   onChange={(e) => field.onChange(parseInt(e.target.value) || 0)}
                   InputProps={{
