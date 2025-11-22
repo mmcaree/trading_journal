@@ -1,27 +1,25 @@
 // src/services/notificationService.ts
 import api from './apiConfig';
+import { 
+  NotificationSettings, 
+  TwoFactorSetup, 
+  BackupCodesResponse,
+  AxiosErrorResponse 
+} from '../types/api';
 
-export interface NotificationSettings {
-  email_notifications_enabled: boolean;
-  weekly_email_enabled: boolean;
-  weekly_email_time?: string;
-}
-
-export interface TwoFactorSetup {
-  secret: string;
-  qr_code: string;
-  backup_codes: string[];
-}
+// Re-export types for backward compatibility
+export type { NotificationSettings, TwoFactorSetup };
 
 // Update notification settings
 export const updateNotificationSettings = async (settings: NotificationSettings) => {
   try {
     const response = await api.put('/api/users/me/notifications', settings);
     return response.data;
-  } catch (error: any) {
-    console.error('Update notification settings error:', error);
-    if (error.response?.status === 400) {
-      throw new Error(error.response.data.detail || 'Failed to update notification settings');
+  } catch (error) {
+    const axiosError = error as AxiosErrorResponse;
+    console.error('Update notification settings error:', axiosError);
+    if (axiosError.response?.status === 400) {
+      throw new Error(axiosError.response.data.detail || 'Failed to update notification settings');
     }
     throw new Error('Failed to update notification settings. Please try again.');
   }
@@ -32,8 +30,9 @@ export const setup2FA = async (): Promise<TwoFactorSetup> => {
   try {
     const response = await api.post('/api/users/me/2fa/setup');
     return response.data;
-  } catch (error: any) {
-    console.error('2FA setup error:', error);
+  } catch (error) {
+    const axiosError = error as AxiosErrorResponse;
+    console.error('2FA setup error:', axiosError);
     throw new Error('Failed to set up 2FA. Please try again.');
   }
 };
@@ -42,10 +41,11 @@ export const setup2FA = async (): Promise<TwoFactorSetup> => {
 export const verify2FA = async (token: string): Promise<void> => {
   try {
     await api.post('/api/users/me/2fa/verify', { token });
-  } catch (error: any) {
-    console.error('2FA verification error:', error);
-    if (error.response?.status === 400) {
-      throw new Error(error.response.data.detail || 'Invalid verification code');
+  } catch (error) {
+    const axiosError = error as AxiosErrorResponse;
+    console.error('2FA verification error:', axiosError);
+    if (axiosError.response?.status === 400) {
+      throw new Error(axiosError.response.data.detail || 'Invalid verification code');
     }
     throw new Error('Failed to verify 2FA. Please try again.');
   }
@@ -55,8 +55,9 @@ export const verify2FA = async (token: string): Promise<void> => {
 export const disable2FA = async (): Promise<void> => {
   try {
     await api.delete('/api/users/me/2fa');
-  } catch (error: any) {
-    console.error('2FA disable error:', error);
+  } catch (error) {
+    const axiosError = error as AxiosErrorResponse;
+    console.error('2FA disable error:', axiosError);
     throw new Error('Failed to disable 2FA. Please try again.');
   }
 };
@@ -64,10 +65,11 @@ export const disable2FA = async (): Promise<void> => {
 // Regenerate backup codes
 export const regenerateBackupCodes = async (): Promise<string[]> => {
   try {
-    const response = await api.post('/api/users/me/2fa/backup-codes');
+    const response = await api.post<BackupCodesResponse>('/api/users/me/2fa/backup-codes');
     return response.data.backup_codes;
-  } catch (error: any) {
-    console.error('Regenerate backup codes error:', error);
+  } catch (error) {
+    const axiosError = error as AxiosErrorResponse;
+    console.error('Regenerate backup codes error:', axiosError);
     throw new Error('Failed to regenerate backup codes. Please try again.');
   }
 };

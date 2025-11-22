@@ -1,4 +1,7 @@
-import { AccountSettings } from './types';
+import { AccountSettings } from '../types/api';
+
+// Re-export for backward compatibility
+export type { AccountSettings };
 
 /**
  * Account Settings Service

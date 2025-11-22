@@ -1,54 +1,15 @@
 // src/services/authService.ts
-import api, { API_URL } from './apiConfig';
+import api from './apiConfig';
+import { 
+  User, 
+  LoginData, 
+  RegisterData, 
+  AuthResponse,
+  AxiosErrorResponse 
+} from '../types/api';
 
-export interface User {
-  id: number;
-  username: string;
-  email: string;
-  is_active: boolean;
-  created_at: string;
-  first_name?: string;
-  last_name?: string;
-  display_name?: string;
-  bio?: string;
-  profile_picture_url?: string;
-  updated_at?: string;
-  timezone?: string;
-  
-  // Notification settings
-  email_notifications_enabled?: boolean;
-  daily_email_enabled?: boolean;
-  daily_email_time?: string;
-  weekly_email_enabled?: boolean;
-  weekly_email_time?: string;
-  
-  // 2FA status
-  two_factor_enabled?: boolean;
-  
-  // Trading settings
-  default_account_size?: number;
-  current_account_balance?: number;
-  initial_account_balance?: number;
-  
-  // Admin system
-  role?: string; // 'STUDENT' or 'INSTRUCTOR'
-}
-
-export interface LoginData {
-  username: string;
-  password: string;
-}
-
-export interface RegisterData {
-  username: string;
-  email: string;
-  password: string;
-}
-
-export interface AuthResponse {
-  access_token: string;
-  token_type: string;
-}
+// Re-export types for backward compatibility
+export type { User, LoginData, RegisterData, AuthResponse };
 
 // Login user and return token
 export const login = async (username: string, password: string): Promise<AuthResponse> => {
@@ -65,9 +26,10 @@ export const login = async (username: string, password: string): Promise<AuthRes
     });
     
     return response.data;
-  } catch (error: any) {
-    console.error('Login error:', error);
-    if (error.response?.status === 401) {
+  } catch (error) {
+    const axiosError = error as AxiosErrorResponse;
+    console.error('Login error:', axiosError);
+    if (axiosError.response?.status === 401) {
       throw new Error('Invalid username or password');
     }
     throw new Error('Login failed. Please try again.');
@@ -79,10 +41,11 @@ export const register = async (userData: RegisterData): Promise<User> => {
   try {
     const response = await api.post('/api/auth/register', userData);
     return response.data;
-  } catch (error: any) {
-    console.error('Registration error:', error);
-    if (error.response?.status === 400) {
-      throw new Error(error.response.data.detail || 'Registration failed');
+  } catch (error) {
+    const axiosError = error as AxiosErrorResponse;
+    console.error('Registration error:', axiosError);
+    if (axiosError.response?.status === 400) {
+      throw new Error(axiosError.response.data.detail || 'Registration failed');
     }
     throw new Error('Registration failed. Please try again.');
   }
@@ -93,8 +56,9 @@ export const getCurrentUser = async (): Promise<User> => {
   try {
     const response = await api.get('/api/users/me');
     return response.data;
-  } catch (error: any) {
-    console.error('Get current user error:', error);
+  } catch (error) {
+    const axiosError = error as AxiosErrorResponse;
+    console.error('Get current user error:', axiosError);
     throw new Error('Failed to get user profile');
   }
 };

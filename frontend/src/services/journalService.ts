@@ -1,36 +1,18 @@
 import { API_URL } from './apiConfig';
+import {
+  JournalEntry,
+  JournalEntryCreate,
+  JournalEntryUpdate,
+  JournalResponse
+} from '../types/api';
 
-export interface JournalEntry {
-  id: number;
-  entry_type: 'note' | 'lesson' | 'mistake' | 'analysis';
-  content: string;
-  entry_date: string;
-  created_at: string;
-  updated_at: string;
-  attached_images?: Array<{ url: string; description: string }>;
-  attached_charts?: number[];
-}
-
-export interface JournalEntryCreate {
-  entry_type: 'note' | 'lesson' | 'mistake' | 'analysis';
-  content: string;
-  entry_date?: string; // Optional, defaults to now
-  attached_images?: Array<{ url: string; description: string }>;
-  attached_charts?: number[];
-}
-
-export interface JournalEntryUpdate {
-  entry_type?: 'note' | 'lesson' | 'mistake' | 'analysis';
-  content?: string;
-  entry_date?: string;
-  attached_images?: Array<{ url: string; description: string }>;
-  attached_charts?: number[];
-}
-
-export interface JournalResponse {
-  success?: boolean;
-  message?: string;
-}
+// Re-export types for backward compatibility
+export type {
+  JournalEntry,
+  JournalEntryCreate,
+  JournalEntryUpdate,
+  JournalResponse
+};
 
 class JournalService {
   private baseUrl = `${API_URL}/api/v2`;

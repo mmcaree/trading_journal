@@ -1,9 +1,8 @@
 import { API_URL } from './apiConfig';
+import { NotesUpdateResponse } from '../types/api';
 
-export interface NotesUpdateResponse {
-  success: boolean;
-  message: string;
-}
+// Re-export types for backward compatibility
+export type { NotesUpdateResponse };
 
 class NotesService {
   private baseUrl = `${API_URL}/api/notes`;
