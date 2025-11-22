@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, HTTPException, status, UploadFile, File
+from fastapi import APIRouter, Depends, UploadFile, File
 from typing import List
 from sqlalchemy.orm import Session
 import os
@@ -14,6 +14,12 @@ from app.api.deps import get_db, get_current_user
 from app.models import User
 from app.models.position_models import TradingPosition, TradingPositionChart
 from app.core.config import settings
+from app.utils.exceptions import (
+    NotFoundException,
+    ForbiddenException,
+    BadRequestException,
+    InternalServerException
+)
 
 router = APIRouter()
 
@@ -60,22 +66,18 @@ async def upload_image(
     
     # Validate file type
     if not file.filename:
-        raise HTTPException(status_code=400, detail="No filename provided")
+        raise BadRequestException("No filename provided")
     
     file_ext = Path(file.filename).suffix.lower()
     if file_ext not in ALLOWED_EXTENSIONS:
-        raise HTTPException(
-            status_code=400, 
-            detail=f"File type {file_ext} not allowed. Allowed types: {', '.join(ALLOWED_EXTENSIONS)}"
+        raise BadRequestException(
+            f"File type {file_ext} not allowed. Allowed types: {', '.join(ALLOWED_EXTENSIONS)}"
         )
     
     # Validate file size
     content = await file.read()
     if len(content) > MAX_FILE_SIZE:
-        raise HTTPException(
-            status_code=413, 
-            detail=f"File too large. Maximum size: {MAX_FILE_SIZE // (1024*1024)}MB"
-        )
+        raise BadRequestException(f"File too large. Maximum size: {MAX_FILE_SIZE // (1024*1024)}MB")
     
     try:
         if USE_CLOUDINARY:
@@ -104,7 +106,7 @@ async def upload_image(
             filename = unique_filename
             
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Failed to upload image: {str(e)}")
+        raise InternalServerException(f"Failed to upload image: {str(e)}")
     
     return {
         "success": True,
@@ -124,10 +126,10 @@ async def add_position_chart(
     # Get the position and verify ownership
     position = db.query(TradingPosition).filter(TradingPosition.id == position_id).first()
     if not position:
-        raise HTTPException(status_code=404, detail="Position not found")
+        raise NotFoundException("Position")
     
     if position.user_id != current_user.id:
-        raise HTTPException(status_code=403, detail="Not authorized to modify this position")
+        raise ForbiddenException("Not authorized to modify this position")
     
     # Create new chart record
     chart = TradingPositionChart(
@@ -158,10 +160,10 @@ async def get_position_charts(
     # Get the position and verify ownership
     position = db.query(TradingPosition).filter(TradingPosition.id == position_id).first()
     if not position:
-        raise HTTPException(status_code=404, detail="Position not found")
+        raise NotFoundException("Position")
     
     if position.user_id != current_user.id:
-        raise HTTPException(status_code=403, detail="Not authorized to view this position")
+        raise ForbiddenException("Not authorized to view this position")
     
     charts = db.query(TradingPositionChart).filter(
         TradingPositionChart.position_id == position_id
@@ -193,10 +195,10 @@ async def update_position_notes(
     # Get the position and verify ownership
     position = db.query(TradingPosition).filter(TradingPosition.id == position_id).first()
     if not position:
-        raise HTTPException(status_code=404, detail="Position not found")
+        raise NotFoundException("Position")
     
     if position.user_id != current_user.id:
-        raise HTTPException(status_code=403, detail="Not authorized to modify this position")
+        raise ForbiddenException("Not authorized to modify this position")
     
     # Update notes fields
     position.notes = request.notes.strip() if request.notes else None
@@ -225,11 +227,11 @@ async def delete_chart(
     # Get the chart and verify ownership through position
     chart = db.query(TradingPositionChart).filter(TradingPositionChart.id == chart_id).first()
     if not chart:
-        raise HTTPException(status_code=404, detail="Chart not found")
+        raise NotFoundException("Chart")
     
     position = db.query(TradingPosition).filter(TradingPosition.id == chart.position_id).first()
     if not position or position.user_id != current_user.id:
-        raise HTTPException(status_code=403, detail="Not authorized to delete this chart")
+        raise ForbiddenException("Not authorized to delete this chart")
     
     # Delete the chart
     db.delete(chart)

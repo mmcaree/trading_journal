@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, Query
 from sqlalchemy.orm import Session
 from typing import List, Optional
 from datetime import datetime, timedelta
@@ -7,6 +7,7 @@ from app.db.session import get_db
 from app.models.position_models import User, TradingPosition, TradingPositionEvent, InstructorNote, TradingPositionJournalEntry, TradingPositionChart
 from app.models.schemas import UserResponse
 from app.api.deps import get_current_user
+from app.utils.exceptions import NotFoundException, ForbiddenException
 from pydantic import BaseModel
 
 router = APIRouter()
@@ -70,7 +71,7 @@ class InstructorNoteResponse(BaseModel):
 # Middleware to check if user is instructor
 def get_current_instructor(current_user: User = Depends(get_current_user)):
     if current_user.role != 'INSTRUCTOR':
-        raise HTTPException(status_code=403, detail=f"Instructor access required. Current role: {current_user.role}")
+        raise ForbiddenException("Instructor access required")
     return current_user
 
 @router.get("/admin-debug/current-user")
@@ -203,7 +204,7 @@ async def get_student_detail(
     
     student = db.query(User).filter(User.id == student_id, User.role == 'STUDENT').first()
     if not student:
-        raise HTTPException(status_code=404, detail="Student not found")
+        raise NotFoundException("Student")
     
     return StudentDetail.from_orm(student)
 
@@ -218,7 +219,7 @@ async def get_student_positions(
     # Verify student exists
     student = db.query(User).filter(User.id == student_id, User.role == 'STUDENT').first()
     if not student:
-        raise HTTPException(status_code=404, detail="Student not found")
+        raise NotFoundException("Student")
     
     positions = db.query(TradingPosition).filter(TradingPosition.user_id == student_id).all()
     return positions
@@ -236,7 +237,7 @@ async def get_student_events(
     # Verify student exists
     student = db.query(User).filter(User.id == student_id, User.role == 'STUDENT').first()
     if not student:
-        raise HTTPException(status_code=404, detail="Student not found")
+        raise NotFoundException("Student")
     
     # Get all position IDs for this student
     position_ids = db.query(TradingPosition.id).filter(TradingPosition.user_id == student_id).all()
@@ -260,7 +261,7 @@ async def get_student_notes(
     # Verify student exists
     student = db.query(User).filter(User.id == student_id, User.role == 'STUDENT').first()
     if not student:
-        raise HTTPException(status_code=404, detail="Student not found")
+        raise NotFoundException("Student")
     
     notes = db.query(InstructorNote).filter(InstructorNote.student_id == student_id).order_by(InstructorNote.created_at.desc()).all()
     
@@ -293,7 +294,7 @@ async def add_student_note(
     # Verify student exists
     student = db.query(User).filter(User.id == student_id, User.role == 'STUDENT').first()
     if not student:
-        raise HTTPException(status_code=404, detail="Student not found")
+        raise NotFoundException("Student")
     
     # Create new note
     new_note = InstructorNote(
@@ -331,7 +332,7 @@ async def get_student_journal_entries(
     # Verify student exists
     student = db.query(User).filter(User.id == student_id, User.role == 'STUDENT').first()
     if not student:
-        raise HTTPException(status_code=404, detail="Student not found")
+        raise NotFoundException("Student")
     
     # Get all position IDs for this student
     position_ids = db.query(TradingPosition.id).filter(TradingPosition.user_id == student_id).all()
@@ -378,7 +379,7 @@ async def get_student_position_journal(
     ).first()
     
     if not position:
-        raise HTTPException(status_code=404, detail="Position not found for this student")
+        raise NotFoundException("Position not found for this student")
     
     # Get journal entries for this position
     journal_entries = db.query(TradingPositionJournalEntry).filter(
@@ -403,7 +404,7 @@ async def get_student_position_details(
     ).first()
     
     if not position:
-        raise HTTPException(status_code=404, detail="Position not found for this student")
+        raise NotFoundException("Position not found for this student")
     
     # Get all events for this position
     events = db.query(TradingPositionEvent).filter(
