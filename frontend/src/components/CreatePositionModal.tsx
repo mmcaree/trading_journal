@@ -114,10 +114,10 @@ const CreatePositionModal: React.FC<CreatePositionModalProps> = ({
       shares: 0,
       price: 0,
       event_date: getCurrentLocalDateTime(), // Format for datetime-local input in user's local time
-      stop_loss: undefined,
-      take_profit: undefined,
+      stop_loss: '' as any, // Empty string prevents uncontrolled->controlled warning
+      take_profit: '' as any,
       notes: '',
-      strike_price: undefined,
+      strike_price: '' as any,
       expiration_date: '',
       option_type: 'CALL'
     }
@@ -224,10 +224,10 @@ const CreatePositionModal: React.FC<CreatePositionModalProps> = ({
         shares: 0,
         price: 0,
         event_date: getCurrentLocalDateTime(),
-        stop_loss: undefined,
-        take_profit: undefined,
+        stop_loss: '' as any,
+        take_profit: '' as any,
         notes: '',
-        strike_price: undefined,
+        strike_price: '' as any,
         expiration_date: '',
         option_type: 'CALL'
       });
@@ -270,15 +270,19 @@ const CreatePositionModal: React.FC<CreatePositionModalProps> = ({
   const handleCancel = () => {
     reset({
       ticker: '',
+      instrument_type: 'STOCK',
       strategy: '',
       setup_type: '',
       timeframe: '',
       shares: 0,
       price: 0,
       event_date: getCurrentLocalDateTime(),
-      stop_loss: undefined,
-      take_profit: undefined,
-      notes: ''
+      stop_loss: '' as any,
+      take_profit: '' as any,
+      notes: '',
+      strike_price: '' as any,
+      expiration_date: '',
+      option_type: 'CALL'
     });
     setError(null);
     onClose();
@@ -384,6 +388,7 @@ const CreatePositionModal: React.FC<CreatePositionModalProps> = ({
                       label="Strike Price"
                       type="number"
                       fullWidth
+                      value={field.value || ''}
                       error={!!errors.strike_price}
                       helperText={errors.strike_price?.message}
                       inputProps={{ 
@@ -622,11 +627,12 @@ const CreatePositionModal: React.FC<CreatePositionModalProps> = ({
                   type="number"
                   label="Stop Loss (Optional)"
                   fullWidth
+                  value={field.value || ''}
                   InputProps={{
                     startAdornment: <InputAdornment position="start">$</InputAdornment>,
                   }}
                   inputProps={{ min: 0.01, step: 0.01 }}
-                  onChange={(e) => field.onChange(e.target.value ? parseFloat(e.target.value) : undefined)}
+                  onChange={(e) => field.onChange(e.target.value ? parseFloat(e.target.value) : '')}
                 />
               )}
             />
@@ -642,11 +648,12 @@ const CreatePositionModal: React.FC<CreatePositionModalProps> = ({
                   type="number"
                   label="Take Profit (Optional)"
                   fullWidth
+                  value={field.value || ''}
                   InputProps={{
                     startAdornment: <InputAdornment position="start">$</InputAdornment>,
                   }}
                   inputProps={{ min: 0.01, step: 0.01 }}
-                  onChange={(e) => field.onChange(e.target.value ? parseFloat(e.target.value) : undefined)}
+                  onChange={(e) => field.onChange(e.target.value ? parseFloat(e.target.value) : '')}
                 />
               )}
             />
