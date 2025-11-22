@@ -54,6 +54,7 @@ import {
   EntryExitMetrics 
 } from '../utils/analyticsUtils';
 import { getTickerSector } from '../utils/tickerSectorMapping';
+import { CHART_COLORS, PIE_CHART_COLORS, currencyTickFormatter, CustomTooltip } from '../components/CustomChartComponents';
 
 interface AnalyticsMetrics {
   totalTrades: number;
@@ -796,18 +797,29 @@ const Analytics: React.FC = () => {
               <Typography variant="h6" gutterBottom>Recent Performance Trend</Typography>
               <Box sx={{ width: '100%', height: 250 }}>
                 {timeAnalysisData.cumulativeReturns.length > 0 ? (
-                  <ResponsiveContainer>
-                    <LineChart data={timeAnalysisData.cumulativeReturns}>
-                      <CartesianGrid strokeDasharray="3 3" />
-
-                      <YAxis tickFormatter={(value) => `$${value.toLocaleString()}`} />
-                      <RechartsTooltip formatter={(value: number) => [`$${value.toLocaleString()}`, 'Cumulative P&L']} />
+                  <ResponsiveContainer width="100%" height="100%">
+                    <LineChart data={timeAnalysisData.cumulativeReturns} margin={{ top: 5, right: 30, left: 20, bottom: 5 }}>
+                      <CartesianGrid strokeDasharray="3 3" stroke={CHART_COLORS.grid} />
+                      <XAxis 
+                        dataKey="date" 
+                        tick={{ fill: CHART_COLORS.text, fontSize: 12 }}
+                        angle={-45}
+                        textAnchor="end"
+                        height={80}
+                      />
+                      <YAxis 
+                        tickFormatter={currencyTickFormatter}
+                        tick={{ fill: CHART_COLORS.text, fontSize: 12 }}
+                        width={80}
+                      />
+                      <RechartsTooltip content={<CustomTooltip />} cursor={{ strokeDasharray: '5 5' }} animationDuration={150} />
                       <Line 
                         type="monotone" 
                         dataKey="cumulative" 
-                        stroke="#1976d2" 
-                        strokeWidth={1}
-                        dot={{ r: 1 }}
+                        stroke={CHART_COLORS.primary}
+                        strokeWidth={2}
+                        dot={{ fill: CHART_COLORS.primary, r: 4 }}
+                        activeDot={{ r: 6 }}
                       />
                     </LineChart>
                   </ResponsiveContainer>
@@ -825,7 +837,7 @@ const Analytics: React.FC = () => {
               <Typography variant="h6" gutterBottom>Portfolio Allocation</Typography>
               <Box sx={{ width: '100%', height: 250 }}>
                 {portfolioAnalysisData.sectorChart.length > 0 ? (
-                  <ResponsiveContainer>
+                  <ResponsiveContainer width="100%" height="100%">
                     <PieChart>
                       <Pie
                         data={portfolioAnalysisData.sectorChart.slice(0, 6)}
@@ -845,7 +857,7 @@ const Analytics: React.FC = () => {
                           />
                         ))}
                       </Pie>
-                      <RechartsTooltip formatter={(value: number) => [`$${value.toLocaleString()}`, 'Value']} />
+                      <RechartsTooltip formatter={(value: number) => [`$${value.toLocaleString()}`, 'Value']} cursor={{ strokeDasharray: '5 5' }} animationDuration={150} />
                       <Legend />
                     </PieChart>
                   </ResponsiveContainer>
@@ -1283,28 +1295,30 @@ const Analytics: React.FC = () => {
                 Now showing P&L attributed to actual sell dates (not final position close dates)
               </Typography>
               <Box sx={{ width: '100%', height: 400 }}>
-                <ResponsiveContainer>
-                  <LineChart data={timeAnalysisData.cumulativeReturns}>
-                    <CartesianGrid strokeDasharray="3 3" />
-                    <YAxis 
-                      label={{ value: 'Cumulative P&L ($)', angle: -90, position: 'insideLeft', style: { textAnchor: 'middle' } }}
-                      tickFormatter={(value) => `$${value.toLocaleString()}`}
-                      width={80}
+                <ResponsiveContainer width="100%" height="100%">
+                  <LineChart data={timeAnalysisData.cumulativeReturns} margin={{ top: 20, right: 40, left: 30, bottom: 70 }}>
+                    <CartesianGrid strokeDasharray="4 4" stroke={CHART_COLORS.grid} />
+                    <XAxis
+                      dataKey="date"
+                      tick={{ fill: CHART_COLORS.text, fontSize: 12 }}
+                      angle={-45}
+                      textAnchor="end"
+                      height={90}
                     />
-                    <RechartsTooltip 
-                      formatter={(value: number, name: string) => [
-                        name === 'cumulative' ? `$${value.toLocaleString()}` : `$${value.toLocaleString()}`,
-                        name === 'cumulative' ? 'Cumulative P&L' : 'Sell Event P&L'
-                      ]}
-                      labelFormatter={(value) => `Sell Event #${value}`}
+                    <YAxis
+                      tickFormatter={currencyTickFormatter}
+                      tick={{ fill: CHART_COLORS.text, fontSize: 13 }}
+                      width={100}
+                      label={{ value: 'Cumulative P&L ($)', angle: -90, position: 'insideLeft', style: { fill: CHART_COLORS.text } }}
                     />
+                    <RechartsTooltip content={<CustomTooltip />} cursor={{ strokeDasharray: '5 5' }} animationDuration={150} />
                     <Line 
                       type="monotone" 
                       dataKey="cumulative" 
-                      stroke="#1976d2" 
-                      strokeWidth={2}
-                      dot={{ r: 3 }}
-                      activeDot={{ r: 5 }}
+                      stroke={CHART_COLORS.primary}
+                      strokeWidth={3}
+                      dot={{ fill: CHART_COLORS.primary, r: 4 }}
+                      activeDot={{ r: 7 }}
                     />
                   </LineChart>
                 </ResponsiveContainer>
@@ -1316,19 +1330,21 @@ const Analytics: React.FC = () => {
           <Grid item xs={12} md={6}>
             <Paper sx={{ p: 3 }}>
               <Typography variant="h6" gutterBottom>Holding Period Analysis</Typography>
-              <Box sx={{ width: '100%', height: 300 }}>
-                <ResponsiveContainer>
-                  <BarChart data={timeAnalysisData.holdingPeriodChart}>
-                    <CartesianGrid strokeDasharray="3 3" />
-                    <XAxis dataKey="range" />
-                    <YAxis />
-                    <RechartsTooltip 
-                      formatter={(value: number, name: string) => [
-                        name === 'count' ? value : `$${value.toLocaleString()}`,
-                        name === 'count' ? 'Trade Count' : name === 'avgReturn' ? 'Avg Return' : 'Total Return'
-                      ]}
+              <Box sx={{ width: '100%', height: 320 }}>
+                <ResponsiveContainer width="100%" height="100%">
+                  <BarChart data={timeAnalysisData.holdingPeriodChart} margin={{ top: 20, right: 30, left: 20, bottom: 50 }}>
+                    <CartesianGrid strokeDasharray="3 3" stroke={CHART_COLORS.grid}/>
+                    <XAxis
+                      dataKey="range"
+                      tick={{ fill: CHART_COLORS.text, fontSize: 12 }}
+                      angle={-30}
+                      textAnchor="end"
+                      height={70}
                     />
-                    <Bar dataKey="count" fill="#1976d2" name="count" />
+                    <YAxis tick={{ fill: CHART_COLORS.text }} />
+                    <RechartsTooltip content={<CustomTooltip />} cursor={{ strokeDasharray: '5 5' }} animationDuration={150} />
+                    <Bar dataKey="count" fill={CHART_COLORS.success} name="Trade Count" />
+                    <Bar dataKey="avgReturn" fill={CHART_COLORS.primary} name="Avg Return ($)" />
                   </BarChart>
                 </ResponsiveContainer>
               </Box>
@@ -1339,14 +1355,20 @@ const Analytics: React.FC = () => {
           <Grid item xs={12} md={6}>
             <Paper sx={{ p: 3 }}>
               <Typography variant="h6" gutterBottom>P&L Distribution</Typography>
-              <Box sx={{ width: '100%', height: 300 }}>
-                <ResponsiveContainer>
-                  <BarChart data={timeAnalysisData.pnlDistributionChart}>
-                    <CartesianGrid strokeDasharray="3 3" />
-                    <XAxis dataKey="range" angle={-45} textAnchor="end" height={80} />
-                    <YAxis />
-                    <RechartsTooltip formatter={(value: number) => [value, 'Trade Count']} />
-                    <Bar dataKey="count" fill="#2e7d32" />
+              <Box sx={{ width: '100%', height: 320 }}>
+                <ResponsiveContainer width="100%" height="100%">
+                  <BarChart data={timeAnalysisData.pnlDistributionChart} margin={{ top: 20, right: 30, left: 20, bottom: 90 }}>
+                    <CartesianGrid strokeDasharray="3 3" stroke={CHART_COLORS.grid}/>
+                    <XAxis
+                      dataKey="range"
+                      tick={{ fill: CHART_COLORS.text, fontSize: 11 }}
+                      angle={-45}
+                      textAnchor="end"
+                      height={100}
+                    />
+                    <YAxis tick={{ fill: CHART_COLORS.text }} />
+                    <RechartsTooltip content={<CustomTooltip />} cursor={{ strokeDasharray: '5 5' }} animationDuration={150} />
+                    <Bar dataKey="count" fill={CHART_COLORS.purple} />
                   </BarChart>
                 </ResponsiveContainer>
               </Box>
@@ -1459,27 +1481,26 @@ const Analytics: React.FC = () => {
             <Paper sx={{ p: 3 }}>
               <Typography variant="h6" gutterBottom>Sector Allocation</Typography>
               <Box sx={{ width: '100%', height: 400 }}>
-                <ResponsiveContainer>
+                <ResponsiveContainer width="100%" height="100%">
                   <PieChart>
                     <Pie
                       data={portfolioAnalysisData.sectorChart}
                       cx="50%"
                       cy="50%"
-                      outerRadius={120}
-                      fill="#8884d8"
+                      outerRadius={130}
+                      innerRadius={60}
+                      paddingAngle={2}
                       dataKey="value"
+                      label={({ name, percent }) => `${name} ${(percent * 100).toFixed(0)}%`}
                     >
                       {portfolioAnalysisData.sectorChart.map((entry, index) => (
-                        <Cell 
-                          key={`sector-${index}`} 
-                          fill={[
-                            '#1976d2', '#2e7d32', '#ed6c02', '#9c27b0', 
-                            '#d32f2f', '#0288d1', '#689f38', '#f57c00'
-                          ][index % 8]} 
+                        <Cell
+                          key={`sector-${index}`}
+                          fill={PIE_CHART_COLORS[index % PIE_CHART_COLORS.length]}
                         />
                       ))}
                     </Pie>
-                    <RechartsTooltip formatter={(value: number) => [`$${value.toLocaleString()}`, 'Value']} />
+                    <RechartsTooltip formatter={(value: number) => [`$${value.toLocaleString()}`, 'Value']} cursor={{ strokeDasharray: '5 5' }} animationDuration={150} />
                     <Legend />
                   </PieChart>
                 </ResponsiveContainer>
@@ -1492,12 +1513,12 @@ const Analytics: React.FC = () => {
             <Paper sx={{ p: 3 }}>
               <Typography variant="h6" gutterBottom>Position Size Distribution</Typography>
               <Box sx={{ width: '100%', height: 400 }}>
-                <ResponsiveContainer>
+                <ResponsiveContainer width="100%" height="100%">
                   <BarChart data={portfolioAnalysisData.positionSizeChart}>
                     <CartesianGrid strokeDasharray="3 3" />
                     <XAxis dataKey="range" />
                     <YAxis />
-                    <RechartsTooltip formatter={(value: number) => [value, 'Position Count']} />
+                    <RechartsTooltip formatter={(value: number) => [value, 'Position Count']} cursor={{ strokeDasharray: '5 5' }} animationDuration={150} />
                     <Bar dataKey="count" fill="#1976d2" />
                   </BarChart>
                 </ResponsiveContainer>
@@ -1510,18 +1531,12 @@ const Analytics: React.FC = () => {
             <Paper sx={{ p: 3 }}>
               <Typography variant="h6" gutterBottom>Performance by Position Size</Typography>
               <Box sx={{ width: '100%', height: 400 }}>
-                <ResponsiveContainer>
+                <ResponsiveContainer width="100%" height="100%">
                   <BarChart data={portfolioAnalysisData.performanceBySize}>
                     <CartesianGrid strokeDasharray="3 3" />
                     <XAxis dataKey="category" />
                     <YAxis />
-                    <RechartsTooltip 
-                      formatter={(value: number, name: string) => {
-                        if (name === 'winRate') return [`${value.toFixed(1)}%`, 'Win Rate'];
-                        if (name === 'totalPnl' || name === 'avgPnl') return [`$${value.toLocaleString()}`, name === 'totalPnl' ? 'Total P&L' : 'Avg P&L'];
-                        return [value, name === 'wins' ? 'Wins' : 'Losses'];
-                      }}
-                    />
+                    <RechartsTooltip content={<CustomTooltip />} cursor={{ strokeDasharray: '5 5' }} animationDuration={150} />
                     <Bar dataKey="wins" stackId="trades" fill="#2e7d32" name="wins" />
                     <Bar dataKey="losses" stackId="trades" fill="#d32f2f" name="losses" />
                   </BarChart>
@@ -1679,15 +1694,12 @@ const Analytics: React.FC = () => {
             <Paper sx={{ p: 3 }}>
               <Typography variant="h6" gutterBottom>Best Entry Days</Typography>
               <Box sx={{ width: '100%', height: 300 }}>
-                <ResponsiveContainer>
+                <ResponsiveContainer width="100%" height="100%">
                   <BarChart data={entryExitAnalysisData.entryDayChart}>
                     <CartesianGrid strokeDasharray="3 3" />
                     <XAxis dataKey="day" />
                     <YAxis />
-                    <RechartsTooltip formatter={(value: number, name: string) => [
-                      name === 'avgPnl' ? `$${value.toLocaleString()}` : value,
-                      name === 'avgPnl' ? 'Avg P&L' : 'Trade Count'
-                    ]} />
+                    <RechartsTooltip content={<CustomTooltip />} cursor={{ strokeDasharray: '5 5' }} animationDuration={150} />
                     <Bar dataKey="avgPnl" fill="#1976d2" />
                   </BarChart>
                 </ResponsiveContainer>
@@ -1704,7 +1716,7 @@ const Analytics: React.FC = () => {
                 </Typography>
               </Tooltip>
               <Box sx={{ width: '100%', height: 300 }}>
-                <ResponsiveContainer>
+                <ResponsiveContainer width="100%" height="100%">
                   <BarChart data={entryExitAnalysisData.entryHourChart}>
                     <CartesianGrid strokeDasharray="3 3" />
                     <XAxis 
@@ -1715,7 +1727,7 @@ const Analytics: React.FC = () => {
                       label={{ value: 'Avg P&L ($)', angle: -90, position: 'insideLeft' }}
                       tickFormatter={(value) => `$${value.toLocaleString()}`}
                     />
-                    <RechartsTooltip formatter={(value: number) => [`$${value.toLocaleString()}`, 'Avg P&L']} />
+                    <RechartsTooltip content={<CustomTooltip />} cursor={{ strokeDasharray: '5 5' }} animationDuration={150} />
                     <Bar dataKey="avgPnl" fill="#2e7d32" />
                   </BarChart>
                 </ResponsiveContainer>
@@ -1786,15 +1798,12 @@ const Analytics: React.FC = () => {
                 How well do you perform on trades of different sizes? Large trades can create emotional pressure.
               </Typography>
               <Box sx={{ width: '100%', height: 400 }}>
-                <ResponsiveContainer>
+                <ResponsiveContainer width="100%" height="100%">
                   <BarChart data={psychologyData.impactChart}>
                     <CartesianGrid strokeDasharray="3 3" />
                     <XAxis dataKey="category" />
                     <YAxis />
-                    <RechartsTooltip formatter={(value: number, name: string) => [
-                      name === 'winRate' ? `${value.toFixed(1)}%` : value,
-                      name === 'winRate' ? 'Win Rate' : name === 'wins' ? 'Wins' : 'Losses'
-                    ]} />
+                    <RechartsTooltip content={<CustomTooltip />} cursor={{ strokeDasharray: '5 5' }} animationDuration={150} />
                     <Bar dataKey="wins" stackId="trades" fill="#2e7d32" name="wins" />
                     <Bar dataKey="losses" stackId="trades" fill="#d32f2f" name="losses" />
                   </BarChart>
@@ -1907,12 +1916,12 @@ const Analytics: React.FC = () => {
             <Paper sx={{ p: 3 }}>
               <Typography variant="h6" gutterBottom>Strategy P&L Comparison</Typography>
               <Box sx={{ width: '100%', height: 400 }}>
-                <ResponsiveContainer>
+                <ResponsiveContainer width="100%" height="100%">
                   <BarChart data={topPerformersData.topStrategies.slice(0, 8)}>
                     <CartesianGrid strokeDasharray="3 3" />
                     <XAxis dataKey="strategy" angle={-45} textAnchor="end" height={100} />
                     <YAxis tickFormatter={(value) => `$${value.toLocaleString()}`} />
-                    <RechartsTooltip formatter={(value: number) => [`$${value.toLocaleString()}`, 'Total P&L']} />
+                    <RechartsTooltip content={<CustomTooltip />} cursor={{ strokeDasharray: '5 5' }} animationDuration={150} />
                     <Bar dataKey="totalPnl" fill="#1976d2" />
                   </BarChart>
                 </ResponsiveContainer>
@@ -2052,12 +2061,12 @@ const Analytics: React.FC = () => {
             <Paper sx={{ p: 3 }}>
               <Typography variant="h6" gutterBottom>Top Tickers P&L Chart</Typography>
               <Box sx={{ width: '100%', height: 400 }}>
-                <ResponsiveContainer>
+                <ResponsiveContainer width="100%" height="100%">
                   <BarChart data={topPerformersData.topTickers.slice(0, 10)}>
                     <CartesianGrid strokeDasharray="3 3" />
                     <XAxis dataKey="ticker" />
                     <YAxis tickFormatter={(value) => `$${value.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`} />
-                    <RechartsTooltip formatter={(value: number) => [`$${value.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`, 'Total P&L']} />
+                    <RechartsTooltip content={<CustomTooltip />} cursor={{ strokeDasharray: '5 5' }} animationDuration={150} />
                     <Bar dataKey="totalPnl" fill="#1976d2" />
                   </BarChart>
                 </ResponsiveContainer>

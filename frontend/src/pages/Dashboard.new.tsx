@@ -37,6 +37,7 @@ import { getAllPositions } from '../services/positionsService';
 import { accountService } from '../services/accountService';
 import { useCurrency } from '../context/CurrencyContext';
 import { Position } from '../services/positionsService';
+import { CustomTooltip, PIE_CHART_COLORS } from '../components/CustomChartComponents';
 
 const COLORS = ['#1da0f0', '#00C49F', '#FFBB28', '#FF8042', '#8884D8'];
 
@@ -302,15 +303,16 @@ const Dashboard: React.FC = () => {
           <Card>
             <CardContent>
               <Typography variant="h6" gutterBottom>Position Status</Typography>
-              <Box height={200}>
+              <Box height={300}>
                 <ResponsiveContainer width="100%" height="100%">
                   <PieChart>
                     <Pie
                       data={getPositionStatusData()}
                       cx="50%"
                       cy="50%"
-                      outerRadius={80}
-                      fill="#1da0f0"
+                      outerRadius={100}
+                      innerRadius={60}
+                      paddingAngle={5}
                       dataKey="value"
                       label={({ name, value }) => `${name}: ${value}`}
                     >
@@ -318,7 +320,7 @@ const Dashboard: React.FC = () => {
                         <Cell key={`cell-${index}`} fill={entry.color} />
                       ))}
                     </Pie>
-                    <Tooltip />
+                    <Tooltip content={<CustomTooltip />} />
                   </PieChart>
                 </ResponsiveContainer>
               </Box>
