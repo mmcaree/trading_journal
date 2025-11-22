@@ -1031,8 +1031,8 @@ const Analytics: React.FC = () => {
                     <Typography variant="subtitle2">Trading Performance</Typography>
                     <Typography variant="body2">
                       {advancedMetrics ? `${advancedMetrics.risk.winRate.toFixed(1)}% win rate` : 'N/A'} 
-                      {advancedMetrics && advancedMetrics.risk.winRate >= 60 ? ' - Excellent!' : 
-                       advancedMetrics && advancedMetrics.risk.winRate >= 40 ? ' - Good' : ' - Needs improvement'}
+                      {advancedMetrics && advancedMetrics.risk.winRate >= 40 ? ' - Excellent!' : 
+                       advancedMetrics && advancedMetrics.risk.winRate >= 30 ? ' - Good' : ' - Needs improvement'}
                     </Typography>
                   </Alert>
                 </Grid>
