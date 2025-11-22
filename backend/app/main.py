@@ -1,12 +1,13 @@
-from fastapi import FastAPI, HTTPException, APIRouter
+from fastapi import FastAPI, APIRouter, Request, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.middleware.gzip import GZipMiddleware
 from fastapi.staticfiles import StaticFiles
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, JSONResponse
 from app.api.routes import router as api_router
 from app.core.config import settings
 from app.models.position_models import Base
 from app.db.session import engine
+from app.utils.exceptions import AppException, ErrorResponse, NotFoundException, UnauthorizedException
 import datetime
 import os
 import mimetypes
@@ -63,10 +64,10 @@ app.include_router(journal_router, prefix="/api/v2")
 try:
     from app.api.routes.admin import router as admin_router
     app.include_router(admin_router, prefix="/api/admin")
-    print("✅ REAL admin routes loaded successfully")
+    print("REAL admin routes loaded successfully")
 except Exception as e:
-    print(f"❌ CRITICAL: Could not load admin routes: {type(e).__name__}: {e}")
-    print(f"❌ Full traceback: {traceback.format_exc()}")
+    print(f"CRITICAL: Could not load admin routes: {type(e).__name__}: {e}")
+    print(f"Full traceback: {traceback.format_exc()}")
     # Create a minimal fallback admin router
     fallback_admin_router = APIRouter()
     
@@ -91,7 +92,7 @@ except Exception as e:
         }
     
     app.include_router(fallback_admin_router, prefix="/api/admin")
-    print("⚠️  Using FALLBACK admin router - real admin routes failed to load")
+    print("Using FALLBACK admin router - real admin routes failed to load")
 
 # Serve static files (React build) in production
 static_path = os.path.join(os.path.dirname(__file__), "..", "static")
@@ -142,13 +143,51 @@ if os.path.exists(static_path):
             full_path.startswith("static/") or
             full_path.startswith("docs") or 
             full_path.startswith("openapi.json")):
-            raise HTTPException(status_code=404, detail="API route not found")
+            raise NotFoundException("Route")
         
         # Serve index.html for React Router routes
         index_path = os.path.join(static_path, "index.html")
         if os.path.exists(index_path):
             return FileResponse(index_path)
-        raise HTTPException(status_code=404, detail="Page not found")
+        raise NotFoundException("Page")
+
+# Global exception handlers
+@app.exception_handler(AppException)
+async def app_exception_handler(request: Request, exc: AppException):
+    return JSONResponse(
+        status_code=exc.status_code,
+        content=exc.to_response(),
+        headers=exc.headers
+    )
+
+@app.exception_handler(HTTPException)
+async def http_exception_handler(request: Request, exc: HTTPException):
+    # Handle FastAPI's default HTTPException (like OAuth2PasswordBearer 401)
+    # Convert to our standard error format
+    error_code = "unauthorized" if exc.status_code == 401 else "http_error"
+    return JSONResponse(
+        status_code=exc.status_code,
+        content={
+            "error": error_code,
+            "detail": exc.detail,
+            "status_code": exc.status_code
+        },
+        headers=exc.headers if hasattr(exc, 'headers') and exc.headers else {}
+    )
+
+@app.exception_handler(Exception)
+async def generic_exception_handler(request: Request, exc: Exception):
+    import logging
+    logging.exception(f"Uncaught exception: {exc}")
+
+    return JSONResponse(
+        status_code=500,
+        content={
+            "error": "internal_error",
+            "detail": "An unexpected error occurred. Please try again later.",
+            "status_code": 500
+        }
+    )
 
 if __name__ == "__main__":
     import uvicorn

@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, status
 from fastapi.security import OAuth2PasswordRequestForm
 from sqlalchemy.orm import Session
 from datetime import timedelta
@@ -16,6 +16,12 @@ from app.services.user_service import (
     reset_password_with_token
 )
 from app.services.email_service import email_service
+from app.utils.exceptions import (
+    BadRequestException,
+    UnauthorizedException,
+    ValidationException,
+    InvalidCredentialsException
+)
 
 router = APIRouter()
 
@@ -24,27 +30,18 @@ def register(user: UserCreate, db: Session = Depends(get_db)):
     """Register a new user"""
     # Check if username exists
     if get_user_by_username(db, user.username):
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Username already registered"
-        )
+        raise BadRequestException("Username already registered")
     
     # Check if email exists
     if get_user_by_email(db, user.email):
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Email already registered"
-        )
+        raise BadRequestException("Email already registered")
     
     # Create the user
     try:
         db_user = create_user(db, user)
         return db_user
     except ValueError as e:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=str(e)
-        )
+        raise ValidationException(str(e))
 
 @router.post("/login", response_model=Token)
 def login(
@@ -55,12 +52,8 @@ def login(
     # Authenticate the user
     user = authenticate_user(db, form_data.username, form_data.password)
     if not user:
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Incorrect username or password",
-            headers={"WWW-Authenticate": "Bearer"},
-        )
-    
+        raise InvalidCredentialsException()
+
     # Create access token
     access_token_expires = timedelta(minutes=settings.ACCESS_TOKEN_EXPIRE_MINUTES)
     access_token = create_access_token(
@@ -106,9 +99,6 @@ def reset_password(
     success = reset_password_with_token(db, request.token, request.new_password)
     
     if not success:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Invalid or expired reset token"
-        )
+        raise BadRequestException("Invalid or expired reset token")
     
     return {"message": "Password has been reset successfully"}

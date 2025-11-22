@@ -15,6 +15,13 @@ from app.models import User
 from app.models.position_models import TradingPosition, TradingPositionEvent, PositionStatus, EventType, ImportedPendingOrder, TradingPositionJournalEntry, JournalEntryType
 from app.services.position_service import PositionService
 from pydantic import BaseModel
+from app.utils.exceptions import (
+    NotFoundException,
+    ForbiddenException,
+    BadRequestException,
+    InternalServerException,
+    ValidationException
+)
 
 
 # === Pydantic Schemas ===
@@ -151,7 +158,7 @@ router = APIRouter(prefix="/positions", tags=["positions-v2"])
 
 # === Position Management ===
 
-@router.post("/", response_model=PositionResponse, status_code=status.HTTP_201_CREATED)
+@router.post("/", response_model=PositionResponse, status_code=201)
 def create_position(
     position_data: PositionCreate,
     db: Session = Depends(get_db),
@@ -159,6 +166,17 @@ def create_position(
 ):
     """Create a new position with initial buy event"""
     position_service = PositionService(db)
+
+    if not position_data.ticker or not position_data.ticker.strip():
+        raise ValidationException("Ticker is required and cannot be empty")
+    
+    initial_event = position_data.initial_event
+    if initial_event.shares <= 0:
+        raise ValidationException("Shares must be greater than 0")
+    if initial_event.price <= 0:
+        raise ValidationException("Price must be greater than 0")
+    if initial_event.event_type.lower() != "buy":
+        raise ValidationException("Initial event must be a 'buy'")
     
     try:
         # Create position
@@ -173,24 +191,19 @@ def create_position(
         )
         
         # Add initial event
-        initial_event = position_data.initial_event
-        if initial_event.event_type.lower() == 'buy':
-            position_service.add_shares(
-                position_id=position.id,
-                shares=initial_event.shares,
-                price=initial_event.price,
-                event_date=initial_event.event_date,
-                stop_loss=initial_event.stop_loss,
-                take_profit=initial_event.take_profit,
-                notes=initial_event.notes
-            )
+        position_service.add_shares(
+            position_id=position.id,
+            shares=initial_event.shares,
+            price=initial_event.price,
+            event_date=initial_event.event_date,
+            stop_loss=initial_event.stop_loss,
+            take_profit=initial_event.take_profit,
+            notes=initial_event.notes
+        )
             
             # Update position opened_at to match the initial event date
-            if initial_event.event_date:
-                position.opened_at = initial_event.event_date
-                
-        else:
-            raise ValueError("Initial event must be a buy")
+        if initial_event.event_date:
+            position.opened_at = initial_event.event_date
         
         db.commit()
         
@@ -224,12 +237,15 @@ def create_position(
             account_value_at_entry=position.account_value_at_entry
         )
         
+    except ValueError as e:
+        db.rollback()
+        raise ValidationException(str(e))
+    except AppException:
+        db.rollback()
+        raise
     except Exception as e:
         db.rollback()
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"Failed to create position: {str(e)}"
-        )
+        raise InternalServerException(f"Failed to create position: {str(e)}")
 
 @router.get("/", response_model=List[PositionResponse])
 def get_positions(
@@ -251,10 +267,7 @@ def get_positions(
         try:
             status_enum = PositionStatus(status_filter.lower())
         except ValueError:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail=f"Invalid status: {status_filter}"
-            )
+            raise BadRequestException(f"Invalid status: {status_filter}")
     
     # Get positions with events preloaded to avoid N+1 queries (only if requested)
     positions = position_service.get_user_positions(
@@ -348,16 +361,10 @@ def get_position_details(
     
     position = position_service.get_position(position_id)
     if not position:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Position not found"
-        )
+        raise NotFoundException("Position")
     
     if position.user_id != current_user.id:
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="Not authorized to access this position"
-        )
+        raise ForbiddenException("Not authorized to access this position")
     
     summary = position_service.get_position_summary(position_id)
     
@@ -434,16 +441,10 @@ def update_position(
     
     position = position_service.get_position(position_id)
     if not position:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Position not found"
-        )
-    
+        raise NotFoundException("Position")
+
     if position.user_id != current_user.id:
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="Not authorized to update this position"
-        )
+        raise ForbiddenException("Not authorized to update this position")
     
     try:
         updated_position = position_service.update_position_metadata(
@@ -490,11 +491,17 @@ def update_position(
             account_value_at_entry=updated_position.account_value_at_entry
         )
         
+    except ValueError as e:
+        db.rollback()
+        raise ValidationException(str(e))
+    except AppException:
+        db.rollback()
+        raise
     except Exception as e:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"Failed to update position: {str(e)}"
-        )
+        db.rollback()
+        import logging
+        logging.exception("Failed to update position event")
+        raise InternalServerException("Failed to update event")
 
 @router.delete("/{position_id}")
 def delete_position(
@@ -507,16 +514,10 @@ def delete_position(
     
     position = position_service.get_position(position_id)
     if not position:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Position not found"
-        )
+        raise NotFoundException("Position")
     
     if position.user_id != current_user.id:
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="Not authorized to delete this position"
-        )
+        raise ForbiddenException("Not authorized to delete this position")
     
     try:
         success = position_service.delete_position(position_id)
@@ -524,21 +525,12 @@ def delete_position(
         if success:
             return {"success": True, "message": "Position deleted successfully"}
         else:
-            raise HTTPException(
-                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                detail="Failed to delete position"
-            )
+            raise InternalServerException("Failed to delete position")
         
     except ValueError as e:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=str(e)
-        )
+        raise BadRequestException(str(e))
     except Exception as e:
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Failed to delete position: {str(e)}"
-        )
+        raise InternalServerException(f"Failed to delete position: {str(e)}")
 
 
 # === Event Management ===
@@ -555,16 +547,20 @@ def add_position_event(
     
     position = position_service.get_position(position_id)
     if not position:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Position not found"
-        )
+        raise NotFoundException("Position")
     
     if position.user_id != current_user.id:
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="Not authorized to modify this position"
-        )
+        raise ForbiddenException("Not authorized to modify this position")
+    
+
+    if event_data.shares <= 0:
+        raise ValidationException("Shares must be greater than 0")
+    if event_data.price <= 0:
+        raise ValidationException("Price must be greater than 0")
+    
+    event_type = event_data.event_type.lower()
+    if event_type not in ("buy", "sell"):
+        raise ValidationException(f"Invalid event type: {event_data.event_type}. Must be 'buy' or 'sell'")
     
     try:
         if event_data.event_type.lower() == 'buy':
@@ -577,7 +573,7 @@ def add_position_event(
                 take_profit=event_data.take_profit,
                 notes=event_data.notes
             )
-        elif event_data.event_type.lower() == 'sell':
+        else:
             event = position_service.sell_shares(
                 position_id=position_id,
                 shares=event_data.shares,
@@ -587,8 +583,6 @@ def add_position_event(
                 take_profit=event_data.take_profit,
                 notes=event_data.notes
             )
-        else:
-            raise ValueError(f"Invalid event type: {event_data.event_type}")
         
         db.commit()
         
@@ -607,12 +601,17 @@ def add_position_event(
             position_shares_after=event.position_shares_after
         )
         
+    except ValueError as e:
+        db.rollback()
+        raise ValidationException(str(e))
+    except AppException:
+        db.rollback()
+        raise
     except Exception as e:
         db.rollback()
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"Failed to add event: {str(e)}"
-        )
+        import logging
+        logging.exception("Failed to add position event")
+        raise InternalServerException("Failed to add event")
 
 @router.get("/{position_id}/events", response_model=List[EventResponse])
 def get_position_events(
@@ -625,16 +624,10 @@ def get_position_events(
     
     position = position_service.get_position(position_id)
     if not position:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Position not found"
-        )
+        raise NotFoundException("Position")
     
     if position.user_id != current_user.id:
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="Not authorized to access this position"
-        )
+        raise ForbiddenException("Not authorized to access this position")
     
     events = position_service.get_position_events(position_id)
     
@@ -668,16 +661,10 @@ def get_position_pending_orders(
     position = position_service.get_position(position_id)
     
     if not position:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Position not found"
-        )
+        raise NotFoundException("Position")
     
     if position.user_id != current_user.id:
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="Not authorized to access this position"
-        )
+        raise ForbiddenException("Not authorized to access this position")
     
     # Get pending orders for this position
     pending_orders = db.query(ImportedPendingOrder).filter(
@@ -715,18 +702,12 @@ def update_position_event(
     # Get the event to check permissions
     event = db.query(TradingPositionEvent).get(event_id)
     if not event:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Event not found"
-        )
+        raise NotFoundException("Event")
     
     # Check that user owns the position
     position = position_service.get_position(event.position_id)
     if not position or position.user_id != current_user.id:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Position not found"
-        )
+        raise ForbiddenException("Not authorized to access this position")
     
     try:
         updated_event = position_service.update_event(
@@ -752,15 +733,16 @@ def update_position_event(
         )
         
     except ValueError as e:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=str(e)
-        )
+        db.rollback()
+        raise ValidationException(str(e))
+    except AppException:
+        db.rollback()
+        raise
     except Exception as e:
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Failed to update event: {str(e)}"
-        )
+        db.rollback()
+        import logging
+        logging.exception("Failed to update position event")
+        raise InternalServerException("Failed to update event")
 
 
 @router.put("/events/{event_id}/comprehensive", response_model=EventResponse)
@@ -776,18 +758,12 @@ def update_position_event_comprehensive(
     # Get the event to check permissions
     event = db.query(TradingPositionEvent).get(event_id)
     if not event:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Event not found"
-        )
-    
+        raise NotFoundException("Event")
+
     # Check that user owns the position
     position = position_service.get_position(event.position_id)
     if not position or position.user_id != current_user.id:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Position not found"
-        )
+        raise ForbiddenException("Not authorized to access this position")
     
     try:
         updated_event = position_service.update_event_comprehensive(
@@ -816,15 +792,16 @@ def update_position_event_comprehensive(
         )
         
     except ValueError as e:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=str(e)
-        )
+        db.rollback()
+        raise ValidationException(str(e))
+    except AppException:
+        db.rollback()
+        raise
     except Exception as e:
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Failed to update event comprehensively: {str(e)}"
-        )
+        db.rollback()
+        import logging
+        logging.exception("Failed to update position event comprehensively")
+        raise InternalServerException("Failed to update event comprehensively")
 
 
 @router.delete("/events/{event_id}")
@@ -839,18 +816,12 @@ def delete_position_event(
     # Get the event to check permissions
     event = db.query(TradingPositionEvent).get(event_id)
     if not event:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Event not found"
-        )
+        raise NotFoundException("Event")
     
     # Check that user owns the position
     position = position_service.get_position(event.position_id)
     if not position or position.user_id != current_user.id:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Position not found"
-        )
+        raise ForbiddenException("Not authorized to access this position")
     
     try:
         position_service.delete_event(event_id)
@@ -858,15 +829,10 @@ def delete_position_event(
         return {"success": True, "message": "Event deleted successfully"}
         
     except ValueError as e:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=str(e)
-        )
+        raise BadRequestException(str(e))
+        
     except Exception as e:
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Failed to delete event: {str(e)}"
-        )
+        raise InternalServerException(f"Failed to delete event: {str(e)}")
 
 
 # === Import Functionality ===
@@ -894,10 +860,7 @@ async def import_webull_csv(
     try:
         # Validate file type
         if not file.filename.endswith('.csv'):
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="File must be a CSV file"
-            )
+            raise BadRequestException("File must be a CSV file")
         
         # Read file content
         content = await file.read()
@@ -928,10 +891,7 @@ async def import_webull_csv(
     except HTTPException:
         raise
     except Exception as e:
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Import failed: {str(e)}"
-        )
+        raise InternalServerException(f"Import failed: {str(e)}")
 
 @router.post("/import/validate", response_model=Dict[str, Any])
 async def validate_csv(
@@ -943,11 +903,9 @@ async def validate_csv(
     try:
         # Validate file type
         if not file.filename.endswith('.csv'):
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="File must be a CSV file"
-            )
-        
+            raise BadRequestException("File must be a CSV file")
+
+            
         # Read file content
         content = await file.read()
         csv_content = content.decode('utf-8')
@@ -989,10 +947,7 @@ async def validate_csv(
     except HTTPException:
         raise
     except Exception as e:
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Validation failed: {str(e)}"
-        )
+        raise InternalServerException(f"Validation failed: {str(e)}")
 
 
 # === Pending Orders Management ===
@@ -1018,18 +973,12 @@ def update_pending_order(
     ).first()
     
     if not pending_order:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Pending order not found"
-        )
+        raise NotFoundException("Pending order not found")
     
     # Check if user owns the position this order belongs to
     if pending_order.position:
         if pending_order.position.user_id != current_user.id:
-            raise HTTPException(
-                status_code=status.HTTP_403_FORBIDDEN,
-                detail="Not authorized to update this order"
-            )
+            raise NotAuthorizedException("Not authorized to update this pending order")
     
     # Update the order fields
     if order_update.stop_loss is not None:
@@ -1061,11 +1010,7 @@ def update_pending_order(
         
     except Exception as e:
         db.rollback()
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Failed to update pending order: {str(e)}"
-        )
-
+        raise InternalServerException(f"Failed to update pending order: {str(e)}")
 
 # === Journal Entry Endpoints ===
 
@@ -1084,10 +1029,7 @@ async def get_position_journal_entries(
     ).first()
     
     if not position:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Position not found"
-        )
+        raise NotFoundException("Position not found")
     
     # Get journal entries (already ordered by entry_date desc in relationship)
     entries = db.query(TradingPositionJournalEntry).filter(
@@ -1125,19 +1067,13 @@ async def create_journal_entry(
     ).first()
     
     if not position:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Position not found"
-        )
+        raise NotFoundException("Position not found")
     
     # Validate entry type
     try:
         entry_type = JournalEntryType(entry_data.entry_type)
     except ValueError:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"Invalid entry type. Must be one of: {[e.value for e in JournalEntryType]}"
-        )
+        raise BadRequestException(f"Invalid entry type. Must be one of: {[e.value for e in JournalEntryType]}")
     
     # Create new journal entry
     journal_entry = TradingPositionJournalEntry(
@@ -1167,10 +1103,7 @@ async def create_journal_entry(
         
     except Exception as e:
         db.rollback()
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Failed to create journal entry: {str(e)}"
-        )
+        raise InternalServerException(f"Failed to create journal entry: {str(e)}")
 
 
 # Create separate router for journal endpoints that don't have position prefix
@@ -1192,20 +1125,14 @@ async def update_journal_entry(
     ).first()
     
     if not journal_entry:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Journal entry not found"
-        )
+        raise NotFoundException("Journal entry not found")
     
     # Update fields
     if entry_update.entry_type is not None:
         try:
             journal_entry.entry_type = JournalEntryType(entry_update.entry_type)
         except ValueError:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail=f"Invalid entry type. Must be one of: {[e.value for e in JournalEntryType]}"
-            )
+            raise BadRequestException(f"Invalid entry type. Must be one of: {[e.value for e in JournalEntryType]}")
     
     if entry_update.content is not None:
         journal_entry.content = entry_update.content
@@ -1236,10 +1163,7 @@ async def update_journal_entry(
         
     except Exception as e:
         db.rollback()
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Failed to update journal entry: {str(e)}"
-        )
+        raise InternalServerException(f"Failed to update journal entry: {str(e)}")
 
 
 @journal_router.delete("/{entry_id}")
@@ -1257,10 +1181,7 @@ async def delete_journal_entry(
     ).first()
     
     if not journal_entry:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Journal entry not found"
-        )
+        raise NotFoundException("Journal entry not found")
     
     try:
         db.delete(journal_entry)
@@ -1270,7 +1191,4 @@ async def delete_journal_entry(
         
     except Exception as e:
         db.rollback()
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Failed to delete journal entry: {str(e)}"
-        )
+        raise InternalServerException(f"Failed to delete journal entry: {str(e)}")
