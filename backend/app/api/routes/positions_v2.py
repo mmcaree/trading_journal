@@ -166,6 +166,17 @@ def create_position(
 ):
     """Create a new position with initial buy event"""
     position_service = PositionService(db)
+
+    if not position_data.ticker or not position_data.ticker.strip():
+        raise ValidationException("Ticker is required and cannot be empty")
+    
+    initial_event = position_data.initial_event
+    if initial_event.shares <= 0:
+        raise ValidationException("Shares must be greater than 0")
+    if initial_event.price <= 0:
+        raise ValidationException("Price must be greater than 0")
+    if initial_event.event_type.lower() != "buy":
+        raise ValidationException("Initial event must be a 'buy'")
     
     try:
         # Create position
@@ -180,24 +191,19 @@ def create_position(
         )
         
         # Add initial event
-        initial_event = position_data.initial_event
-        if initial_event.event_type.lower() == 'buy':
-            position_service.add_shares(
-                position_id=position.id,
-                shares=initial_event.shares,
-                price=initial_event.price,
-                event_date=initial_event.event_date,
-                stop_loss=initial_event.stop_loss,
-                take_profit=initial_event.take_profit,
-                notes=initial_event.notes
-            )
+        position_service.add_shares(
+            position_id=position.id,
+            shares=initial_event.shares,
+            price=initial_event.price,
+            event_date=initial_event.event_date,
+            stop_loss=initial_event.stop_loss,
+            take_profit=initial_event.take_profit,
+            notes=initial_event.notes
+        )
             
             # Update position opened_at to match the initial event date
-            if initial_event.event_date:
-                position.opened_at = initial_event.event_date
-                
-        else:
-            raise ValidationException("Initial event must be a buy")
+        if initial_event.event_date:
+            position.opened_at = initial_event.event_date
         
         db.commit()
         
@@ -231,9 +237,15 @@ def create_position(
             account_value_at_entry=position.account_value_at_entry
         )
         
+    except ValueError as e:
+        db.rollback()
+        raise ValidationException(str(e))
+    except AppException:
+        db.rollback()
+        raise
     except Exception as e:
         db.rollback()
-        raise BadRequestException(f"Failed to create position: {str(e)}")
+        raise InternalServerException(f"Failed to create position: {str(e)}")
 
 @router.get("/", response_model=List[PositionResponse])
 def get_positions(
@@ -479,8 +491,17 @@ def update_position(
             account_value_at_entry=updated_position.account_value_at_entry
         )
         
+    except ValueError as e:
+        db.rollback()
+        raise ValidationException(str(e))
+    except AppException:
+        db.rollback()
+        raise
     except Exception as e:
-        raise BadRequestException(f"Failed to update position: {str(e)}")
+        db.rollback()
+        import logging
+        logging.exception("Failed to update position event")
+        raise InternalServerException("Failed to update event")
 
 @router.delete("/{position_id}")
 def delete_position(
@@ -531,6 +552,16 @@ def add_position_event(
     if position.user_id != current_user.id:
         raise ForbiddenException("Not authorized to modify this position")
     
+
+    if event_data.shares <= 0:
+        raise ValidationException("Shares must be greater than 0")
+    if event_data.price <= 0:
+        raise ValidationException("Price must be greater than 0")
+    
+    event_type = event_data.event_type.lower()
+    if event_type not in ("buy", "sell"):
+        raise ValidationException(f"Invalid event type: {event_data.event_type}. Must be 'buy' or 'sell'")
+    
     try:
         if event_data.event_type.lower() == 'buy':
             event = position_service.add_shares(
@@ -542,7 +573,7 @@ def add_position_event(
                 take_profit=event_data.take_profit,
                 notes=event_data.notes
             )
-        elif event_data.event_type.lower() == 'sell':
+        else:
             event = position_service.sell_shares(
                 position_id=position_id,
                 shares=event_data.shares,
@@ -552,8 +583,6 @@ def add_position_event(
                 take_profit=event_data.take_profit,
                 notes=event_data.notes
             )
-        else:
-            raise ValidationException(f"Invalid event type: {event_data.event_type}")
         
         db.commit()
         
@@ -572,9 +601,17 @@ def add_position_event(
             position_shares_after=event.position_shares_after
         )
         
+    except ValueError as e:
+        db.rollback()
+        raise ValidationException(str(e))
+    except AppException:
+        db.rollback()
+        raise
     except Exception as e:
         db.rollback()
-        raise BadRequestException(f"Failed to add event: {str(e)}")
+        import logging
+        logging.exception("Failed to add position event")
+        raise InternalServerException("Failed to add event")
 
 @router.get("/{position_id}/events", response_model=List[EventResponse])
 def get_position_events(
@@ -696,9 +733,16 @@ def update_position_event(
         )
         
     except ValueError as e:
-        raise BadRequestException(str(e))
+        db.rollback()
+        raise ValidationException(str(e))
+    except AppException:
+        db.rollback()
+        raise
     except Exception as e:
-        raise InternalServerException(f"Failed to update event: {str(e)}")
+        db.rollback()
+        import logging
+        logging.exception("Failed to update position event")
+        raise InternalServerException("Failed to update event")
 
 
 @router.put("/events/{event_id}/comprehensive", response_model=EventResponse)
@@ -748,10 +792,16 @@ def update_position_event_comprehensive(
         )
         
     except ValueError as e:
-        raise BadRequestException(str(e))
-        
+        db.rollback()
+        raise ValidationException(str(e))
+    except AppException:
+        db.rollback()
+        raise
     except Exception as e:
-        raise InternalServerException(f"Failed to update event comprehensively: {str(e)}")
+        db.rollback()
+        import logging
+        logging.exception("Failed to update position event comprehensively")
+        raise InternalServerException("Failed to update event comprehensively")
 
 
 @router.delete("/events/{event_id}")

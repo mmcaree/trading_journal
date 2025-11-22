@@ -1,6 +1,6 @@
 # backend/app/utils/exceptions.py
 from fastapi import HTTPException
-from typing import Any, Optional
+from typing import Any, Optional, Dict
 from pydantic import BaseModel
 
 
@@ -12,54 +12,68 @@ class ErrorResponse(BaseModel):
 
 
 class AppException(HTTPException):
-    """Base class for all application exceptions"""
-    def __init__(self, status_code: int, error: str, detail: str, extra: Optional[dict] = None):
-        super().__init__(status_code=status_code, detail=ErrorResponse(
-            error=error,
-            detail=detail,
-            status_code=status_code,
-            extra=extra
-        ).dict())
+    status_code: int = 500
+    error_code: str = "app_error"
+    detail: str = "An error occurred"
+
+    def __init__(
+        self,
+        detail: Optional[str] = None,
+        extra: Optional[Dict[str, Any]] = None,
+        headers: Optional[Dict[str, str]] = None,
+    ):
+        self.detail = detail or self.detail
+        self.error_code = self.__class__.__name__.replace("Exception", "").lower()
+        self.extra = extra
+        self.headers = headers or {}
+        super().__init__(status_code=self.status_code, detail=self.detail, headers=self.headers)
+
+    def to_response(self) -> Dict[str, Any]:
+        return {
+            "error": self.error_code,
+            "detail": self.detail,
+            "status_code": self.status_code,
+            "extra": self.extra,
+        }
 
 
 # === Authentication & Authorization ===
 class UnauthorizedException(AppException):
-    def __init__(self, detail: str = "Authentication required"):
-        super().__init__(401, "unauthorized", detail)
+    status_code = 401
+    detail = "Authentication required"
 
 
 class ForbiddenException(AppException):
-    def __init__(self, detail: str = "Not authorized to perform this action"):
-        super().__init__(403, "forbidden", detail)
+    status_code = 403
+    detail = "Not authorized to perform this action"
 
 
 class InvalidCredentialsException(AppException):
-    def __init__(self, detail: str = "Invalid username or password"):
-        super().__init__(401, "invalid_credentials", detail)
+    status_code = 401
+    detail = "Invalid username or password"
 
 
 # === Validation & Business Logic ===
 class ValidationException(AppException):
-    def __init__(self, detail: str = "Validation failed"):
-        super().__init__(400, "validation_error", detail)
+    status_code = 400
+    detail = "Validation failed"
 
 
 class NotFoundException(AppException):
-    def __init__(self, entity: str = "Resource"):
-        super().__init__(404, "not_found", f"{entity} not found")
+    status_code = 404
+    detail = "Resource not found"
 
 
 class ConflictException(AppException):
-    def __init__(self, detail: str = "Resource conflict"):
-        super().__init__(409, "conflict", detail)
+    status_code = 409
+    detail = "Resource conflict"
 
 
 class BadRequestException(AppException):
-    def __init__(self, detail: str = "Bad request"):
-        super().__init__(400, "bad_request", detail)
-
+    status_code = 400
+    detail = "Bad request"
 
 # === Server Errors ===
 class InternalServerException(AppException):
-    def __init__(self, detail: str = "An unexpected error occurred"):
-        super().__init__(500, "internal_error", detail)
+    status_code = 500
+    detail = "An unexpected error occurred"

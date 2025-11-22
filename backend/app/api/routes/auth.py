@@ -19,7 +19,8 @@ from app.services.email_service import email_service
 from app.utils.exceptions import (
     BadRequestException,
     UnauthorizedException,
-    ValidationException
+    ValidationException,
+    InvalidCredentialsException
 )
 
 router = APIRouter()
@@ -51,8 +52,8 @@ def login(
     # Authenticate the user
     user = authenticate_user(db, form_data.username, form_data.password)
     if not user:
-        raise UnauthorizedException("Incorrect username or password")
-    
+        raise InvalidCredentialsException()
+
     # Create access token
     access_token_expires = timedelta(minutes=settings.ACCESS_TOKEN_EXPIRE_MINUTES)
     access_token = create_access_token(

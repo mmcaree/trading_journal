@@ -154,16 +154,10 @@ if os.path.exists(static_path):
 # Global exception handlers
 @app.exception_handler(AppException)
 async def app_exception_handler(request: Request, exc: AppException):
-
-    response_data = {
-        "detail": exc.detail,
-        "status_code": exc.status_code,
-        "error": exc.__class__.__name__[:-9].lower()
-    }
-
     return JSONResponse(
         status_code=exc.status_code,
-        content=response_data
+        content=exc.to_response(),
+        headers=exc.headers
     )
 
 @app.exception_handler(Exception)
@@ -173,11 +167,11 @@ async def generic_exception_handler(request: Request, exc: Exception):
 
     return JSONResponse(
         status_code=500,
-        content=ErrorResponse(
-            error="internal_error",
-            detail="An unexpected error occurred. Please try again later.",
-            status_code=500
-        ).dict()
+        content={
+            "error": "internal_error",
+            "detail": "An unexpected error occurred. Please try again later.",
+            "status_code": 500
+        }
     )
 
 if __name__ == "__main__":
