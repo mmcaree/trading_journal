@@ -74,7 +74,7 @@ export async function getAllPositionsWithEvents(filters?: {
   strategy?: string;
   skip?: number;
   limit?: number;
-}): Promise<(Position & { events?: PositionEvent [] })[]> {
+}): Promise<(Position & { events?: PositionEvent[] })[]> {
   try {
     const params = new URLSearchParams();
     
