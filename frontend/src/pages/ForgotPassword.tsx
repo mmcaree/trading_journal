@@ -14,15 +14,9 @@ import {
   LockOutlined as LockOutlinedIcon,
   ArrowBack as ArrowBackIcon
 } from '@mui/icons-material';
-import * as Yup from 'yup';
 import { useFormik } from 'formik';
 import api from '../services/apiConfig';
-
-const forgotPasswordSchema = Yup.object().shape({
-  email: Yup.string()
-    .email('Invalid email address')
-    .required('Email is required'),
-});
+import { forgotPasswordSchema } from '../utils/validationSchemas';
 
 const ForgotPassword: React.FC = () => {
   const navigate = useNavigate();

@@ -18,18 +18,9 @@ import {
   VisibilityOff as VisibilityOffIcon,
   CheckCircle as CheckCircleIcon
 } from '@mui/icons-material';
-import * as Yup from 'yup';
 import { useFormik } from 'formik';
 import api from '../services/apiConfig';
-
-const resetPasswordSchema = Yup.object().shape({
-  password: Yup.string()
-    .min(6, 'Password must be at least 6 characters')
-    .required('Password is required'),
-  confirmPassword: Yup.string()
-    .oneOf([Yup.ref('password')], 'Passwords must match')
-    .required('Please confirm your password'),
-});
+import { passwordResetSchema } from '../utils/validationSchemas';
 
 const ResetPassword: React.FC = () => {
   const navigate = useNavigate();
@@ -54,7 +45,7 @@ const ResetPassword: React.FC = () => {
       password: '',
       confirmPassword: ''
     },
-    validationSchema: resetPasswordSchema,
+    validationSchema: passwordResetSchema,
     onSubmit: async (values) => {
       try {
         setError(null);

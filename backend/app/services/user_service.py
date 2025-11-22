@@ -9,6 +9,7 @@ from app.core.config import settings
 from app.models import User
 from app.models.schemas import UserCreate, UserUpdate, NotificationSettings
 from app.utils.datetime_utils import utc_now
+from app.utils.validators import validate_time_format
 
 # Password hashing
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
@@ -81,11 +82,15 @@ def update_notification_settings(db: Session, user_id: int, settings: Notificati
         raise ValueError("User not found")
     
     # Validate time format if provided
-    if settings.daily_email_time and not _is_valid_time_format(settings.daily_email_time):
-        raise ValueError("Invalid daily email time format. Use HH:MM")
+    if settings.daily_email_time:
+        is_valid, error_msg = validate_time_format(settings.daily_email_time)
+        if not is_valid:
+            raise ValueError(error_msg)
     
-    if settings.weekly_email_time and not _is_valid_time_format(settings.weekly_email_time):
-        raise ValueError("Invalid weekly email time format. Use HH:MM")
+    if settings.weekly_email_time:
+        is_valid, error_msg = validate_time_format(settings.weekly_email_time)
+        if not is_valid:
+            raise ValueError(error_msg)
     
     # Update notification settings
     user.email_notifications_enabled = settings.email_notifications_enabled
@@ -98,15 +103,6 @@ def update_notification_settings(db: Session, user_id: int, settings: Notificati
     db.commit()
     db.refresh(user)
     return user
-
-
-def _is_valid_time_format(time_str: str) -> bool:
-    """Validate time format HH:MM"""
-    try:
-        datetime.strptime(time_str, "%H:%M")
-        return True
-    except ValueError:
-        return False
 
 
 def change_password(db: Session, user_id: int, current_password: str, new_password: str) -> bool:

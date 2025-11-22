@@ -19,17 +19,8 @@ import {
   VisibilityOff as VisibilityOffIcon
 } from '@mui/icons-material';
 import { useAuth } from '../context/AuthContext';
-import * as Yup from 'yup';
 import { useFormik } from 'formik';
-
-const loginSchema = Yup.object().shape({
-  username: Yup.string()
-    .required('Username is required'),
-  password: Yup.string()
-    .min(6, 'Password must be at least 6 characters')
-    .required('Password is required'),
-  rememberMe: Yup.boolean()
-});
+import { loginFormSchema } from '../utils/validationSchemas';
 
 const Login: React.FC = () => {
   const navigate = useNavigate();
@@ -43,7 +34,7 @@ const Login: React.FC = () => {
       password: '',
       rememberMe: false
     },
-    validationSchema: loginSchema,
+    validationSchema: loginFormSchema,
     onSubmit: async (values) => {
       try {
         setError(null);

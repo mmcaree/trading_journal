@@ -24,27 +24,8 @@ import {
   ArrowForward as ArrowForwardIcon,
 } from '@mui/icons-material';
 import { useAuth } from '../context/AuthContext';
-import * as Yup from 'yup';
 import { useFormik } from 'formik';
-
-// Define validation schemas for each step
-const personalInfoSchema = Yup.object().shape({
-  username: Yup.string()
-    .min(3, 'Username must be at least 3 characters')
-    .max(20, 'Username must be less than 20 characters')
-    .matches(/^[a-zA-Z0-9_]+$/, 'Username can only contain letters, numbers, and underscores')
-    .required('Username is required'),
-  email: Yup.string().email('Invalid email address').required('Email is required'),
-});
-
-const accountInfoSchema = Yup.object().shape({
-  password: Yup.string()
-    .min(6, 'Password must be at least 6 characters')
-    .required('Password is required'),
-  confirmPassword: Yup.string()
-    .oneOf([Yup.ref('password')], 'Passwords must match')
-    .required('Confirm password is required'),
-});
+import { personalInfoSchema, accountInfoSchema } from '../utils/validationSchemas';
 
 const steps = ['Account Information', 'Password Setup', 'Finish'];
 

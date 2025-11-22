@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useMemo } from 'react';
+import { calculateWinRate } from '../utils/calculations';
 import {
   Box,
   Typography,
@@ -369,7 +370,7 @@ const Analytics: React.FC = () => {
       category,
       wins: data.wins,
       losses: data.losses,
-      winRate: data.wins + data.losses > 0 ? (data.wins / (data.wins + data.losses)) * 100 : 0,
+      winRate: calculateWinRate(data.wins, data.wins + data.losses),
       totalPnl: data.totalPnl,
       avgPnl: data.wins + data.losses > 0 ? data.totalPnl / (data.wins + data.losses) : 0
     }));
@@ -539,7 +540,7 @@ const Analytics: React.FC = () => {
       category,
       wins: data.wins,
       losses: data.losses,
-      winRate: (data.wins + data.losses) > 0 ? (data.wins / (data.wins + data.losses)) * 100 : 0,
+      winRate: calculateWinRate(data.wins, data.wins + data.losses),
       totalPnl: data.totalPnl
     }));
 

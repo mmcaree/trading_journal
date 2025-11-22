@@ -1,4 +1,5 @@
 import { AccountSettings } from '../types/api';
+import { calculateRiskPercent as calcRisk } from '../utils/calculations';
 
 // Re-export for backward compatibility
 export type { AccountSettings };
@@ -119,10 +120,7 @@ export const accountService = {
    */
   calculateRiskPercent(shares: number, entryPrice: number, stopLoss: number): number {
     const accountBalance = this.getCurrentBalance();
-    const riskPerShare = Math.abs(entryPrice - stopLoss);
-    const totalRisk = shares * riskPerShare;
-    
-    return accountBalance > 0 ? (totalRisk / accountBalance) * 100 : 0;
+    return calcRisk(shares, entryPrice, stopLoss, accountBalance);
   },
 
   /**
@@ -134,10 +132,7 @@ export const accountService = {
    */
   calculateOriginalRiskPercent(totalSharesBought: number, entryPrice: number, stopLoss: number): number {
     const accountBalance = this.getCurrentBalance();
-    const riskPerShare = Math.abs(entryPrice - stopLoss);
-    const originalTotalRisk = totalSharesBought * riskPerShare;
-    
-    return accountBalance > 0 ? (originalTotalRisk / accountBalance) * 100 : 0;
+    return calcRisk(totalSharesBought, entryPrice, stopLoss, accountBalance);
   },
 
   /**

@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import { PASSWORD_MIN_LENGTH } from '../utils/validationSchemas';
 import { 
   Box, 
   Typography, 
@@ -144,8 +145,8 @@ const Settings: React.FC = () => {
       return;
     }
 
-    if (passwordData.new_password.length < 6) {
-      setAlert({ type: 'error', message: 'New password must be at least 6 characters long' });
+    if (passwordData.new_password.length < PASSWORD_MIN_LENGTH) {
+      setAlert({ type: 'error', message: `New password must be at least ${PASSWORD_MIN_LENGTH} characters long` });
       return;
     }
 
