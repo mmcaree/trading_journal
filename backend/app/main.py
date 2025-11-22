@@ -1,4 +1,4 @@
-from fastapi import FastAPI, APIRouter, Request
+from fastapi import FastAPI, APIRouter, Request, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.middleware.gzip import GZipMiddleware
 from fastapi.staticfiles import StaticFiles
@@ -7,7 +7,7 @@ from app.api.routes import router as api_router
 from app.core.config import settings
 from app.models.position_models import Base
 from app.db.session import engine
-from app.utils.exceptions import AppException, ErrorResponse
+from app.utils.exceptions import AppException, ErrorResponse, NotFoundException, UnauthorizedException
 import datetime
 import os
 import mimetypes
@@ -158,6 +158,21 @@ async def app_exception_handler(request: Request, exc: AppException):
         status_code=exc.status_code,
         content=exc.to_response(),
         headers=exc.headers
+    )
+
+@app.exception_handler(HTTPException)
+async def http_exception_handler(request: Request, exc: HTTPException):
+    # Handle FastAPI's default HTTPException (like OAuth2PasswordBearer 401)
+    # Convert to our standard error format
+    error_code = "unauthorized" if exc.status_code == 401 else "http_error"
+    return JSONResponse(
+        status_code=exc.status_code,
+        content={
+            "error": error_code,
+            "detail": exc.detail,
+            "status_code": exc.status_code
+        },
+        headers=exc.headers if hasattr(exc, 'headers') and exc.headers else {}
     )
 
 @app.exception_handler(Exception)
