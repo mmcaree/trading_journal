@@ -36,6 +36,7 @@ export const CustomTooltip: React.FC<TooltipProps<ValueType, NameType>> = ({
   if (!active || !payload || payload.length === 0) return null;
 
   const formatLabel = (label: string | number | Date): string => {
+    if (!label || label === 'undefined') return '';
     if (typeof label === 'string' && /^\d{4}-\d{2}-\d{2}/.test(label)) {
       const date = new Date(label);
       if (!isNaN(date.getTime())) {
@@ -84,21 +85,47 @@ export const CustomTooltip: React.FC<TooltipProps<ValueType, NameType>> = ({
         maxWidth: 320,
       }}
     >
-      <Typography variant="subtitle2" fontWeight="bold" gutterBottom>
-        {formatLabel(label)}
-      </Typography>
-      {payload.map((entry, i) => (
-        <Box key={i} sx={{ mt: 0.5 }}>
-          <Typography variant="body2" sx={{ display: 'flex', justifyContent: 'space-between', gap: 3 }}>
-            <span style={{ color: entry.color || entry.fill, fontWeight: 600 }}>
-              {entry.name}:
-            </span>
-            <span style={{ fontFamily: 'monospace', fontWeight: 500 }}>
-              {formatValue(entry.value, String(entry.name))}
-            </span>
-          </Typography>
-        </Box>
-      ))}
+      {/* Only show label if it exists and is not empty/undefined */}
+      {label && label !== 'undefined' && (
+        <Typography variant="subtitle2" fontWeight="bold" gutterBottom>
+          {formatLabel(label)}
+        </Typography>
+      )}
+      {payload.map((entry, i) => {
+        // Access the full data point to get additional properties like 'tickers'
+        const dataPoint = entry.payload;
+        
+        // For Pie charts, Recharts doesn't populate entry.name even with nameKey
+        // Instead, the name is in entry.payload.name or we need to look at entry.name
+        // Check multiple locations to find the name
+        let displayName: string;
+        if (entry.name && entry.name !== 'undefined') {
+          displayName = String(entry.name);
+        } else if (dataPoint?.name) {
+          displayName = String(dataPoint.name);
+        } else {
+          displayName = 'Unknown';
+        }
+        
+        return (
+          <Box key={i} sx={{ mt: 0.5 }}>
+            <Typography variant="body2" sx={{ display: 'flex', justifyContent: 'space-between', gap: 3 }}>
+              <span style={{ color: entry.color || entry.fill, fontWeight: 600 }}>
+                {displayName}:
+              </span>
+              <span style={{ fontFamily: 'monospace', fontWeight: 500 }}>
+                {formatValue(entry.value, displayName)}
+              </span>
+            </Typography>
+            {/* Show tickers if available (for sector charts) */}
+            {dataPoint?.tickers && (
+              <Typography variant="caption" sx={{ color: 'text.secondary', display: 'block', mt: 0.5 }}>
+                Tickers: {dataPoint.tickers}
+              </Typography>
+            )}
+          </Box>
+        );
+      })}
     </Paper>
   );
 };

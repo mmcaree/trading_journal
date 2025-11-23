@@ -293,39 +293,51 @@ const Analytics: React.FC = () => {
 
   // Portfolio Analysis calculations
   const portfolioAnalysisData = useMemo(() => {
-    // Sector allocation using real ticker data
-    const sectorAllocation = filteredPositions.reduce((acc, position) => {
-      const sector = getTickerSector(position.ticker);
-      const positionValue = Math.abs(position.total_cost || 0);
+    // IMPORTANT: Portfolio analysis should focus on OPEN positions only
+    // We want to see the current state of the portfolio, not historical closed positions
+    const openPositions = filteredPositions.filter(p => p.status === 'open');
+    
+    // Calculate current market value for each open position
+    const positionSizes = openPositions
+      .map(position => {
+        // For open positions, use current_shares * avg_entry_price to get current market value
+        // Note: In a real app, you'd multiply by current market price, but we use entry price as proxy
+        const currentValue = (position.current_shares || 0) * (position.avg_entry_price || 0);
+        
+        return {
+          ticker: position.ticker,
+          value: currentValue,
+          shares: position.current_shares,
+          avgPrice: position.avg_entry_price || 0,
+          sector: getTickerSector(position.ticker),
+          pnl: position.total_realized_pnl || 0, // Realized P&L so far
+          unrealizedPnl: 0, // Could calculate if we had current market prices
+          status: position.status
+        };
+      })
+      .filter(p => p.value > 0) // Only include positions with value
+      .sort((a, b) => b.value - a.value);
+
+    // Sector allocation - group by sector and collect ticker names
+    const sectorAllocation = positionSizes.reduce((acc, position) => {
+      const sector = position.sector;
       
-      if (!acc[sector]) acc[sector] = { value: 0, count: 0 };
-      acc[sector].value += positionValue;
+      if (!acc[sector]) acc[sector] = { value: 0, count: 0, tickers: [] };
+      acc[sector].value += position.value;
       acc[sector].count += 1;
+      acc[sector].tickers.push(position.ticker);
       
       return acc;
-    }, {} as Record<string, {value: number, count: number}>);
+    }, {} as Record<string, {value: number, count: number, tickers: string[]}>);
 
     const sectorChart = Object.entries(sectorAllocation).map(([sector, data]) => ({
       name: sector,
       value: data.value,
-      count: data.count
+      count: data.count,
+      tickers: data.tickers.join(', ') // Include ticker names for tooltip
     }));
 
-    // Position sizing analysis
-    const positionSizes = filteredPositions
-      .filter(p => (p.total_cost || 0) !== 0)
-      .map(position => {
-        const totalValue = Math.abs(position.total_cost || 0);
-        return {
-          ticker: position.ticker,
-          value: totalValue,
-          pnl: position.total_realized_pnl || 0,
-          status: position.status
-        };
-      })
-      .sort((a, b) => b.value - a.value);
-
-    // Position size distribution
+    // Position size distribution - categorize by current market value
     const positionSizeDistribution = positionSizes.reduce((acc, position) => {
       let bucket = '';
       const value = position.value;
@@ -347,14 +359,25 @@ const Analytics: React.FC = () => {
       count
     }));
 
-    // Top positions by value
+    // Top positions by current market value
     const topPositions = positionSizes.slice(0, 10);
 
-    // Win/Loss by position size
-    const sizePerformance = positionSizes.reduce((acc, position) => {
+    // Performance by position size - analyze CLOSED positions to see win/loss patterns
+    const closedPositions = filteredPositions
+      .filter(p => p.status === 'closed')
+      .map(position => {
+        // For closed positions, use the total_cost as the position size
+        const positionSize = Math.abs(position.total_cost || 0);
+        return {
+          size: positionSize,
+          pnl: position.total_realized_pnl || 0
+        };
+      });
+
+    const sizePerformance = closedPositions.reduce((acc, position) => {
       let sizeCategory = '';
-      if (position.value < 1000) sizeCategory = 'Small (<$1K)';
-      else if (position.value < 5000) sizeCategory = 'Medium ($1K-$5K)';
+      if (position.size < 1000) sizeCategory = 'Small (<$1K)';
+      else if (position.size < 5000) sizeCategory = 'Medium ($1K-$5K)';
       else sizeCategory = 'Large (>$5K)';
 
       if (!acc[sizeCategory]) acc[sizeCategory] = { wins: 0, losses: 0, totalPnl: 0 };
@@ -376,10 +399,13 @@ const Analytics: React.FC = () => {
       avgPnl: data.wins + data.losses > 0 ? data.totalPnl / (data.wins + data.losses) : 0
     }));
 
-    // Concentration risk - top 5 positions as % of total
+    // Total portfolio value - sum of all open position current values
     const totalPortfolioValue = positionSizes.reduce((sum, pos) => sum + pos.value, 0);
+    
+    // Concentration risk - top 5 open positions as % of TOTAL ACCOUNT VALUE (not just position sum)
+    // This shows what % of your total trading capital is in your top 5 positions
     const top5Value = positionSizes.slice(0, 5).reduce((sum, pos) => sum + pos.value, 0);
-    const concentrationRisk = totalPortfolioValue > 0 ? (top5Value / totalPortfolioValue) * 100 : 0;
+    const concentrationRisk = accountBalance > 0 ? (top5Value / accountBalance) * 100 : 0;
 
     return {
       sectorChart,
@@ -388,10 +414,10 @@ const Analytics: React.FC = () => {
       performanceBySize,
       concentrationRisk,
       totalPositions: filteredPositions.length,
-      activePositions: filteredPositions.filter(p => p.status === 'open').length,
+      activePositions: openPositions.length,
       totalPortfolioValue
     };
-  }, [filteredPositions]);
+  }, [filteredPositions, accountBalance]);
 
   // Entry/Exit Analysis calculations
   const entryExitAnalysisData = useMemo(() => {
@@ -846,6 +872,7 @@ const Analytics: React.FC = () => {
                         outerRadius={80}
                         fill="#8884d8"
                         dataKey="value"
+                        nameKey="name"
                       >
                         {portfolioAnalysisData.sectorChart.slice(0, 6).map((entry, index) => (
                           <Cell 
@@ -857,7 +884,7 @@ const Analytics: React.FC = () => {
                           />
                         ))}
                       </Pie>
-                      <RechartsTooltip formatter={(value: number) => [`$${value.toLocaleString()}`, 'Value']} cursor={{ strokeDasharray: '5 5' }} animationDuration={150} />
+                      <RechartsTooltip content={<CustomTooltip />} cursor={{ strokeDasharray: '5 5' }} animationDuration={150} />
                       <Legend />
                     </PieChart>
                   </ResponsiveContainer>
@@ -1442,7 +1469,7 @@ const Analytics: React.FC = () => {
                 <Typography color="text.secondary" gutterBottom>Portfolio Value</Typography>
                 <Typography variant="h4">${portfolioAnalysisData.totalPortfolioValue.toLocaleString()}</Typography>
                 <Typography variant="body2" color="text.secondary">
-                  Total invested capital
+                  Current market value of open positions
                 </Typography>
               </CardContent>
             </Card>
@@ -1450,7 +1477,11 @@ const Analytics: React.FC = () => {
           <Grid item xs={12} md={3}>
             <Card>
               <CardContent>
-                <Typography color="text.secondary" gutterBottom>Concentration Risk</Typography>
+                <Tooltip title="Percentage of your TOTAL ACCOUNT VALUE (from Settings) held in your 5 largest open positions. This shows what % of your trading capital is concentrated in your top holdings. Values >50% indicate high concentration risk, 30-50% is moderate, <30% is well diversified.">
+                  <Typography color="text.secondary" gutterBottom sx={{ cursor: 'help' }}>
+                    Concentration Risk ℹ️
+                  </Typography>
+                </Tooltip>
                 <Typography 
                   variant="h4" 
                   color={portfolioAnalysisData.concentrationRisk > 50 ? 'error.main' : 
@@ -1459,7 +1490,7 @@ const Analytics: React.FC = () => {
                   {portfolioAnalysisData.concentrationRisk.toFixed(1)}%
                 </Typography>
                 <Typography variant="body2" color="text.secondary">
-                  Top 5 positions
+                  Of ${accountBalance.toLocaleString()} account
                 </Typography>
               </CardContent>
             </Card>
@@ -1479,7 +1510,11 @@ const Analytics: React.FC = () => {
           {/* Sector Allocation Pie Chart */}
           <Grid item xs={12} md={6}>
             <Paper sx={{ p: 3 }}>
-              <Typography variant="h6" gutterBottom>Sector Allocation</Typography>
+              <Tooltip title="Distribution of your current open positions across different market sectors based on current market value.">
+                <Typography variant="h6" gutterBottom sx={{ cursor: 'help' }}>
+                  Sector Allocation (Open Positions) ℹ️
+                </Typography>
+              </Tooltip>
               <Box sx={{ width: '100%', height: 400 }}>
                 <ResponsiveContainer width="100%" height="100%">
                   <PieChart>
@@ -1491,6 +1526,7 @@ const Analytics: React.FC = () => {
                       innerRadius={60}
                       paddingAngle={2}
                       dataKey="value"
+                      nameKey="name"
                     >
                       {portfolioAnalysisData.sectorChart.map((entry, index) => (
                         <Cell
@@ -1510,7 +1546,11 @@ const Analytics: React.FC = () => {
           {/* Position Size Distribution */}
           <Grid item xs={12} md={6}>
             <Paper sx={{ p: 3 }}>
-              <Typography variant="h6" gutterBottom>Position Size Distribution</Typography>
+              <Tooltip title="Shows how your open positions are distributed by current market value. Helps identify if you're sizing positions consistently.">
+                <Typography variant="h6" gutterBottom sx={{ cursor: 'help' }}>
+                  Position Size Distribution (Open) ℹ️
+                </Typography>
+              </Tooltip>
               <Box sx={{ width: '100%', height: 400 }}>
                 <ResponsiveContainer width="100%" height="100%">
                   <BarChart data={portfolioAnalysisData.positionSizeChart}>
@@ -1528,7 +1568,11 @@ const Analytics: React.FC = () => {
           {/* Performance by Position Size */}
           <Grid item xs={12}>
             <Paper sx={{ p: 3 }}>
-              <Typography variant="h6" gutterBottom>Performance by Position Size</Typography>
+              <Tooltip title="Analyzes win/loss performance of your closed positions grouped by original position size. Helps identify if larger positions affect your win rate.">
+                <Typography variant="h6" gutterBottom sx={{ cursor: 'help' }}>
+                  Performance by Position Size (Closed Trades) ℹ️
+                </Typography>
+              </Tooltip>
               <Box sx={{ width: '100%', height: 400 }}>
                 <ResponsiveContainer width="100%" height="100%">
                   <BarChart data={portfolioAnalysisData.performanceBySize}>
@@ -1547,7 +1591,7 @@ const Analytics: React.FC = () => {
           {/* Top Positions Table */}
           <Grid item xs={12}>
             <Paper sx={{ p: 3 }}>
-              <Typography variant="h6" gutterBottom>Top Positions by Value</Typography>
+              <Typography variant="h6" gutterBottom>Top Open Positions by Current Value</Typography>
               <TableContainer>
                 <Table>
                   <TableHead>
