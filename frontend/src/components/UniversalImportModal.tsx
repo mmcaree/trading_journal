@@ -101,6 +101,7 @@ const UniversalImportModal: React.FC<UniversalImportModalProps> = ({
 
   // Load brokers on mount
   React.useEffect(() => {
+    console.log('Modal open state changed:', open);
     if (open) {
       loadBrokers();
       // Reset state on open
@@ -120,7 +121,9 @@ const UniversalImportModal: React.FC<UniversalImportModalProps> = ({
 
   const loadBrokers = async () => {
     try {
+      console.log('Loading brokers from /api/v2/positions/brokers...');
       const response = await api.get<{ brokers: BrokerInfo[] }>('/api/v2/positions/brokers');
+      console.log('Brokers loaded:', response.data.brokers);
       setBrokers(response.data.brokers);
     } catch (err) {
       console.error('Failed to load brokers:', err);
@@ -306,7 +309,10 @@ const UniversalImportModal: React.FC<UniversalImportModalProps> = ({
   // Render Helpers
   // =====================================================
 
-  const renderFileUpload = () => (
+  const renderFileUpload = () => {
+    console.log('Rendering file upload. Brokers count:', brokers.length, 'Selected:', selectedBroker);
+    
+    return (
     <Box>
       {/* Broker Selection */}
       <TextField
@@ -392,7 +398,8 @@ const UniversalImportModal: React.FC<UniversalImportModalProps> = ({
         </Typography>
       </Paper>
     </Box>
-  );
+    );
+  };
 
   const renderValidationResult = () => {
     if (!validationResult) return null;
