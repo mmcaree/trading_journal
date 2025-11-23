@@ -168,3 +168,4 @@ backend/pyproject.toml
 backend/tests/README.md
 backend/tests/requirements-test.txt
 backend/tests/conftest.py
+test_data.zip

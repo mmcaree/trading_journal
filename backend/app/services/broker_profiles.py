@@ -72,7 +72,16 @@ def parse_date_flexible(date_str: Any, formats: List[str]) -> Optional[datetime]
     
     date_str = str(date_str).strip()
     
+    # Special handling for Charles Schwab "as of" format
+    if " as of " in date_str:
+        # Extract the first date (trade date) from "MM/DD/YYYY as of MM/DD/YYYY"
+        date_str = date_str.split(" as of ")[0].strip()
+    
     for fmt in formats:
+        # Skip formats with duplicate directives (they'll fail with strptime)
+        if fmt.count('%m') > 1 or fmt.count('%d') > 1 or fmt.count('%Y') > 1:
+            continue
+            
         try:
             return datetime.strptime(date_str, fmt)
         except (ValueError, TypeError):

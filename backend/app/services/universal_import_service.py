@@ -218,8 +218,16 @@ class UniversalImportService:
                 if not action_raw:
                     continue
                 
-                # Map action using broker profile
-                action = broker_profile.action_mappings.get(action_raw.upper(), action_raw.upper())
+                # Map action using broker profile - try exact match first, then uppercase
+                action = broker_profile.action_mappings.get(action_raw)
+                if not action:
+                    action = broker_profile.action_mappings.get(action_raw.upper())
+                if not action:
+                    action = broker_profile.action_mappings.get(action_raw.lower())
+                if not action:
+                    # No mapping found, use as-is and uppercase it
+                    action = action_raw.upper()
+                    
                 if action not in ['BUY', 'SELL']:
                     self.warnings.append(f"Row {idx + 2}: Unknown action '{action_raw}', skipping")
                     continue
@@ -263,16 +271,25 @@ class UniversalImportService:
                 
                 # Extract optional fields
                 commission_col = column_map.get('commission')
-                commission = clean_currency_value(row[commission_col]) if commission_col and commission_col in row else 0.0
+                if commission_col and commission_col in df.columns and pd.notna(row.get(commission_col)):
+                    commission = clean_currency_value(row[commission_col])
+                else:
+                    commission = 0.0
                 
                 stop_loss_col = column_map.get('stop_loss')
-                stop_loss = clean_currency_value(row[stop_loss_col]) if stop_loss_col and stop_loss_col in row else None
+                if stop_loss_col and stop_loss_col in df.columns and pd.notna(row.get(stop_loss_col)):
+                    stop_loss = clean_currency_value(row[stop_loss_col])
+                else:
+                    stop_loss = 0.0
                 
                 take_profit_col = column_map.get('take_profit')
-                take_profit = clean_currency_value(row[take_profit_col]) if take_profit_col and take_profit_col in row else None
+                if take_profit_col and take_profit_col in df.columns and pd.notna(row.get(take_profit_col)):
+                    take_profit = clean_currency_value(row[take_profit_col])
+                else:
+                    take_profit = 0.0
                 
                 status_col = column_map.get('status')
-                status = str(row[status_col]).strip().upper() if status_col and status_col in row else 'FILLED'
+                status = str(row[status_col]).strip().upper() if status_col and status_col in df.columns and pd.notna(row.get(status_col)) else 'FILLED'
                 
                 # Build standardized event
                 event = {
