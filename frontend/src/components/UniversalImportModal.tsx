@@ -205,6 +205,8 @@ const UniversalImportModal: React.FC<UniversalImportModalProps> = ({
         }
       );
 
+      console.log('Validation response:', response.data);
+      console.log('Selected broker was:', selectedBroker);
       setValidationResult(response.data);
       
       if (response.data.valid) {

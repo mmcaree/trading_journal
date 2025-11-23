@@ -93,14 +93,14 @@ WEBULL_USA_PROFILE = BrokerProfile(
     name="webull_usa",
     display_name="Webull (USA)",
     column_mappings={
-        "symbol": ["Symbol", "symbol", "Ticker", "ticker"],
-        "action": ["Action", "action", "Side", "side", "Transaction Type"],
-        "quantity": ["Quantity", "quantity", "Qty", "qty", "Shares", "shares"],
-        "price": ["Price", "price", "Filled Price", "Trade Price"],
-        "date": ["Date", "date", "Trade Date", "Filled Time", "Time"],
+        "symbol": ["Symbol", "symbol", "Ticker"],
+        "action": ["Side", "side", "Action", "action", "Transaction Type"],
+        "quantity": ["Total Qty", "Filled", "Quantity", "quantity", "Qty", "qty", "Shares", "shares"],
+        "price": ["Avg Price", "Price", "price", "Filled Price", "Trade Price"],
+        "date": ["Filled Time", "Placed Time", "Date", "date", "Trade Date", "Time"],
         "status": ["Status", "status", "Order Status"],
-        "order_type": ["Order Type", "Type", "order_type"],
-        "commission": ["Commission", "commission", "Fee", "fee"],
+        "order_type": ["Time-in-Force", "Order Type", "Type", "order_type"],
+        "description": ["Name", "name", "Security Name"],
     },
     date_formats=[
         "%Y-%m-%d %H:%M:%S",  # 2024-01-15 09:30:00
@@ -116,7 +116,7 @@ WEBULL_USA_PROFILE = BrokerProfile(
         "buy": "BUY",
         "sell": "SELL",
     },
-    signature_columns=["Symbol", "Action", "Quantity", "Price"],
+    signature_columns=["Name", "Side", "Filled Time", "Time-in-Force"],
     default_currency="USD"
 )
 
@@ -257,13 +257,13 @@ ETRADE_PROFILE = BrokerProfile(
     display_name="E*TRADE",
     column_mappings={
         "symbol": ["Symbol", "Security", "Ticker"],
-        "action": ["Transaction Type", "Action", "Type"],
+        "action": ["TransactionType", "Transaction Type", "Action", "Type"],
         "quantity": ["Quantity", "Qty", "Shares"],
         "price": ["Price", "Execution Price", "Trade Price"],
-        "date": ["Trade Date", "Date", "Settlement Date"],
+        "date": ["TransactionDate", "Transaction Date", "Trade Date", "Date"],
         "amount": ["Amount", "Principal"],
         "commission": ["Commission", "Fee"],
-        "description": ["Description", "Desc"],
+        "description": ["SecurityDescription", "Security Description", "Description", "Desc"],
     },
     date_formats=[
         "%m/%d/%Y",            # 01/15/2024
@@ -280,7 +280,7 @@ ETRADE_PROFILE = BrokerProfile(
         "Purchase": "BUY",
         "Sale": "SELL",
     },
-    signature_columns=["Trade Date", "Transaction Type", "Symbol", "Quantity"],
+    signature_columns=["CUSIPNumber", "TransactionDate", "TransactionType", "SecurityType"],
     default_currency="USD"
 )
 
@@ -288,14 +288,15 @@ FIDELITY_PROFILE = BrokerProfile(
     name="fidelity",
     display_name="Fidelity",
     column_mappings={
-        "symbol": ["Symbol", "Security Description", "Ticker"],
+        "symbol": ["Symbol", "Ticker"],
         "action": ["Action", "Transaction", "Type"],
         "quantity": ["Quantity", "Qty", "Shares"],
         "price": ["Price", "Trade Price", "Price ($)"],
         "date": ["Run Date", "Trade Date", "Date"],
         "amount": ["Amount", "Amount ($)"],
-        "commission": ["Commission", "Fees & Comm"],
+        "commission": ["Commission", "Fees"],
         "settlement_date": ["Settlement Date"],
+        "description": ["Security Description", "Security"],
     },
     date_formats=[
         "%m/%d/%Y",            # 01/15/2024
@@ -312,7 +313,7 @@ FIDELITY_PROFILE = BrokerProfile(
         "BOUGHT": "BUY",
         "SOLD": "SELL",
     },
-    signature_columns=["Run Date", "Action", "Symbol", "Quantity"],
+    signature_columns=["Run Date", "Settlement Date", "Account", "Security Description"],
     default_currency="USD"
 )
 
@@ -326,7 +327,7 @@ CHARLES_SCHWAB_PROFILE = BrokerProfile(
         "price": ["Price", "Trade Price", "Price $"],
         "date": ["Date", "Trade Date"],
         "amount": ["Amount", "Total"],
-        "commission": ["Fees & Commissions", "Commission"],
+        "commission": ["Fees & Comm", "Fees & Commissions", "Commission"],
         "description": ["Description"],
     },
     date_formats=[
@@ -342,7 +343,7 @@ CHARLES_SCHWAB_PROFILE = BrokerProfile(
         "B": "BUY",
         "S": "SELL",
     },
-    signature_columns=["Date", "Action", "Symbol", "Quantity"],
+    signature_columns=["Fees & Comm", "Description", "Date"],
     default_currency="USD"
 )
 
