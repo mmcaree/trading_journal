@@ -34,8 +34,25 @@ export type {
 const cache = new Map<string, CacheEntry<unknown>>();
 const CACHE_TTL = 30000; // 30 seconds cache TTL
 
+// Helper to get current user ID from token for cache keying
+function getCurrentUserId(): string | null {
+  const token = localStorage.getItem('token');
+  if (!token) return null;
+  
+  try {
+    // Decode JWT token to get user info
+    const payload = JSON.parse(atob(token.split('.')[1]));
+    return payload.sub || payload.username || null;
+  } catch (e) {
+    console.error('Error decoding token for cache key:', e);
+    return null;
+  }
+}
+
 function getCacheKey(endpoint: string, params?: Record<string, unknown>): string {
-  return `${endpoint}_${JSON.stringify(params || {})}`;
+  // CRITICAL FIX: Include user ID in cache key to prevent cross-user data leakage
+  const userId = getCurrentUserId() || 'anonymous';
+  return `${userId}_${endpoint}_${JSON.stringify(params || {})}`;
 }
 
 function getFromCache<T>(key: string): T | null {
@@ -58,6 +75,11 @@ function clearPositionsCache(): void {
       cache.delete(key);
     }
   }
+}
+
+// Clear ALL cache (useful for logout/login)
+export function clearAllCache(): void {
+  cache.clear();
 }
 
 // =====================================================
@@ -113,6 +135,7 @@ export async function getAllPositions(filters?: {
     const cacheKey = getCacheKey('positions', filters);
     const cached = getFromCache<Position[]>(cacheKey);
     if (cached) {
+      console.log('Returning cached positions for key:', cacheKey);
       return cached;
     }
 
@@ -125,9 +148,10 @@ export async function getAllPositions(filters?: {
     if (filters?.limit) params.append('limit', filters.limit.toString());
     
     const url = `/api/v2/positions/${params.toString() ? `?${params.toString()}` : ''}`;
+    console.log('Fetching fresh positions from:', url);
     const response = await api.get(url);
     
-    // Cache the result
+    // Cache the result with user-specific key
     setCache(cacheKey, response.data);
     
     return response.data;
@@ -192,6 +216,7 @@ export async function sellFromPosition(positionId: number, eventData: Omit<AddEv
   try {
     const sellEventData = { ...eventData, event_type: 'sell' as const };
     const response = await api.post(`/api/v2/positions/${positionId}/events`, sellEventData);
+    clearPositionsCache();
     return response.data;
   } catch (error) {
     console.error('Error selling from position:', error);
@@ -213,6 +238,7 @@ export async function updatePosition(positionId: number, updates: {
 }): Promise<Position> {
   try {
     const response = await api.put(`/api/v2/positions/${positionId}`, updates);
+    clearPositionsCache();
     return response.data;
   } catch (error) {
     console.error('Error updating position:', error);
@@ -227,7 +253,7 @@ export async function updatePosition(positionId: number, updates: {
 export async function deletePosition(positionId: number): Promise<void> {
   try {
     await api.delete(`/api/v2/positions/${positionId}`);
-    clearPositionsCache(); // Clear from cache
+    clearPositionsCache();
   } catch (error) {
     console.error('Error deleting position:', error);
     throw error;
@@ -251,7 +277,7 @@ export async function updateEventComprehensive(eventId: number, updates: {
 }): Promise<PositionEvent> {
   try {
     const response = await api.put(`/api/v2/positions/events/${eventId}/comprehensive`, updates);
-    clearPositionsCache(); // Clear cache since event changed
+    clearPositionsCache();
     return response.data;
   } catch (error) {
     console.error('Error updating event comprehensively:', error);
@@ -269,7 +295,7 @@ export async function updateEventRiskManagement(eventId: number, updates: {
 }): Promise<PositionEvent> {
   try {
     const response = await api.put(`/api/v2/positions/events/${eventId}`, updates);
-    clearPositionsCache(); // Clear cache since event changed
+    clearPositionsCache();
     return response.data;
   } catch (error) {
     console.error('Error updating event risk management:', error);
@@ -283,7 +309,7 @@ export async function updateEventRiskManagement(eventId: number, updates: {
 export async function deleteEvent(eventId: number): Promise<void> {
   try {
     await api.delete(`/api/v2/positions/events/${eventId}`);
-    clearPositionsCache(); // Clear cache since event was deleted
+    clearPositionsCache();
   } catch (error) {
     console.error('Error deleting event:', error);
     throw error;
@@ -339,7 +365,7 @@ export async function getClosedPositions(): Promise<Position[]> {
  * Replaces: fetchTrades() without filters
  */
 export async function getAllPositionsForAnalytics(): Promise<Position[]> {
-  return getAllPositions({ limit: 100000 }); // Get all positions for analytics - increase limit significantly
+  return getAllPositions({ limit: 100000 });
 }
 
 // =====================================================
@@ -357,7 +383,7 @@ export function positionToLegacyTrade(position: Position): Record<string, unknow
     entryDate: position.opened_at,
     exitDate: position.closed_at,
     entryPrice: position.avg_entry_price || 0,
-    exitPrice: null, // Will need to calculate from events if needed
+    exitPrice: null,
     strategy: position.strategy || 'Unknown',
     setupType: position.setup_type || 'Unknown',
     timeframe: position.timeframe || 'Daily',
@@ -366,7 +392,6 @@ export function positionToLegacyTrade(position: Position): Record<string, unknow
     result: position.total_realized_pnl,
     resultAmount: position.total_realized_pnl,
     notes: position.notes || '',
-    // Add more mappings as needed
   };
 }
 
@@ -379,7 +404,7 @@ export function eventToPartialExit(event: PositionEvent): PartialExit | null {
   return {
     exit_price: event.price,
     exit_date: event.event_date,
-    shares_sold: Math.abs(event.shares), // Convert negative to positive
+    shares_sold: Math.abs(event.shares),
     profit_loss: event.realized_pnl || 0,
     notes: event.notes || ''
   };
@@ -413,18 +438,14 @@ export async function getDashboardData(): Promise<{
     const closedPositions = allPositions.filter(p => p.status === 'closed');
     const openPositions = allPositions.filter(p => p.status === 'open');
     
-    // Basic metrics
     const totalTrades = allPositions.length;
     const openTrades = openPositions.length;
     
-    // Win rate calculation
     const winningTrades = closedPositions.filter(p => p.total_realized_pnl > 0);
     const winRate = closedPositions.length > 0 ? (winningTrades.length / closedPositions.length) * 100 : 0;
     
-    // Total P&L
     const profitLoss = closedPositions.reduce((sum, p) => sum + p.total_realized_pnl, 0);
     
-    // Recent trades
     const recentTrades = [...allPositions]
       .sort((a, b) => new Date(b.opened_at).getTime() - new Date(a.opened_at).getTime())
       .slice(0, 5)
@@ -436,7 +457,6 @@ export async function getDashboardData(): Promise<{
         profitLoss: position.status === 'closed' ? position.total_realized_pnl : null
       }));
     
-    // Setup performance (simplified - can be enhanced later)
     const setupStats: { [key: string]: { total: number; wins: number } } = {};
     closedPositions.forEach(position => {
       const setup = position.setup_type || 'Other';
@@ -453,7 +473,6 @@ export async function getDashboardData(): Promise<{
       }))
       .slice(0, 4);
     
-    // Equity curve (simplified - can be enhanced with event dates)
     const equityCurve = calculateEquityCurve(closedPositions);
     
     return {
@@ -472,7 +491,6 @@ export async function getDashboardData(): Promise<{
   }
 }
 
-// Helper functions
 function getColorForSetup(setup: string): string {
   const colors: { [key: string]: string } = {
     'Breakout': '#4caf50',
@@ -489,7 +507,6 @@ function calculateEquityCurve(closedPositions: Position[]): Array<{ date: string
     return [{ date: new Date().toISOString().split('T')[0], equity: 0 }];
   }
   
-  // Sort by close date
   const sortedPositions = [...closedPositions]
     .filter(p => p.closed_at)
     .sort((a, b) => new Date(a.closed_at!).getTime() - new Date(b.closed_at!).getTime());
@@ -503,7 +520,6 @@ function calculateEquityCurve(closedPositions: Position[]): Array<{ date: string
     };
   });
   
-  // Add current date if needed
   const today = new Date().toISOString().split('T')[0];
   if (curve.length === 0 || curve[curve.length - 1].date !== today) {
     curve.push({ date: today, equity: cumulativeEquity });
@@ -547,41 +563,30 @@ export interface LifetimeTickerAnalytics {
   closedPositionsCount: number;
 }
 
-/**
- * Get comprehensive lifetime analytics for a specific ticker
- */
 export async function getLifetimeTickerAnalytics(ticker: string): Promise<LifetimeTickerAnalytics> {
   try {
-    
-    // Get all positions for this ticker
     const allPositions = await getAllPositions({ ticker, limit: 1000 });
     
     const openPositions = allPositions.filter(p => p.status === 'open');
     const closedPositions = allPositions.filter(p => p.status === 'closed');
     
-    // Basic counts
     const totalPositions = allPositions.length;
     const openPositionsCount = openPositions.length;
     const closedPositionsCount = closedPositions.length;
     
-    // Win rate calculation (only for closed positions)
     const winningPositions = closedPositions.filter(p => p.total_realized_pnl > 0);
     const lifetimeWinRate = closedPositions.length > 0 ? (winningPositions.length / closedPositions.length) * 100 : 0;
     
-    // Lifetime P&L (only realized from closed positions)
     const lifetimePnL = closedPositions.reduce((sum, p) => sum + p.total_realized_pnl, 0);
     
-    // Average return per position (only closed positions)
     const averageReturnPerPosition = closedPositions.length > 0 
       ? closedPositions.reduce((sum, p) => sum + (p.return_percent || 0), 0) / closedPositions.length
       : 0;
     
-    // Best and worst positions - sort by dollar P&L, not percentage
     let bestPosition = null;
     let worstPosition = null;
     
     if (closedPositions.length > 0) {
-      // Sort by total realized P&L (dollar amount) instead of percentage
       const sortedByPnL = [...closedPositions].sort((a, b) => b.total_realized_pnl - a.total_realized_pnl);
       
       const best = sortedByPnL[0];
@@ -605,14 +610,11 @@ export async function getLifetimeTickerAnalytics(ticker: string): Promise<Lifeti
       }
     }
     
-    // Average days held
     const totalDaysHeld = closedPositions.reduce((sum, p) => sum + calculateDaysHeld(p), 0);
     const averageDaysHeld = closedPositions.length > 0 ? totalDaysHeld / closedPositions.length : 0;
     
-    // Total volume traded (sum of all costs)
     const totalVolumeTraded = allPositions.reduce((sum, p) => sum + p.total_cost, 0);
     
-    // Success by strategy
     const strategyStats: { [key: string]: { positions: Position[], wins: number, totalReturn: number } } = {};
     
     closedPositions.forEach(position => {
@@ -632,8 +634,6 @@ export async function getLifetimeTickerAnalytics(ticker: string): Promise<Lifeti
       positionsCount: stats.positions.length
     })).sort((a, b) => b.winRate - a.winRate);
     
-    // Risk-adjusted return (Sharpe-like ratio)
-    // Calculate standard deviation of returns
     let riskAdjustedReturn = 0;
     if (closedPositions.length > 1) {
       const returns = closedPositions.map(p => p.return_percent || 0);
@@ -667,9 +667,6 @@ export async function getLifetimeTickerAnalytics(ticker: string): Promise<Lifeti
   }
 }
 
-/**
- * Helper function to calculate days held for a position
- */
 function calculateDaysHeld(position: Position): number {
   if (!position.opened_at) return 0;
   
@@ -679,24 +676,16 @@ function calculateDaysHeld(position: Position): number {
   return Math.max(0, Math.floor((endDate.getTime() - startDate.getTime()) / (1000 * 60 * 60 * 24)));
 }
 
-// =====================================================
-// EVENT MANAGEMENT FUNCTIONS
-// =====================================================
-
 export interface EventUpdateData {
   stop_loss?: number | null;
   take_profit?: number | null;
   notes?: string;
 }
 
-/**
- * Update an individual position event (stop loss, take profit, notes)
- */
 export async function updatePositionEvent(eventId: number, eventData: EventUpdateData): Promise<PositionEvent> {
   try {
-    
     const response = await api.put(`/api/v2/positions/events/${eventId}`, eventData);
-    
+    clearPositionsCache();
     return response.data;
   } catch (error) {
     console.error('Error updating position event:', error);
@@ -705,7 +694,6 @@ export async function updatePositionEvent(eventId: number, eventData: EventUpdat
 }
 
 export default {
-  // Main functions
   getAllPositions,
   getAllPositionsWithEvents,
   getPositionDetails,
@@ -714,20 +702,13 @@ export default {
   sellFromPosition,
   updatePosition,
   deletePosition,
-  
-  // Convenience functions
   getOpenPositions,
   getClosedPositions,
   getAllPositionsForAnalytics,
-  
-  // Analytics
   getDashboardData,
   getLifetimeTickerAnalytics,
-  
-  // Legacy compatibility
   positionToLegacyTrade,
   eventToPartialExit,
-  
-  // Event management
-  updatePositionEvent
+  updatePositionEvent,
+  clearAllCache
 };

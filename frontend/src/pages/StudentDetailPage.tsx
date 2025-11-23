@@ -1,4 +1,6 @@
 import React, { useState, useEffect } from 'react';
+import AddCommentIcon from '@mui/icons-material/AddComment';
+import { AlertTitle, Stack } from '@mui/material';
 import {
   Container,
   Paper,
@@ -151,6 +153,10 @@ const StudentDetailPage: React.FC = () => {
   const [chartDialog, setChartDialog] = useState(false);
   const [selectedChart, setSelectedChart] = useState<string | null>(null);
   const [selectedChartInfo, setSelectedChartInfo] = useState<PositionChart | null>(null);
+  const [tradeNotes, setTradeNotes] = useState<any[]>([]);
+  const [addingTradeNote, setAddingTradeNote] = useState(false);
+  const [newTradeNoteText, setNewTradeNoteText] = useState('');
+  const [savingTradeNote, setSavingTradeNote] = useState(false);
 
   useEffect(() => {
     if (studentId) {
@@ -239,16 +245,24 @@ const StudentDetailPage: React.FC = () => {
     try {
       setSelectedPosition(position);
       const token = localStorage.getItem('token');
-      const response = await fetch(`/api/admin/student/${studentId}/position/${position.id}/details`, {
+
+      const [detailsRes, notesRes] = await Promise.all([
+        fetch(`/api/admin/student/${studentId}/position/${position.id}/details`, {
         headers: { 'Authorization': `Bearer ${token}` }
-      });
+        }),
+        fetch(`/api/admin/positions/${position.id}/instructor-notes`, {
+        headers: { 'Authorization': `Bearer ${token}` }
+        })
+      ]);
 
-      if (!response.ok) {
-        throw new Error('Failed to load position details');
-      }
+      if (!detailsRes.ok) throw new Error('Failed to load position details');
+      if (!notesRes.ok) throw new Error('Failed to load trade notes');
 
-      const details = await response.json();
+      const details = await detailsRes.json();
+      const notes = await notesRes.json();
+
       setPositionDetails(details);
+      setTradeNotes(notes);
       setPositionDialog(true);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to load position details');
@@ -1015,6 +1029,96 @@ const StudentDetailPage: React.FC = () => {
               )}
             </Box>
           )}
+                        {/* === INSTRUCTOR FEEDBACK ON THIS TRADE === */}
+              <Box sx={{ mt: 5, pt: 4, borderTop: 1, borderColor: 'divider' }}>
+                <Typography variant="h6" gutterBottom>
+                  Instructor Feedback on This Trade
+                </Typography>
+
+                {tradeNotes.length > 0 ? (
+                  <Stack spacing={2} sx={{ mb: 3 }}>
+                    {tradeNotes.map((note: any) => (
+                      <Alert key={note.id} severity="info" icon={<FlagIcon />}>
+                        <AlertTitle>
+                          {note.instructor_username} — {formatDateTime(note.created_at)}
+                        </AlertTitle>
+                        {note.note_text}
+                      </Alert>
+                    ))}
+                  </Stack>
+                ) : (
+                  <Alert severity="info" sx={{ mb: 3 }}>
+                    No instructor feedback yet for this specific trade.
+                  </Alert>
+                )}
+
+                {addingTradeNote ? (
+                  <Box sx={{ p: 3, border: '2px dashed', borderColor: 'primary.main', borderRadius: 2 }}>
+                    <TextField
+                      fullWidth
+                      multiline
+                      rows={4}
+                      label="Your feedback on this trade"
+                      placeholder="e.g. Solid setup, but you sized too aggressively. Consider 1% risk max."
+                      value={newTradeNoteText}
+                      onChange={(e) => setNewTradeNoteText(e.target.value)}
+                      autoFocus
+                    />
+                    <Box sx={{ mt: 2, display: 'flex', gap: 1, justifyContent: 'flex-end' }}>
+                      <Button onClick={() => {
+                        setAddingTradeNote(false);
+                        setNewTradeNoteText('');
+                      }}>
+                        Cancel
+                      </Button>
+                      <Button
+                        variant="contained"
+                        disabled={!newTradeNoteText.trim() || savingTradeNote}
+                        onClick={async () => {
+                          if (!selectedPosition) return;
+
+                          setSavingTradeNote(true);
+                          try {
+                            const token = localStorage.getItem('token');
+                            const res = await fetch(`/api/admin/positions/${selectedPosition.id}/instructor-notes`, {
+                              method: 'POST',
+                              headers: {
+                                'Authorization': `Bearer ${token}`,
+                                'Content-Type': 'application/json',
+                              },
+                              body: JSON.stringify({
+                                note_text: newTradeNoteText,
+                                is_flagged: false
+                              }),
+                            });
+
+                            if (res.ok) {
+                              const saved = await res.json();
+                              setTradeNotes([...tradeNotes, saved]);
+                              setNewTradeNoteText('');
+                              setAddingTradeNote(false);
+                            }
+                          } catch (err) {
+                            alert('Failed to save note');
+                          } finally {
+                            setSavingTradeNote(false);
+                          }
+                        }}
+                      >
+                        {savingTradeNote ? 'Saving...' : 'Save Feedback'}
+                      </Button>
+                    </Box>
+                  </Box>
+                ) : (
+                  <Button
+                    variant="contained"
+                    startIcon={<AddCommentIcon />}
+                    onClick={() => setAddingTradeNote(true)}
+                  >
+                    Add Feedback on This Trade
+                  </Button>
+                )}
+              </Box>
         </DialogContent>
       </Dialog>
 

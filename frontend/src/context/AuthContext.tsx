@@ -1,10 +1,9 @@
-// src/context/AuthContext.tsx
 import React, { createContext, useContext, useState, useEffect } from 'react';
 import axios from 'axios';
 import * as authService from '../services/authService';
+import { clearAllCache } from '../services/positionsService';
 import type { User } from '../services/authService';
 
-// Use import.meta.env instead of process.env for Vite
 const API_URL = import.meta.env.VITE_API_URL || (import.meta.env.PROD ? '' : 'http://localhost:8000');
 
 interface RegisterData {
@@ -51,6 +50,8 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
           authService.removeToken();
           setToken(null);
           setUser(null);
+          // Clear cache on auth failure
+          clearAllCache();
         }
       }
       setIsLoading(false);
@@ -61,6 +62,9 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
   const login = async (username: string, password: string) => {
     try {
+      // CRITICAL: Clear cache before login to prevent cross-user data leakage
+      clearAllCache();
+      
       const authResponse = await authService.login(username, password);
       authService.saveToken(authResponse.access_token);
       setToken(authResponse.access_token);
@@ -71,8 +75,12 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       // Get user data after successful login
       const userData = await authService.getCurrentUser();
       setUser(userData);
+      
+      console.log('Login successful, cache cleared for new user:', userData.username);
     } catch (error) {
       console.error('Login error:', error);
+      // Clear cache on login failure too
+      clearAllCache();
       throw error;
     }
   };
@@ -81,15 +89,22 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     authService.removeToken();
     setToken(null);
     setUser(null);
+    // CRITICAL: Clear cache on logout to prevent data leakage
+    clearAllCache();
+    console.log('Logout successful, all cache cleared');
   };
 
   const register = async (data: RegisterData) => {
     try {
+      // Clear cache before registration
+      clearAllCache();
+      
       await authService.register(data);
       // After registration, automatically log in
       await login(data.username, data.password);
     } catch (error) {
       console.error('Registration error:', error);
+      clearAllCache();
       throw error;
     }
   };

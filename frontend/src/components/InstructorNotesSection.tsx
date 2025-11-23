@@ -28,7 +28,7 @@ const InstructorNotesSection: React.FC<Props> = ({ positionId }) => {
 
   const fetchNotes = async () => {
     try {
-      const res = await api.get(`/admin/positions/${positionId}/instructor-notes`);
+      const res = await api.get(`/api/admin/positions/${positionId}/instructor-notes`);
       setNotes(res.data);
     } catch (err) {
       console.error("Failed to load instructor notes");
@@ -45,7 +45,7 @@ const InstructorNotesSection: React.FC<Props> = ({ positionId }) => {
     if (!newNote.trim()) return;
     setSubmitting(true);
     try {
-      await api.post(`/admin/positions/${positionId}/instructor-notes`, {
+      await api.post(`/api/admin/positions/${positionId}/instructor-notes`, {
         note_text: newNote,
         is_flagged: false
       });
