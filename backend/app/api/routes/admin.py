@@ -59,6 +59,7 @@ class InstructorNoteResponse(BaseModel):
     id: int
     instructor_id: int
     student_id: int
+    position_id: int
     note_text: str
     is_flagged: bool
     created_at: datetime
@@ -477,6 +478,73 @@ async def get_class_analytics(
         "flagged_students": flagged_students,
         "average_pnl_per_student": total_pnl / total_students if total_students > 0 else 0
     }
+
+
+@router.get("/positions/{position_id}/instructor-notes", response_model=List[InstructorNoteResponse])
+async def get_instructor_notes_for_position(
+    position_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    position = db.query(TradingPosition).filter(TradingPosition.id == position_id).first()
+    if not position:
+        raise NotFoundException("Position")
+    
+    if current_user.role != 'INSTRUCTOR' and position.user_id != current_user.id:
+        raise ForbiddenException("Not authorized")
+    
+    notes = db.query(InstructorNote).filter(InstructorNote.position_id == position_id)\
+        .order_by(InstructorNote.created_at.desc()).all()
+    
+    return [
+        InstructorNoteResponse(
+            id=n.id,
+            instructor_id=n.instructor_id,
+            student_id=n.student_id,
+            position_id=n.position_id,
+            note_text=n.note_text,
+            is_flagged=n.is_flagged,
+            created_at=n.created_at,
+            updated_at=n.updated_at,
+            instructor_username=n.instructor.username
+        )
+        for n in notes
+    ]
+
+
+@router.post("/positions/{position_id}/instructor-notes", response_model=InstructorNoteResponse)
+async def add_instructor_note_to_position(
+    position_id: int,
+    note_data: InstructorNoteCreate,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_instructor)
+):
+    position = db.query(TradingPosition).filter(TradingPosition.id == position_id).first()
+    if not position:
+        raise NotFoundException("Position")
+    
+    note = InstructorNote(
+        instructor_id=current_user.id,
+        student_id=position.user_id,
+        position_id=position_id,
+        note_text=note_data.note_text,
+        is_flagged=note_data.is_flagged
+    )
+    db.add(note)
+    db.commit()
+    db.refresh(note)
+    
+    return InstructorNoteResponse(
+        id=note.id,
+        instructor_id=note.instructor_id,
+        student_id=note.student_id,
+        position_id=note.position_id,
+        note_text=note.note_text,
+        is_flagged=note.is_flagged,
+        created_at=note.created_at,
+        updated_at=note.updated_at,
+        instructor_username=current_user.username
+    )
 
 # Test endpoint at the end to see if it gets registered
 @router.get("/test")

@@ -97,6 +97,7 @@ class TradingPosition(Base):
     charts = relationship("TradingPositionChart", back_populates="position")
     pending_orders = relationship("ImportedPendingOrder", back_populates="position")
     journal_entries = relationship("TradingPositionJournalEntry", back_populates="position", order_by="TradingPositionJournalEntry.entry_date.desc()")
+    instructor_notes = relationship("InstructorNote", back_populates="position", cascade="all, delete-orphan")
     
     def __repr__(self):
         return f"<TradingPosition(id={self.id}, ticker={self.ticker}, shares={self.current_shares}, status={self.status})>"
@@ -287,6 +288,8 @@ class InstructorNote(Base):
     id = Column(Integer, primary_key=True, index=True)
     instructor_id = Column(Integer, ForeignKey("users.id"), nullable=False)
     student_id = Column(Integer, ForeignKey("users.id"), nullable=False)
+    position_id = Column(Integer, ForeignKey("trading_positions.id", ondelete="CASCADE"), nullable=False, index=True)
+
     note_text = Column(Text, nullable=False)
     is_flagged = Column(Boolean, default=False)  # Flag student for attention
     created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
@@ -295,3 +298,4 @@ class InstructorNote(Base):
     # Relationships
     instructor = relationship("User", foreign_keys=[instructor_id])
     student = relationship("User", foreign_keys=[student_id])
+    position = relationship("TradingPosition", back_populates="instructor_notes")

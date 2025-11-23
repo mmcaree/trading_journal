@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useMemo } from 'react';
+import InstructorNotesSection from './InstructorNotesSection';
 import {
   Box,
   Typography,
@@ -1250,6 +1251,9 @@ const PositionDetailsModal: React.FC<PositionDetailsModalProps> = ({
                   </>
                 )}
               </Paper>
+            </Grid>
+            <Grid item xs={12}>
+              <InstructorNotesSection positionId={position.id} />
             </Grid>
           </Grid>
         </TabPanel>
