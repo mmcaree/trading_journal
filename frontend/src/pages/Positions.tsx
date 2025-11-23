@@ -23,7 +23,8 @@ import {
   Add as AddIcon,
   TrendingDown as SellIcon,
   Security as StopLossIcon,
-  Visibility as DetailsIcon
+  Visibility as DetailsIcon,
+  Upload as UploadIcon
 } from '@mui/icons-material';
 import { getAllPositions, getPositionDetails, Position, PositionDetails } from '../services/positionsService';
 import { useCurrency } from '../context/CurrencyContext';
@@ -32,6 +33,7 @@ import SellFromPositionModal from '../components/SellFromPositionModal';
 import UpdateStopLossModal from '../components/UpdateStopLossModal';
 import PositionDetailsModal from '../components/PositionDetailsModal';
 import CreatePositionModal from '../components/CreatePositionModal';
+import UniversalImportModal from '../components/UniversalImportModal';
 import { KeyboardShortcutsButton } from '../components/KeyboardShortcutsHelp';
 import { useKeyboardShortcuts, createTradingShortcuts } from '../hooks/useKeyboardShortcuts';
 
@@ -77,6 +79,7 @@ const Positions: React.FC = () => {
   });
 
   const [createPositionModal, setCreatePositionModal] = useState(false);
+  const [importModal, setImportModal] = useState(false);
 
   const [selectedPosition, setSelectedPosition] = useState<Position | null>(null);
   
@@ -256,15 +259,26 @@ const Positions: React.FC = () => {
             Open Positions
           </Typography>
         </Box>
-        <Button
-          variant="contained"
-          color="primary"
-          startIcon={<AddIcon />}
-          onClick={() => setCreatePositionModal(true)}
-          sx={{ height: 'fit-content' }}
-        >
-          Create Position
-        </Button>
+        <Box sx={{ display: 'flex', gap: 2 }}>
+          <Button
+            variant="outlined"
+            color="primary"
+            startIcon={<UploadIcon />}
+            onClick={() => setImportModal(true)}
+            sx={{ height: 'fit-content' }}
+          >
+            Import from Broker
+          </Button>
+          <Button
+            variant="contained"
+            color="primary"
+            startIcon={<AddIcon />}
+            onClick={() => setCreatePositionModal(true)}
+            sx={{ height: 'fit-content' }}
+          >
+            Create Position
+          </Button>
+        </Box>
       </Box>
 
       {error && (
@@ -473,6 +487,16 @@ const Positions: React.FC = () => {
         open={createPositionModal}
         onClose={() => setCreatePositionModal(false)}
         onSuccess={handleCreatePositionSuccess}
+      />
+
+      {/* Universal Import Modal */}
+      <UniversalImportModal
+        open={importModal}
+        onClose={() => setImportModal(false)}
+        onImportSuccess={() => {
+          loadPositions();
+          setImportModal(false);
+        }}
       />
 
       {/* Keyboard Shortcuts Help */}
