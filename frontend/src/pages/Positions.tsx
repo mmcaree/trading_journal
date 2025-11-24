@@ -16,7 +16,9 @@ import {
   Alert,
   CircularProgress,
   Button,
-  IconButton
+  IconButton,
+  Checkbox,
+  Tooltip
 } from '@mui/material';
 import { 
   Search as SearchIcon,
@@ -24,10 +26,12 @@ import {
   TrendingDown as SellIcon,
   Security as StopLossIcon,
   Visibility as DetailsIcon,
-  Upload as UploadIcon
+  Upload as UploadIcon,
+  Compare as CompareIcon
 } from '@mui/icons-material';
 import { getAllPositions, getPositionDetails, Position, PositionDetails } from '../services/positionsService';
 import { useCurrency } from '../context/CurrencyContext';
+import { useNavigate } from 'react-router-dom';
 import AddToPositionModal from '../components/AddToPositionModal';
 import SellFromPositionModal from '../components/SellFromPositionModal';
 import UpdateStopLossModal from '../components/UpdateStopLossModal';
@@ -44,6 +48,9 @@ const Positions: React.FC = () => {
   const [searchQuery, setSearchQuery] = useState('');
   const [page, setPage] = useState(0);
   const [rowsPerPage, setRowsPerPage] = useState(20);
+  const [selectedForComparison, setSelectedForComparison] = useState<number[]>([]);
+  
+  const navigate = useNavigate();
   
   // Modal state
   const [addToPositionModal, setAddToPositionModal] = useState<{
@@ -241,6 +248,24 @@ const Positions: React.FC = () => {
     loadPositions();
   };
 
+  // Comparison handlers
+  const handleToggleComparison = (positionId: number) => {
+    setSelectedForComparison(prev => {
+      if (prev.includes(positionId)) {
+        return prev.filter(id => id !== positionId);
+      } else if (prev.length < 4) {
+        return [...prev, positionId];
+      }
+      return prev;
+    });
+  };
+
+  const handleComparePositions = () => {
+    if (selectedForComparison.length >= 2) {
+      navigate(`/compare?ids=${selectedForComparison.join(',')}`);
+    }
+  };
+
   if (loading) {
     return (
       <Box sx={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: 400 }}>
@@ -260,6 +285,17 @@ const Positions: React.FC = () => {
           </Typography>
         </Box>
         <Box sx={{ display: 'flex', gap: 2 }}>
+          {selectedForComparison.length >= 2 && (
+            <Button
+              variant="contained"
+              color="secondary"
+              startIcon={<CompareIcon />}
+              onClick={handleComparePositions}
+              sx={{ height: 'fit-content' }}
+            >
+              Compare {selectedForComparison.length} Positions
+            </Button>
+          )}
           <Button
             variant="outlined"
             color="primary"
@@ -313,6 +349,11 @@ const Positions: React.FC = () => {
           <Table>
             <TableHead>
               <TableRow>
+                <TableCell sx={{ color: 'primary.main', fontWeight: 'bold' }}>
+                  <Tooltip title="Select up to 4 positions to compare">
+                    <span>Compare</span>
+                  </Tooltip>
+                </TableCell>
                 <TableCell sx={{ color: 'primary.main', fontWeight: 'bold' }}>Ticker</TableCell>
                 <TableCell sx={{ color: 'primary.main', fontWeight: 'bold' }}>Strategy</TableCell>
                 <TableCell sx={{ color: 'primary.main', fontWeight: 'bold' }}>Setup</TableCell>
@@ -348,6 +389,17 @@ const Positions: React.FC = () => {
                     }
                   }}
                 >
+                  <TableCell onClick={(e) => e.stopPropagation()}>
+                    <Checkbox
+                      checked={selectedForComparison.includes(position.id)}
+                      onChange={() => handleToggleComparison(position.id)}
+                      disabled={
+                        !selectedForComparison.includes(position.id) &&
+                        selectedForComparison.length >= 4
+                      }
+                      color="primary"
+                    />
+                  </TableCell>
                   <TableCell>
                     <Typography variant="body2" fontWeight="bold">
                       {position.ticker}

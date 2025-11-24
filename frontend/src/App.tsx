@@ -13,6 +13,7 @@ import Dashboard from './pages/Dashboard';
 import TradesList from './pages/TradesList';
 import Positions from './pages/Positions';
 import PositionsServiceTest from './pages/PositionsServiceTest';
+import PositionComparison from './pages/PositionComparison';
 import Analytics from './pages/Analytics';
 import Settings from './pages/Settings';
 import ImportData from './pages/ImportData';
@@ -123,6 +124,7 @@ function App() {
                 <Route path="/" element={<ProtectedRoute><DashboardLayout /></ProtectedRoute>}>
                   <Route index element={<Dashboard />} />
                   <Route path="positions" element={<Positions />} />
+                  <Route path="compare" element={<PositionComparison />} />
                   <Route path="trades" element={<TradesList />} />
                   <Route path="positions-test" element={<PositionsServiceTest />} />
                   {/* Position details, creation, and editing routes removed */}

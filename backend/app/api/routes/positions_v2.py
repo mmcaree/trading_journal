@@ -1329,3 +1329,149 @@ async def delete_journal_entry(
     except Exception as e:
         db.rollback()
         raise InternalServerException(f"Failed to delete journal entry: {str(e)}")
+
+
+# === Chart Data Routes ===
+
+@router.get("/{position_id}/chart-data")
+async def get_position_chart_data(
+    position_id: int,
+    days_before: int = Query(7, ge=0, le=30, description="Days of data before entry"),
+    days_after: int = Query(7, ge=0, le=30, description="Days of data after exit"),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    """
+    Get historical price chart data for a position with context days before/after.
+    Returns daily OHLCV data from 7 days before entry to 7 days after exit.
+    """
+    from app.services.market_data_service import MarketDataService
+    
+    # Get position and verify ownership
+    position = db.query(TradingPosition).filter(
+        TradingPosition.id == position_id,
+        TradingPosition.user_id == current_user.id
+    ).first()
+    
+    if not position:
+        raise NotFoundException("Position not found")
+    
+    # Get entry and exit dates from events
+    first_event = db.query(TradingPositionEvent).filter(
+        TradingPositionEvent.position_id == position_id,
+        TradingPositionEvent.event_type == EventType.BUY
+    ).order_by(TradingPositionEvent.event_date.asc()).first()
+    
+    last_event = db.query(TradingPositionEvent).filter(
+        TradingPositionEvent.position_id == position_id
+    ).order_by(TradingPositionEvent.event_date.desc()).first()
+    
+    if not first_event:
+        raise BadRequestException("Position has no entry event")
+    
+    try:
+        market_service = MarketDataService()
+        chart_data = market_service.get_position_chart_data(
+            symbol=position.ticker,
+            opened_at=first_event.event_date,
+            closed_at=last_event.event_date if position.status == PositionStatus.CLOSED else None,
+            days_before=days_before,
+            days_after=days_after
+        )
+        
+        # Log success for debugging
+        import logging
+        logger = logging.getLogger(__name__)
+        logger.info(f"Chart data for {position.ticker} (ID {position_id}): {len(chart_data.get('price_data', []))} data points")
+        
+        return {
+            "position_id": position_id,
+            "ticker": position.ticker,
+            **chart_data
+        }
+        
+    except Exception as e:
+        import logging
+        import traceback
+        logger = logging.getLogger(__name__)
+        logger.error(f"Failed to fetch chart data for position {position_id} ({position.ticker}): {str(e)}")
+        logger.error(traceback.format_exc())
+        raise InternalServerException(f"Failed to fetch chart data: {str(e)}")
+
+
+@router.post("/chart-data/bulk")
+async def get_bulk_position_chart_data(
+    request: Dict[str, Any],
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    """
+    Get chart data for multiple positions at once.
+    Request body: { "position_ids": [1, 2, 3], "days_before": 7, "days_after": 7 }
+    """
+    from app.services.market_data_service import MarketDataService
+    
+    position_ids = request.get("position_ids", [])
+    days_before = request.get("days_before", 7)
+    days_after = request.get("days_after", 7)
+    
+    if not position_ids or not isinstance(position_ids, list):
+        raise BadRequestException("position_ids must be a non-empty list")
+    
+    if len(position_ids) > 10:
+        raise BadRequestException("Cannot fetch chart data for more than 10 positions at once")
+    
+    # Verify all positions exist and user owns them
+    positions = db.query(TradingPosition).filter(
+        TradingPosition.id.in_(position_ids),
+        TradingPosition.user_id == current_user.id
+    ).all()
+    
+    if len(positions) != len(position_ids):
+        raise NotFoundException("One or more positions not found")
+    
+    results = []
+    market_service = MarketDataService()
+    
+    for position in positions:
+        # Get entry and exit dates
+        first_event = db.query(TradingPositionEvent).filter(
+            TradingPositionEvent.position_id == position.id,
+            TradingPositionEvent.event_type == EventType.BUY
+        ).order_by(TradingPositionEvent.event_date.asc()).first()
+        
+        last_event = db.query(TradingPositionEvent).filter(
+            TradingPositionEvent.position_id == position.id
+        ).order_by(TradingPositionEvent.event_date.desc()).first()
+        
+        if not first_event:
+            results.append({
+                "position_id": position.id,
+                "ticker": position.ticker,
+                "error": "No entry event found"
+            })
+            continue
+        
+        try:
+            chart_data = market_service.get_position_chart_data(
+                symbol=position.ticker,
+                opened_at=first_event.event_date,
+                closed_at=last_event.event_date if position.status == PositionStatus.CLOSED else None,
+                days_before=days_before,
+                days_after=days_after
+            )
+            
+            results.append({
+                "position_id": position.id,
+                "ticker": position.ticker,
+                **chart_data
+            })
+            
+        except Exception as e:
+            results.append({
+                "position_id": position.id,
+                "ticker": position.ticker,
+                "error": str(e)
+            })
+    
+    return {"charts": results}

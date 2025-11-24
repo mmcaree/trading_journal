@@ -29,7 +29,8 @@ import {
   ExitToApp as LogoutIcon,
   AccountCircle,
   CloudUpload as ImportIcon,
-  AdminPanelSettings as AdminIcon
+  AdminPanelSettings as AdminIcon,
+  Compare as CompareIcon
 } from '@mui/icons-material';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
@@ -99,6 +100,7 @@ const DashboardLayout = () => {
   const menuItems = [
     { text: 'Dashboard', icon: <DashboardIcon />, path: '/' },
     { text: 'Positions', icon: <PositionsIcon />, path: '/positions' },
+    { text: 'Compare Positions', icon: <CompareIcon />, path: '/compare' },
     { text: 'Trade History', icon: <ShowChartIcon />, path: '/trades' },
     { text: 'Import Data', icon: <ImportIcon />, path: '/import' },
     { text: 'Analytics', icon: <AssessmentIcon />, path: '/analytics' },

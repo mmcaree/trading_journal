@@ -693,6 +693,78 @@ export async function updatePositionEvent(eventId: number, eventData: EventUpdat
   }
 }
 
+// =====================================================
+// CHART DATA SERVICE
+// =====================================================
+
+export interface PriceDataPoint {
+  date: string;
+  open: number;
+  high: number;
+  low: number;
+  close: number;
+  volume: number;
+}
+
+export interface ChartDataResponse {
+  position_id: number;
+  ticker: string;
+  symbol: string;
+  entry_date: string;
+  exit_date: string | null;
+  price_data: PriceDataPoint[];
+  date_range: {
+    start: string;
+    end: string;
+  };
+}
+
+export interface BulkChartDataResponse {
+  charts: (ChartDataResponse & { error?: string })[];
+}
+
+/**
+ * Get historical price chart data for a single position
+ * Returns daily OHLCV data from N days before entry to N days after exit
+ */
+export async function getPositionChartData(
+  positionId: number,
+  daysBefore: number = 7,
+  daysAfter: number = 7
+): Promise<ChartDataResponse> {
+  try {
+    const response = await api.get(`/api/v2/positions/${positionId}/chart-data`, {
+      params: { days_before: daysBefore, days_after: daysAfter }
+    });
+    return response.data;
+  } catch (error) {
+    console.error(`Error fetching chart data for position ${positionId}:`, error);
+    throw error;
+  }
+}
+
+/**
+ * Get chart data for multiple positions at once (bulk fetch)
+ * More efficient than calling getPositionChartData multiple times
+ */
+export async function getBulkPositionChartData(
+  positionIds: number[],
+  daysBefore: number = 7,
+  daysAfter: number = 7
+): Promise<BulkChartDataResponse> {
+  try {
+    const response = await api.post('/api/v2/positions/chart-data/bulk', {
+      position_ids: positionIds,
+      days_before: daysBefore,
+      days_after: daysAfter
+    });
+    return response.data;
+  } catch (error) {
+    console.error('Error fetching bulk chart data:', error);
+    throw error;
+  }
+}
+
 export default {
   getAllPositions,
   getAllPositionsWithEvents,
@@ -710,5 +782,7 @@ export default {
   positionToLegacyTrade,
   eventToPartialExit,
   updatePositionEvent,
-  clearAllCache
+  clearAllCache,
+  getPositionChartData,
+  getBulkPositionChartData,
 };
