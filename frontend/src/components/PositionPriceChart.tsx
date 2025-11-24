@@ -9,6 +9,7 @@ import {
 } from '@mui/material';
 import { createChart, ColorType, LineStyle } from 'lightweight-charts';
 import { PriceDataPoint } from '../services/positionsService';
+import { PositionEvent } from '../types/api';
 import { parseISO } from 'date-fns';
 
 interface PositionPriceChartProps {
@@ -16,6 +17,7 @@ interface PositionPriceChartProps {
   priceData: PriceDataPoint[];
   entryDate?: string;
   exitDate?: string | null;
+  events?: PositionEvent[];
   loading?: boolean;
   error?: string;
 }
@@ -45,6 +47,7 @@ const PositionPriceChart: React.FC<PositionPriceChartProps> = ({
   priceData,
   entryDate,
   exitDate,
+  events = [],
   loading = false,
   error,
 }) => {
@@ -120,60 +123,107 @@ const PositionPriceChart: React.FC<PositionPriceChartProps> = ({
     });
     sma20Series.setData(sma20Data as any);
 
-    // Collect all markers
+    // Collect all markers from events
     const markers: any[] = [];
 
-    // Add entry marker with arrow
-    if (entryDate) {
-      const entryTime = Math.floor(parseISO(entryDate).getTime() / 1000);
-      const entryDataPoint = chartData.find(d => d.time === entryTime);
-      if (entryDataPoint) {
-        // Add horizontal price line
-        candlestickSeries.createPriceLine({
-          price: entryDataPoint.open,
-          color: '#4caf4f80',
-          lineWidth: 2,
-          lineStyle: LineStyle.Dashed,
-          axisLabelVisible: true,
-          title: 'Entry',
-        });
-        
-        // Add marker with arrow
-        markers.push({
-          time: entryTime as any,
-          position: 'belowBar',
-          color: '#4caf4f',
-          shape: 'arrowUp',
-          text: 'Entry',
-          size: 1,
-        });
-      }
-    }
+    console.log('Events for chart:', events);
+    console.log('Entry date:', entryDate);
+    console.log('Exit date:', exitDate);
 
-    // Add exit marker with arrow
-    if (exitDate) {
-      const exitTime = Math.floor(parseISO(exitDate).getTime() / 1000);
-      const exitDataPoint = chartData.find(d => d.time === exitTime);
-      if (exitDataPoint) {
-        // Add horizontal price line
-        candlestickSeries.createPriceLine({
-          price: exitDataPoint.close,
-          color: '#f4433680',
-          lineWidth: 2,
-          lineStyle: LineStyle.Dashed,
-          axisLabelVisible: true,
-          title: 'Exit',
-        });
+    // If we have events, use them to create markers
+    if (events && events.length > 0) {
+      console.log('Using events to create markers');
+      events.forEach((event, index) => {
+        const eventDate = event.event_date.split('T')[0]; // Get just the date part (YYYY-MM-DD)
+        const eventTime = Math.floor(parseISO(eventDate).getTime() / 1000);
+        const eventDataPoint = chartData.find(d => d.time === eventTime);
         
-        // Add marker with arrow
-        markers.push({
-          time: exitTime as any,
-          position: 'aboveBar',
-          color: '#f44336',
-          shape: 'arrowDown',
-          text: 'Exit',
-          size: 1,
-        });
+        console.log(`Event ${index}: ${event.event_type} on ${eventDate}, time: ${eventTime}, found: ${!!eventDataPoint}`);
+        
+        if (eventDataPoint) {
+          const isBuy = event.event_type === 'buy';
+          const isFirstBuy = isBuy && index === 0;
+          const isLastSell = !isBuy && index === events.length - 1;
+          
+          // Add horizontal price line for first buy and last sell
+          if (isFirstBuy) {
+            candlestickSeries.createPriceLine({
+              price: event.price,
+              color: '#4caf4f80',
+              lineWidth: 2,
+              lineStyle: LineStyle.Dashed,
+              axisLabelVisible: true,
+              title: 'Entry',
+            });
+          } else if (isLastSell) {
+            candlestickSeries.createPriceLine({
+              price: event.price,
+              color: '#f4433680',
+              lineWidth: 2,
+              lineStyle: LineStyle.Dashed,
+              axisLabelVisible: true,
+              title: 'Exit',
+            });
+          }
+          
+          // Add marker for all events
+          markers.push({
+            time: eventTime as any,
+            position: isBuy ? 'belowBar' : 'aboveBar',
+            color: isBuy ? '#4caf4f' : '#f44336',
+            shape: isBuy ? 'arrowUp' : 'arrowDown',
+            text: isBuy ? (isFirstBuy ? 'Entry' : `+${event.shares}`) : (isLastSell ? 'Exit' : `-${event.shares}`),
+            size: 1,
+          });
+        }
+      });
+    } else {
+      // Fallback to entry/exit dates if no events available
+      console.log('No events available, using fallback to entry/exit dates');
+      if (entryDate) {
+        const entryTime = Math.floor(parseISO(entryDate).getTime() / 1000);
+        const entryDataPoint = chartData.find(d => d.time === entryTime);
+        if (entryDataPoint) {
+          candlestickSeries.createPriceLine({
+            price: entryDataPoint.open,
+            color: '#4caf4f80',
+            lineWidth: 2,
+            lineStyle: LineStyle.Dashed,
+            axisLabelVisible: true,
+            title: 'Entry',
+          });
+          markers.push({
+            time: entryTime as any,
+            position: 'belowBar',
+            color: '#4caf4f',
+            shape: 'arrowUp',
+            text: 'Entry',
+            size: 1,
+          });
+        }
+      }
+
+      if (exitDate) {
+        const exitTime = Math.floor(parseISO(exitDate).getTime() / 1000);
+        const exitDataPoint = chartData.find(d => d.time === exitTime);
+        if (exitDataPoint) {
+          candlestickSeries.createPriceLine({
+            price: exitDataPoint.close,
+            color: '#f4433680',
+            lineWidth: 2,
+            lineStyle: LineStyle.Dashed,
+            axisLabelVisible: true,
+            title: 'Exit',
+          });
+          markers.push({
+            time: exitTime as any,
+            position: 'aboveBar',
+            color: '#f44336',
+            shape: 'arrowDown',
+            text: 'Exit',
+            size: 1,
+          });
+        }
       }
     }
 
@@ -200,7 +250,7 @@ const PositionPriceChart: React.FC<PositionPriceChartProps> = ({
       window.removeEventListener('resize', handleResize);
       chart.remove();
     };
-  }, [priceData, entryDate, exitDate]);
+  }, [priceData, entryDate, exitDate, events]);
 
   if (loading) {
     return (

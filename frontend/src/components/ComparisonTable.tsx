@@ -24,7 +24,7 @@ interface ComparisonTableProps {
 
 interface MetricRow {
   label: string;
-  getValue: (position: Position) => string | number;
+  getValue: (position: Position) => string | number | null;
   format?: (value: any) => string;
   highlightBest?: boolean;
   inverse?: boolean; // true if lower is better (e.g., risk)
@@ -114,10 +114,28 @@ const ComparisonTable: React.FC<ComparisonTableProps> = ({ positions }) => {
     },
     {
       label: 'Original Risk %',
-      getValue: (p) => p.original_risk_percent || 0,
-      format: (v) => `${v.toFixed(2)}%`,
+      getValue: (p) => p.original_risk_percent || null,
+      format: (v) => v ? `${v.toFixed(2)}%` : 'N/A',
       highlightBest: false,
       inverse: true
+    },
+    {
+      label: 'Stop Loss',
+      getValue: (p) => p.current_stop_loss || null,
+      format: (v) => v ? formatCurrency(v) : 'N/A',
+      highlightBest: false
+    },
+    {
+      label: 'Take Profit',
+      getValue: (p) => p.current_take_profit || null,
+      format: (v) => v ? formatCurrency(v) : 'N/A',
+      highlightBest: false
+    },
+    {
+      label: 'Risk/Reward Ratio',
+      getValue: (p) => calculateRiskRewardRatio(p),
+      format: (v) => v > 0 ? `1:${v.toFixed(2)}` : 'N/A',
+      highlightBest: true
     }
   ];
 

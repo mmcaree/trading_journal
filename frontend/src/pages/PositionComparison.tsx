@@ -19,7 +19,7 @@ import {
 } from '@mui/icons-material';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { Position } from '../types/api';
-import { getAllPositions, getBulkPositionChartData, ChartDataResponse } from '../services/positionsService';
+import { getAllPositionsWithEvents, getBulkPositionChartData, ChartDataResponse } from '../services/positionsService';
 import PositionComparisonCard from '../components/PositionComparisonCard';
 import ComparisonTable from '../components/ComparisonTable';
 import PositionPriceChart from '../components/PositionPriceChart';
@@ -57,7 +57,9 @@ const PositionComparison: React.FC = () => {
     const loadPositions = async () => {
       try {
         setLoading(true);
-        const positions = await getAllPositions({ limit: 100000 });
+        const positions = await getAllPositionsWithEvents({ limit: 100000 });
+        console.log('Loaded positions with events:', positions);
+        console.log('First position events:', positions[0]?.events);
         setAllPositions(positions);
 
         // Check for pre-selected positions from URL params
@@ -446,6 +448,7 @@ const PositionComparison: React.FC = () => {
                     priceData={chartData?.price_data || []}
                     entryDate={chartData?.entry_date}
                     exitDate={chartData?.exit_date}
+                    events={position.events || []}
                     loading={chartLoading}
                     error={!chartLoading && !hasChartData ? 'Unable to load chart data' : undefined}
                   />
