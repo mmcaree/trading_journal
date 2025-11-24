@@ -1,6 +1,6 @@
 from pydantic import BaseModel
 from datetime import datetime
-from typing import Optional, List
+from typing import Optional, List, Dict, Any
 from enum import Enum
 
 class TradeType(str, Enum):
@@ -389,3 +389,61 @@ class TradeEntryUpdateResponse(BaseModel):
     id: int
     success: bool
     message: str
+
+
+# ============================================================================
+# Broker Import Schemas
+# ============================================================================
+
+class BrokerInfo(BaseModel):
+    """Information about a supported broker"""
+    name: str
+    display_name: str
+    default_currency: str
+
+
+class BrokerListResponse(BaseModel):
+    """List of all supported brokers"""
+    brokers: List[BrokerInfo]
+
+
+class ColumnMappingRequest(BaseModel):
+    """Custom column mapping for CSV import"""
+    symbol: str
+    action: str
+    quantity: str
+    price: str
+    date: str
+    time: Optional[str] = None
+    commission: Optional[str] = None
+    status: Optional[str] = None
+    stop_loss: Optional[str] = None
+    take_profit: Optional[str] = None
+
+
+class ImportValidationResponse(BaseModel):
+    """CSV validation response"""
+    valid: bool
+    broker_detected: Optional[str] = None
+    broker_display_name: Optional[str] = None
+    total_rows: Optional[int] = None
+    available_columns: Optional[List[str]] = None
+    column_map: Optional[Dict[str, Optional[str]]] = None
+    missing_fields: Optional[List[str]] = None
+    sample_data: Optional[List[Dict[str, Any]]] = None
+    error: Optional[str] = None
+
+
+class ImportResponse(BaseModel):
+    """CSV import response"""
+    success: bool
+    broker_detected: Optional[str] = None
+    broker_display_name: Optional[str] = None
+    imported_events: Optional[int] = None
+    total_positions: Optional[int] = None
+    open_positions: Optional[int] = None
+    errors: Optional[List[Dict[str, Any]]] = None
+    warnings: Optional[List[str]] = None
+    error: Optional[str] = None
+    available_columns: Optional[List[str]] = None
+    column_map: Optional[Dict[str, Optional[str]]] = None

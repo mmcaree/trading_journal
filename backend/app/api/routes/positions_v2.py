@@ -156,6 +156,41 @@ class PendingOrderResponse(BaseModel):
 router = APIRouter(prefix="/positions", tags=["positions-v2"])
 
 
+# === Universal Import System - Broker Information ===
+# NOTE: These routes MUST come before /{position_id} routes to avoid path conflicts
+
+from app.services.universal_import_service import UniversalImportService
+from app.services.broker_profiles import list_all_brokers, generate_csv_template, get_broker_profile
+from app.models.schemas import BrokerListResponse, BrokerInfo, ImportValidationResponse
+from fastapi.responses import PlainTextResponse
+
+@router.get("/brokers", response_model=BrokerListResponse)
+async def get_supported_brokers():
+    """Get list of all supported broker formats"""
+    brokers = list_all_brokers()
+    return BrokerListResponse(
+        brokers=[BrokerInfo(**broker) for broker in brokers]
+    )
+
+
+@router.get("/brokers/{broker_name}/template", response_class=PlainTextResponse)
+async def download_broker_template(broker_name: str):
+    """Download CSV template for a specific broker format"""
+    broker_profile = get_broker_profile(broker_name)
+    if not broker_profile:
+        raise NotFoundException(f"Broker '{broker_name}' not found")
+    
+    template_content = generate_csv_template(broker_profile)
+    
+    return PlainTextResponse(
+        content=template_content,
+        media_type="text/csv",
+        headers={
+            "Content-Disposition": f'attachment; filename="{broker_name}_template.csv"'
+        }
+    )
+
+
 # === Position Management ===
 
 @router.post("/", response_model=PositionResponse, status_code=201)
@@ -943,6 +978,108 @@ async def validate_csv(
                 'error': str(e),
                 'total_events': 0
             }
+            
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise InternalServerException(f"Validation failed: {str(e)}")
+
+
+# === Universal Import System - CSV Import Routes ===
+
+from fastapi import UploadFile, File
+
+@router.post("/import/universal", response_model=ImportResponse)
+async def import_universal_csv(
+    file: UploadFile = File(...),
+    broker: Optional[str] = None,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    """
+    Universal CSV import supporting multiple broker formats.
+    
+    Optionally specify broker name to skip auto-detection.
+    Supported brokers: webull_usa, webull_au, robinhood, td_ameritrade, 
+    interactive_brokers, etrade, fidelity, charles_schwab
+    """
+    try:
+        # Validate file type
+        if not file.filename.endswith('.csv'):
+            raise BadRequestException("File must be a CSV file")
+        
+        # Read file content
+        content = await file.read()
+        csv_content = content.decode('utf-8')
+        
+        # Initialize universal import service
+        import_service = UniversalImportService(db)
+        
+        # Perform import
+        result = import_service.import_csv(
+            csv_content=csv_content,
+            user_id=current_user.id,
+            broker_name=broker
+        )
+        
+        if result['success']:
+            return ImportResponse(
+                success=True,
+                broker_detected=result.get('broker_detected'),
+                broker_display_name=result.get('broker_display_name'),
+                imported_events=result.get('imported_events'),
+                total_positions=result.get('total_positions'),
+                open_positions=result.get('open_positions'),
+                warnings=result.get('warnings', [])
+            )
+        else:
+            return ImportResponse(
+                success=False,
+                broker_detected=result.get('broker_detected'),
+                errors=result.get('errors'),
+                warnings=result.get('warnings', []),
+                error=result.get('error'),
+                available_columns=result.get('available_columns'),
+                column_map=result.get('column_map')
+            )
+            
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise InternalServerException(f"Universal import failed: {str(e)}")
+
+
+@router.post("/import/universal/validate", response_model=ImportValidationResponse)
+async def validate_universal_csv(
+    file: UploadFile = File(...),
+    broker: Optional[str] = None,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    """
+    Validate CSV file without importing (dry run).
+    
+    Returns detected broker, column mapping, and sample data preview.
+    """
+    try:
+        # Validate file type
+        if not file.filename.endswith('.csv'):
+            raise BadRequestException("File must be a CSV file")
+        
+        # Read file content
+        content = await file.read()
+        csv_content = content.decode('utf-8')
+        
+        # Initialize universal import service
+        import_service = UniversalImportService(db)
+        
+        # Validate CSV
+        result = import_service.validate_csv(
+            csv_content=csv_content,
+            broker_name=broker
+        )
+        
+        return ImportValidationResponse(**result)
             
     except HTTPException:
         raise
