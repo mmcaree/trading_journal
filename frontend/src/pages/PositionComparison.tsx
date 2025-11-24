@@ -91,7 +91,7 @@ const PositionComparison: React.FC = () => {
         const positionIds = selectedPositions.map(p => p.id);
         console.log('Loading chart data for positions:', positionIds);
         
-        const response = await getBulkPositionChartData(positionIds, 60, 30);
+        const response = await getBulkPositionChartData(positionIds, 120, 30);
         console.log('Chart data response:', response);
         
         // Convert array to map keyed by position_id

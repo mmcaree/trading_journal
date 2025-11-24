@@ -120,6 +120,9 @@ const PositionPriceChart: React.FC<PositionPriceChartProps> = ({
     });
     sma20Series.setData(sma20Data as any);
 
+    // Collect all markers
+    const markers: any[] = [];
+
     // Add entry marker with arrow
     if (entryDate) {
       const entryTime = Math.floor(parseISO(entryDate).getTime() / 1000);
@@ -136,17 +139,14 @@ const PositionPriceChart: React.FC<PositionPriceChartProps> = ({
         });
         
         // Add marker with arrow
-        candlestickSeries.setMarkers([
-          ...candlestickSeries.markers?.() || [],
-          {
-            time: entryTime as any,
-            position: 'belowBar',
-            color: '#4caf4f',
-            shape: 'arrowUp',
-            text: 'Entry',
-            size: 1,
-          },
-        ]);
+        markers.push({
+          time: entryTime as any,
+          position: 'belowBar',
+          color: '#4caf4f',
+          shape: 'arrowUp',
+          text: 'Entry',
+          size: 1,
+        });
       }
     }
 
@@ -166,19 +166,20 @@ const PositionPriceChart: React.FC<PositionPriceChartProps> = ({
         });
         
         // Add marker with arrow
-        const existingMarkers = candlestickSeries.markers?.() || [];
-        candlestickSeries.setMarkers([
-          ...existingMarkers,
-          {
-            time: exitTime as any,
-            position: 'aboveBar',
-            color: '#f44336',
-            shape: 'arrowDown',
-            text: 'Exit',
-            size: 1,
-          },
-        ]);
+        markers.push({
+          time: exitTime as any,
+          position: 'aboveBar',
+          color: '#f44336',
+          shape: 'arrowDown',
+          text: 'Exit',
+          size: 1,
+        });
       }
+    }
+
+    // Set all markers at once
+    if (markers.length > 0) {
+      candlestickSeries.setMarkers(markers);
     }
 
     // Fit content

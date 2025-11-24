@@ -81,11 +81,6 @@ const ComparisonTable: React.FC<ComparisonTableProps> = ({ positions }) => {
       highlightBest: false
     },
     {
-      label: 'Current/Final Shares',
-      getValue: (p) => p.current_shares,
-      highlightBest: false
-    },
-    {
       label: 'Total Cost',
       getValue: (p) => p.total_cost,
       format: (v) => formatCurrency(v),
@@ -96,12 +91,6 @@ const ComparisonTable: React.FC<ComparisonTableProps> = ({ positions }) => {
       getValue: (p) => calculateDaysHeld(p),
       format: (v) => `${v} days`,
       highlightBest: false
-    },
-    {
-      label: 'Risk/Reward Ratio',
-      getValue: (p) => calculateRiskRewardRatio(p),
-      format: (v) => v > 0 ? `1:${v.toFixed(2)}` : 'N/A',
-      highlightBest: true
     },
     {
       label: 'Strategy',
