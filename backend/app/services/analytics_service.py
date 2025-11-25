@@ -232,7 +232,14 @@ def get_setup_performance(
 
 
 def _calculate_streaks(positions: List[TradingPosition]) -> Tuple[int, int, int, int]:
-    """Returns (current_win_streak, current_loss_streak, max_win_streak, max_loss_streak)"""
+    """
+    Calculate consecutive win/loss streaks from a list of positions.
+    
+    Algorithm: Iterate through positions in order, track consecutive wins/losses,
+    and update max streaks whenever the streak type changes (win→loss or loss→win).
+    
+    Returns (current_win_streak, current_loss_streak, max_win_streak, max_loss_streak)
+    """
     if not positions:
         return 0, 0, 0, 0
 
@@ -281,7 +288,21 @@ def get_advanced_performance_metrics(
     end_date: Optional[str] = None
 ) -> Dict[str, Any]:
     """
-    FULL advanced analytics endpoint — now includes Kelly, streaks, Sortino, Calmar, etc.
+    Calculate comprehensive advanced performance metrics including risk-adjusted returns,
+    drawdown analysis, and trading quality metrics.
+    
+    Metrics calculated:
+    - Max Drawdown: Maximum decline from peak to trough in portfolio value
+    - Sharpe Ratio: (Return - Risk-free rate) / Standard deviation * √252 (annualized)
+    - Sortino Ratio: Like Sharpe but uses only downside deviation * √252
+    - Calmar Ratio: Annualized return / Maximum drawdown percentage
+    - Kelly %: (Win% × Avg Win - Loss% × Avg Loss) / Avg Win (optimal position size)
+    - Expectancy: (Win% × Avg Win) - (Loss% × Avg Loss) (expected $ per trade)
+    - Recovery Factor: Net profit / Maximum drawdown
+    - Profit Factor: Gross profit / Gross loss
+    - Consecutive Win/Loss Streaks: Current and maximum streaks
+    
+    Returns float('inf') for ratios when denominator is zero.
     """
     query = db.query(TradingPosition).filter(
         TradingPosition.user_id == user_id,
@@ -378,8 +399,10 @@ def get_advanced_performance_metrics(
 
     # Calmar Ratio
     years = max(1, (dates[-1] - dates[0]).days / 365.25) if len(dates) > 1 else 1
-    annualized_return = (equity_curve[-1] / 10000) ** (1 / years) - 1 if equity_curve else 0  # rough estimate
-    calmar = abs(annualized_return / (max_dd / peak)) if max_dd > 0 and annualized_return != 0 else 999
+    # Use first equity point as starting capital, or 10000 as fallback
+    starting_capital = abs(equity_curve[0]) if equity_curve and equity_curve[0] != 0 else 10000
+    annualized_return = ((equity_curve[-1] + starting_capital) / starting_capital) ** (1 / years) - 1 if equity_curve and starting_capital > 0 else 0
+    calmar = abs(annualized_return / (max_dd / peak)) if max_dd > 0 and peak > 0 and annualized_return != 0 else float('inf')
 
     # Kelly Criterion (%)
     win_prob = win_rate / 100.0
@@ -394,10 +417,10 @@ def get_advanced_performance_metrics(
     expectancy = (win_prob * avg_win) - (loss_prob * avg_loss)
 
     # Recovery Factor
-    recovery_factor = abs(total_pnl / max_dd) if max_dd != 0 else 999
+    recovery_factor = abs(total_pnl / max_dd) if max_dd > 0 else float('inf')
 
     # Profit Factor
-    profit_factor = gross_profit / gross_loss if gross_loss > 0 else 999
+    profit_factor = gross_profit / gross_loss if gross_loss > 0 else float('inf')
 
     # Streaks
     curr_win, curr_loss, max_win, max_loss = _calculate_streaks(positions)
@@ -420,19 +443,26 @@ def get_advanced_performance_metrics(
         for k, v in sorted(monthly.items())
     ]
 
+    # Helper function to handle infinity values for JSON serialization
+    def json_safe_value(value, default=None):
+        """Convert infinity to None or default value for JSON compatibility"""
+        if value == float('inf') or value == float('-inf'):
+            return default
+        return value
+
     return {
         "total_trades": len(positions),
         "total_pnl": round(total_pnl, 2),
         "win_rate": round(win_rate, 2),
-        "profit_factor": round(profit_factor, 2),
+        "profit_factor": json_safe_value(round(profit_factor, 2) if profit_factor != float('inf') else profit_factor, None),
         "max_drawdown": round(max_dd, 2),
         "max_drawdown_percent": round(max_dd_percent, 2),
         "sharpe_ratio": round(sharpe, 2),
         "sortino_ratio": round(sortino, 2),
-        "calmar_ratio": round(calmar, 2) if calmar != 999 else 999,
+        "calmar_ratio": json_safe_value(round(calmar, 2) if calmar != float('inf') else calmar, None),
         "kelly_percentage": kelly_percentage,
         "expectancy": round(expectancy, 2),
-        "recovery_factor": round(recovery_factor, 2) if recovery_factor != 999 else 999,
+        "recovery_factor": json_safe_value(round(recovery_factor, 2) if recovery_factor != float('inf') else recovery_factor, None),
         "consecutive_wins": curr_win,
         "consecutive_losses": curr_loss,
         "max_consecutive_wins": max_win,

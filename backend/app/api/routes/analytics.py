@@ -9,7 +9,7 @@ from app.models import User
 from app.utils.exceptions import NotFoundException, AppException
 from app.services.analytics_service import get_advanced_performance_metrics
 
-router = APIRouter(prefix="/analytics", tags=["analytics"])
+router = APIRouter(tags=["analytics"])
 
 
 @router.get("/performance", response_model=PerformanceMetrics)

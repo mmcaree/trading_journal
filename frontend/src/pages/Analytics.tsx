@@ -656,7 +656,7 @@ const Analytics: React.FC = () => {
   useEffect(() => {
     const loadAdvanced = async () => {
       try {
-        const res = await api.get('/api/analytics/analytics/advanced', {
+        const res = await api.get('/api/analytics/advanced', {
           params: selectedTimeScale !== 'ALL' ? {
             start_date: getTimeScaleDate(selectedTimeScale).toISOString(),
           } : {}
@@ -664,6 +664,7 @@ const Analytics: React.FC = () => {
         setAdvancedData(res.data);
       } catch (err) {
         console.error("Failed to load advanced analytics", err);
+        setAdvancedData(null);
       }
     };
     loadAdvanced();
@@ -846,8 +847,8 @@ const Analytics: React.FC = () => {
                         dataKey="cumulative" 
                         stroke={CHART_COLORS.primary}
                         strokeWidth={2}
-                        dot={{ fill: CHART_COLORS.primary, r: 4 }}
-                        activeDot={{ r: 6 }}
+                        dot={{ fill: CHART_COLORS.primary, r: 1 }}
+                        activeDot={{ r: 3 }}
                       />
                     </LineChart>
                   </ResponsiveContainer>
@@ -1179,9 +1180,9 @@ const Analytics: React.FC = () => {
                 </Tooltip>
                 <Typography 
                   variant="h5" 
-                  color={advancedData?.recoveryFactor > 3 ? 'success.main' : 'warning.main'}
+                  color={advancedData?.recovery_factor && advancedData.recovery_factor > 3 ? 'success.main' : 'warning.main'}
                 >
-                  {advancedData?.recoveryFactor === 999 ? '8' : advancedData?.recoveryFactor.toFixed(1)}
+                  {advancedData?.recovery_factor === null ? '∞' : advancedData?.recovery_factor?.toFixed(1) || 'N/A'}
                 </Typography>
                 <Typography variant="body2" color="text.secondary">
                   Net profit / Max DD
@@ -1222,8 +1223,8 @@ const Analytics: React.FC = () => {
                       Calmar Ratio ℹ️
                     </Typography>
                   </Tooltip>
-                  <Typography variant="h6" color={advancedData?.calmar_ratio > 1 ? 'success.main' : 'warning.main'}>
-                    {advancedData?.calmar_ratio === 999 ? '8' : advancedData?.calmar_ratio.toFixed(2)}
+                  <Typography variant="h6" color={advancedData?.calmar_ratio && advancedData.calmar_ratio > 1 ? 'success.main' : 'warning.main'}>
+                    {advancedData?.calmar_ratio === null ? '∞' : advancedData?.calmar_ratio?.toFixed(2) || 'N/A'}
                   </Typography>
                 </Grid>
                 <Grid item xs={6}>
@@ -1252,8 +1253,8 @@ const Analytics: React.FC = () => {
                       Profit Factor ℹ️
                     </Typography>
                   </Tooltip>
-                  <Typography variant="h6" color={advancedData?.profit_factor > 1.5 ? 'success.main' : 'warning.main'}>
-                    {advancedData?.profit_factor.toFixed(2)}
+                  <Typography variant="h6" color={advancedData?.profit_factor && advancedData.profit_factor > 1.5 ? 'success.main' : 'warning.main'}>
+                    {advancedData?.profit_factor === null ? '∞' : advancedData?.profit_factor?.toFixed(2) || 'N/A'}
                   </Typography>
                 </Grid>
               </Grid>
