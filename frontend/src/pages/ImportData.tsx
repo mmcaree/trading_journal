@@ -48,6 +48,13 @@ const ImportData: React.FC = () => {
         </Typography>
       </Alert>
 
+      {/* Options Trading Disclaimer */}
+      <Alert severity="warning" sx={{ mb: 4 }}>
+        <Typography variant="body2">
+          <strong>Note:</strong> Importing options trades is not currently supported. Options trades will need to be input manually until I get access to more broker data for options formatting.
+        </Typography>
+      </Alert>
+
       {/* Main Import Card */}
       <Card elevation={3}>
         <CardContent sx={{ p: 4 }}>
