@@ -58,8 +58,6 @@ const PositionComparison: React.FC = () => {
       try {
         setLoading(true);
         const positions = await getAllPositionsWithEvents({ limit: 100000 });
-        console.log('Loaded positions with events:', positions);
-        console.log('First position events:', positions[0]?.events);
         setAllPositions(positions);
 
         // Check for pre-selected positions from URL params
@@ -91,23 +89,17 @@ const PositionComparison: React.FC = () => {
       try {
         setChartLoading(true);
         const positionIds = selectedPositions.map(p => p.id);
-        console.log('Loading chart data for positions:', positionIds);
         
         const response = await getBulkPositionChartData(positionIds, 120, 30);
-        console.log('Chart data response:', response);
         
         // Convert array to map keyed by position_id
         const dataMap: Record<number, ChartDataResponse> = {};
         response.charts.forEach(chart => {
-          console.log(`Chart for position ${chart.position_id}:`, chart);
           if (!chart.error) {
             dataMap[chart.position_id] = chart;
-          } else {
-            console.error(`Error loading chart for position ${chart.position_id}:`, chart.error);
           }
         });
         
-        console.log('Chart data map:', dataMap);
         setChartDataMap(dataMap);
       } catch (err) {
         console.error('Error loading chart data:', err);

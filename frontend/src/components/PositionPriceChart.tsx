@@ -126,19 +126,12 @@ const PositionPriceChart: React.FC<PositionPriceChartProps> = ({
     // Collect all markers from events
     const markers: any[] = [];
 
-    console.log('Events for chart:', events);
-    console.log('Entry date:', entryDate);
-    console.log('Exit date:', exitDate);
-
     // If we have events, use them to create markers
     if (events && events.length > 0) {
-      console.log('Using events to create markers');
       events.forEach((event, index) => {
         const eventDate = event.event_date.split('T')[0]; // Get just the date part (YYYY-MM-DD)
         const eventTime = Math.floor(parseISO(eventDate).getTime() / 1000);
         const eventDataPoint = chartData.find(d => d.time === eventTime);
-        
-        console.log(`Event ${index}: ${event.event_type} on ${eventDate}, time: ${eventTime}, found: ${!!eventDataPoint}`);
         
         if (eventDataPoint) {
           const isBuy = event.event_type === 'buy';
@@ -179,7 +172,6 @@ const PositionPriceChart: React.FC<PositionPriceChartProps> = ({
       });
     } else {
       // Fallback to entry/exit dates if no events available
-      console.log('No events available, using fallback to entry/exit dates');
       if (entryDate) {
         const entryTime = Math.floor(parseISO(entryDate).getTime() / 1000);
         const entryDataPoint = chartData.find(d => d.time === entryTime);
