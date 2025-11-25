@@ -358,13 +358,16 @@ class UniversalImportService:
                 broker_detected = broker_profile.name if broker_profile else None
             
             # Build validation response
+            # Replace NaN values with None for JSON serialization
+            sample_df = df.head(3).fillna(value='')
+            
             result = {
                 'valid': broker_profile is not None,
                 'broker_detected': broker_detected,
                 'broker_display_name': broker_profile.display_name if broker_profile else None,
                 'total_rows': len(df),
                 'available_columns': list(df.columns),
-                'sample_data': df.head(3).to_dict('records')
+                'sample_data': sample_df.to_dict('records')
             }
             
             if broker_profile:
