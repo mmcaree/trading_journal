@@ -656,7 +656,7 @@ const Analytics: React.FC = () => {
   useEffect(() => {
     const loadAdvanced = async () => {
       try {
-        const res = await api.get('/api/analytics/advanced', {
+        const res = await api.get('/api/analytics/analytics/advanced', {
           params: selectedTimeScale !== 'ALL' ? {
             start_date: getTimeScaleDate(selectedTimeScale).toISOString(),
           } : {}
@@ -957,8 +957,8 @@ const Analytics: React.FC = () => {
                   </Grid>
                   <Grid item xs={12} sm={6} md={3}>
                     <Box textAlign="center">
-                      <Typography variant="h6" color={advancedData?.kellyPercentage > 0 ? 'success.main' : 'error.main'}>
-                        {advancedData?.kellyPercentage.toFixed(1)}%
+                      <Typography variant="h6" color={advancedData?.kelly_percentage > 0 ? 'success.main' : 'error.main'}>
+                        {advancedData?.kelly_percentage.toFixed(1)}%
                       </Typography>
                       <Tooltip title="Optimal position size for maximizing long-term growth. Formula: (Win% × Avg Win - Loss% × Avg Loss) / Avg Win. Values > 2% suggest good edge">
                         <Typography variant="body2" color="text.secondary" sx={{ cursor: 'help' }}>
@@ -1158,9 +1158,9 @@ const Analytics: React.FC = () => {
                 </Tooltip>
                 <Typography 
                   variant="h5" 
-                  color={advancedData?.sharpeRatio > 1 ? 'success.main' : advancedData?.sharpeRatio > 0 ? 'warning.main' : 'error.main'}
+                  color={advancedData?.sharpe_ratio > 1 ? 'success.main' : advancedData?.sharpe_ratio > 0 ? 'warning.main' : 'error.main'}
                 >
-                  {advancedData?.sharpeRatio.toFixed(2)}
+                  {advancedData?.sharpe_ratio.toFixed(2)}
                 </Typography>
                 <Typography variant="body2" color="text.secondary">
                   Risk-adjusted return
@@ -1200,9 +1200,9 @@ const Analytics: React.FC = () => {
                 </Tooltip>
                 <Typography 
                   variant="h5" 
-                  color={advancedData?.kellyPercentage > 0 ? 'success.main' : 'error.main'}
+                  color={advancedData?.kelly_percentage > 0 ? 'success.main' : 'error.main'}
                 >
-                  {advancedData?.kellyPercentage.toFixed(1)}%
+                  {advancedData?.kelly_percentage.toFixed(1)}%
                 </Typography>
                 <Typography variant="body2" color="text.secondary">
                   Optimal position size
