@@ -3,14 +3,18 @@ NEW Analytics Service using v2 Position Models
 Replaces analytics_service.py with TradingPosition + TradingPositionEvent based calculations
 """
 from sqlalchemy.orm import Session
-from typing import List, Optional
+from typing import List, Optional, Dict, Any, Tuple
+import numpy as np
 from datetime import datetime
 from sqlalchemy import func, and_
+from collections import defaultdict
+import statistics
 
 from app.models.position_models import TradingPosition, TradingPositionEvent, PositionStatus, EventType
 from app.models.schemas import PerformanceMetrics, SetupPerformance
 
-def get_performance_metrics(
+
+def get_performance_metrics( 
     db: Session, 
     user_id: int,
     start_date: Optional[str] = None,
@@ -225,3 +229,217 @@ def get_setup_performance(
     setup_performances.sort(key=lambda x: x.total_trades, reverse=True)
     
     return setup_performances
+
+
+def _calculate_streaks(positions: List[TradingPosition]) -> Tuple[int, int, int, int]:
+    """Returns (current_win_streak, current_loss_streak, max_win_streak, max_loss_streak)"""
+    if not positions:
+        return 0, 0, 0, 0
+
+    current_win = 0
+    current_loss = 0
+    max_win = 0
+    max_loss = 0
+
+    for i, pos in enumerate(positions):
+        pnl = pos.total_realized_pnl or 0
+        is_win = pnl > 0
+
+        if i == 0:
+            if is_win:
+                current_win = 1
+            else:
+                current_loss = 1
+        else:
+            prev_was_win = positions[i-1].total_realized_pnl > 0
+            if is_win == prev_was_win:
+                if is_win:
+                    current_win += 1
+                else:
+                    current_loss += 1
+            else:
+                if current_win > max_win:
+                    max_win = current_win
+                if current_loss > max_loss:
+                    max_loss = current_loss
+                current_win = 1 if is_win else 0
+                current_loss = 1 if not is_win else 0
+
+    # Final update for max streaks
+    if current_win > max_win:
+        max_win = current_win
+    if current_loss > max_loss:
+        max_loss = current_loss
+
+    return current_win, current_loss, max_win, max_loss
+
+
+def get_advanced_performance_metrics(
+    db: Session,
+    user_id: int,
+    start_date: Optional[str] = None,
+    end_date: Optional[str] = None
+) -> Dict[str, Any]:
+    """
+    FULL advanced analytics endpoint — now includes Kelly, streaks, Sortino, Calmar, etc.
+    """
+    query = db.query(TradingPosition).filter(
+        TradingPosition.user_id == user_id,
+        TradingPosition.status == PositionStatus.CLOSED
+    )
+
+    if start_date:
+        try:
+            s = datetime.fromisoformat(start_date.replace('Z', '+00:00'))
+            query = query.filter(TradingPosition.closed_at >= s)
+        except ValueError:
+            pass
+    if end_date:
+        try:
+            e = datetime.fromisoformat(end_date.replace('Z', '+00:00'))
+            query = query.filter(TradingPosition.closed_at <= e)
+        except ValueError:
+            pass
+
+    positions = query.order_by(TradingPosition.closed_at.asc()).all()
+
+    if not positions:
+        return {
+            "total_trades": 0,
+            "total_pnl": 0.0,
+            "win_rate": 0.0,
+            "profit_factor": 0.0,
+            "max_drawdown": 0.0,
+            "max_drawdown_percent": 0.0,
+            "sharpe_ratio": 0.0,
+            "sortino_ratio": 0.0,
+            "calmar_ratio": 0.0,
+            "kelly_percentage": 0.0,
+            "expectancy": 0.0,
+            "recovery_factor": 0.0,
+            "consecutive_wins": 0,
+            "consecutive_losses": 0,
+            "max_consecutive_wins": 0,
+            "max_consecutive_losses": 0,
+            "monthly_returns": [],
+            "equity_curve": []
+        }
+
+    # === 1. Basic stats (reuse your existing function) ===
+    standard = get_performance_metrics(db, user_id, start_date, end_date)
+
+    total_pnl = standard.total_profit_loss
+    win_rate = standard.win_rate
+    avg_win = standard.average_profit
+    avg_loss = standard.average_loss or 1  # avoid div by zero
+    gross_profit = standard.total_profit_loss + abs(standard.total_profit_loss) if standard.total_profit_loss < 0 else standard.total_profit_loss
+    gross_loss = abs(standard.total_profit_loss - gross_profit)
+
+    # === 2. Daily P&L for equity curve & drawdown ===
+    daily_pnl = defaultdict(float)
+    for pos in positions:
+        if pos.closed_at:
+            day = pos.closed_at.date()
+            daily_pnl[day] += float(pos.total_realized_pnl or 0)
+
+    sorted_days = sorted(daily_pnl.items())
+    dates = [d[0] for d in sorted_days]
+    daily_returns = np.array([d[1] for d in sorted_days])
+
+    equity = 0.0
+    peak = 0.0
+    max_dd = 0.0
+    equity_curve = []
+
+    for pnl in daily_returns:
+        equity += pnl
+        equity_curve.append(round(equity, 2))
+        if equity > peak:
+            peak = equity
+        dd = peak - equity
+        if dd > max_dd:
+            max_dd = dd
+
+    max_dd_percent = (max_dd / peak * 100) if peak > 0 else 0
+
+    # === 3. Risk Metrics ===
+    # Sharpe (annualized, risk-free rate = 0)
+    if len(daily_returns) > 1 and daily_returns.std() != 0:
+        sharpe = (daily_returns.mean() / daily_returns.std()) * (252 ** 0.5)
+    else:
+        sharpe = 0.0
+
+    # Sortino (downside deviation only)
+    downside = daily_returns[daily_returns < 0]
+    if len(downside) > 0 and downside.std() != 0:
+        sortino = (daily_returns.mean() / downside.std()) * (252 ** 0.5)
+    else:
+        sortino = 0.0
+
+    # Calmar Ratio
+    years = max(1, (dates[-1] - dates[0]).days / 365.25) if len(dates) > 1 else 1
+    annualized_return = (equity_curve[-1] / 10000) ** (1 / years) - 1 if equity_curve else 0  # rough estimate
+    calmar = abs(annualized_return / (max_dd / peak)) if max_dd > 0 and annualized_return != 0 else 999
+
+    # Kelly Criterion (%)
+    win_prob = win_rate / 100.0
+    loss_prob = 1 - win_prob
+    if avg_win > 0:
+        kelly = (win_prob * avg_win - loss_prob * avg_loss) / avg_win
+        kelly_percentage = max(0.0, round(kelly * 100, 2))
+    else:
+        kelly_percentage = 0.0
+
+    # Expectancy
+    expectancy = (win_prob * avg_win) - (loss_prob * avg_loss)
+
+    # Recovery Factor
+    recovery_factor = abs(total_pnl / max_dd) if max_dd != 0 else 999
+
+    # Profit Factor
+    profit_factor = gross_profit / gross_loss if gross_loss > 0 else 999
+
+    # Streaks
+    curr_win, curr_loss, max_win, max_loss = _calculate_streaks(positions)
+
+    # Monthly returns (unchanged)
+    monthly = defaultdict(lambda: {"pnl": 0.0, "trades": 0})
+    for pos in positions:
+        if pos.closed_at:
+            key = pos.closed_at.strftime("%Y-%m")
+            monthly[key]["pnl"] += float(pos.total_realized_pnl or 0)
+            monthly[key]["trades"] += 1
+
+    monthly_returns = [
+        {
+            "month": k,
+            "monthName": datetime.strptime(k, "%Y-%m").strftime("%b %Y"),
+            "pnl": round(v["pnl"], 2),
+            "trades": v["trades"]
+        }
+        for k, v in sorted(monthly.items())
+    ]
+
+    return {
+        "total_trades": len(positions),
+        "total_pnl": round(total_pnl, 2),
+        "win_rate": round(win_rate, 2),
+        "profit_factor": round(profit_factor, 2),
+        "max_drawdown": round(max_dd, 2),
+        "max_drawdown_percent": round(max_dd_percent, 2),
+        "sharpe_ratio": round(sharpe, 2),
+        "sortino_ratio": round(sortino, 2),
+        "calmar_ratio": round(calmar, 2) if calmar != 999 else 999,
+        "kelly_percentage": kelly_percentage,
+        "expectancy": round(expectancy, 2),
+        "recovery_factor": round(recovery_factor, 2) if recovery_factor != 999 else 999,
+        "consecutive_wins": curr_win,
+        "consecutive_losses": curr_loss,
+        "max_consecutive_wins": max_win,
+        "max_consecutive_losses": max_loss,
+        "monthly_returns": monthly_returns,
+        "equity_curve": [
+            {"date": d.strftime("%Y-%m-%d"), "equity": e}
+            for d, e in zip(dates, equity_curve)
+        ]
+    }

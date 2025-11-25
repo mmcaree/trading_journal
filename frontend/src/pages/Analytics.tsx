@@ -55,6 +55,7 @@ import {
 } from '../utils/analyticsUtils';
 import { getTickerSector } from '../utils/tickerSectorMapping';
 import { CHART_COLORS, PIE_CHART_COLORS, currencyTickFormatter, CustomTooltip } from '../components/CustomChartComponents';
+import api from '../services/apiConfig';
 
 interface AnalyticsMetrics {
   totalTrades: number;
@@ -96,14 +97,8 @@ const Analytics: React.FC = () => {
   const [accountBalance, setAccountBalance] = useState(0);
   const [selectedTimeScale, setSelectedTimeScale] = useState<TimeScale>('ALL');
   const { formatCurrency } = useCurrency();
-
-  // Advanced metrics state
-  const [advancedMetrics, setAdvancedMetrics] = useState<{
-    risk: RiskMetrics;
-    timeBased: TimeBasedMetrics;
-    portfolio: PortfolioMetrics;
-    entryExit: EntryExitMetrics;
-  } | null>(null);
+  
+  const [advancedData, setAdvancedData] = useState<any>(null);
 
   useEffect(() => {
     loadAnalyticsData();
@@ -658,14 +653,21 @@ const Analytics: React.FC = () => {
     };
   }, [filteredPositions]);
 
-  // Calculate advanced metrics whenever filtered positions change
   useEffect(() => {
-    if (filteredPositions.length > 0) {
-      // Use positions with events for more accurate metrics (positions already includes events)
-      const metrics = calculateAllMetrics(positions, accountBalance || 10000);
-      setAdvancedMetrics(metrics);
-    }
-  }, [filteredPositions, positions, accountBalance]);
+    const loadAdvanced = async () => {
+      try {
+        const res = await api.get('/api/analytics/advanced', {
+          params: selectedTimeScale !== 'ALL' ? {
+            start_date: getTimeScaleDate(selectedTimeScale).toISOString(),
+          } : {}
+        });
+        setAdvancedData(res.data);
+      } catch (err) {
+        console.error("Failed to load advanced analytics", err);
+      }
+    };
+    loadAdvanced();
+  }, [selectedTimeScale]);
 
   if (loading) {
     return (
@@ -784,9 +786,9 @@ const Analytics: React.FC = () => {
                 </Tooltip>
                 <Typography 
                   variant="h4" 
-                  color={advancedMetrics && advancedMetrics.risk.winRate >= 50 ? 'success.main' : 'error.main'}
+                  color={advancedData && advancedData?.win_rate >= 50 ? 'success.main' : 'error.main'}
                 >
-                  {advancedMetrics ? `${advancedMetrics.risk.winRate.toFixed(1)}%` : 'N/A'}
+                  {advancedData ? `${advancedData.win_rate.toFixed(1)}%` : 'N/A'}
                 </Typography>
                 <Typography variant="body2" color="text.secondary">
                   Closed positions
@@ -805,10 +807,10 @@ const Analytics: React.FC = () => {
                 </Tooltip>
                 <Typography 
                   variant="h4" 
-                  color={advancedMetrics && advancedMetrics.risk.sharpeRatio > 1 ? 'success.main' : 
-                    advancedMetrics && advancedMetrics.risk.sharpeRatio > 0 ? 'warning.main' : 'error.main'}
+                  color={advancedData && advancedData?.sharpe_ratio > 1 ? 'success.main' : 
+                    advancedData && advancedData?.sharpe_ratio > 0 ? 'warning.main' : 'error.main'}
                 >
-                  {advancedMetrics ? advancedMetrics.risk.sharpeRatio.toFixed(2) : 'N/A'}
+                  {advancedData ? advancedData.sharpe_ratio.toFixed(2) : 'N/A'}
                 </Typography>
                 <Typography variant="body2" color="text.secondary">
                   Risk-adjusted return
@@ -897,16 +899,54 @@ const Analytics: React.FC = () => {
             </Paper>
           </Grid>
 
+          {/* Monthly Performance Chart */}
+          <Grid item xs={12}>
+            <Paper sx={{ p: 3 }}>
+              <Typography variant="h6" gutterBottom>
+                Monthly Performance
+              </Typography>
+              {advancedData?.monthly_returns && advancedData.monthly_returns.length > 0 ? (
+                <Box sx={{ height: 400 }}>
+                  <ResponsiveContainer width="100%" height="100%">
+                    <BarChart data={advancedData.monthly_returns}>
+                      <CartesianGrid strokeDasharray="3 3" />
+                      <XAxis 
+                        dataKey="monthName" 
+                        angle={-45} 
+                        textAnchor="end" 
+                        height={80}
+                      />
+                      <YAxis tickFormatter={(v) => `$${v.toLocaleString()}`} />
+                      <RechartsTooltip 
+                        formatter={(value: number) => `$${value.toLocaleString()}`}
+                        labelFormatter={(label) => `${label}`}
+                      />
+                      <Bar dataKey="pnl" name="P&L">
+                        {advancedData.monthly_returns.map((entry: any, i: number) => (
+                          <Cell key={`cell-${i}`} fill={entry.pnl >= 0 ? '#2e7d32' : '#d32f2f'} />
+                        ))}
+                      </Bar>
+                    </BarChart>
+                  </ResponsiveContainer>
+                </Box>
+              ) : (
+                <Box sx={{ height: 400, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                  <Typography color="text.secondary">No monthly data yet</Typography>
+                </Box>
+              )}
+            </Paper>
+          </Grid>
+
           {/* Risk Metrics Summary */}
-          {advancedMetrics && (
+          {advancedData && (
             <Grid item xs={12}>
               <Paper sx={{ p: 3 }}>
                 <Typography variant="h6" gutterBottom>Risk Summary</Typography>
                 <Grid container spacing={2}>
                   <Grid item xs={12} sm={6} md={3}>
                     <Box textAlign="center">
-                      <Typography variant="h6" color={advancedMetrics.risk.maxDrawdownPercent > -20 ? 'success.main' : 'error.main'}>
-                        -{advancedMetrics.risk.maxDrawdownPercent.toFixed(1)}%
+                      <Typography variant="h6" color={advancedData?.max_drawdown_percent > -20 ? 'success.main' : 'error.main'}>
+                        -{advancedData?.max_drawdown_percent.toFixed(1)}%
                       </Typography>
                       <Tooltip title="Maximum decline in portfolio value from peak to trough. Calculated using event-based portfolio timeline including all realized P&L from sell events.">
                         <Typography variant="body2" color="text.secondary" sx={{ cursor: 'help' }}>
@@ -917,8 +957,8 @@ const Analytics: React.FC = () => {
                   </Grid>
                   <Grid item xs={12} sm={6} md={3}>
                     <Box textAlign="center">
-                      <Typography variant="h6" color={advancedMetrics.risk.kellyPercentage > 0 ? 'success.main' : 'error.main'}>
-                        {advancedMetrics.risk.kellyPercentage.toFixed(1)}%
+                      <Typography variant="h6" color={advancedData?.kellyPercentage > 0 ? 'success.main' : 'error.main'}>
+                        {advancedData?.kellyPercentage.toFixed(1)}%
                       </Typography>
                       <Tooltip title="Optimal position size for maximizing long-term growth. Formula: (Win% × Avg Win - Loss% × Avg Loss) / Avg Win. Values > 2% suggest good edge">
                         <Typography variant="body2" color="text.secondary" sx={{ cursor: 'help' }}>
@@ -1053,13 +1093,13 @@ const Analytics: React.FC = () => {
                   </Alert>
                 </Grid>
                 <Grid item xs={12} md={4}>
-                  <Alert severity={advancedMetrics && advancedMetrics.risk.winRate >= 60 ? 'success' : 
-                    advancedMetrics && advancedMetrics.risk.winRate >= 40 ? 'warning' : 'error'}>
+                  <Alert severity={advancedData && advancedData?.win_rate >= 60 ? 'success' : 
+                    advancedData && advancedData?.win_rate >= 40 ? 'warning' : 'error'}>
                     <Typography variant="subtitle2">Trading Performance</Typography>
                     <Typography variant="body2">
-                      {advancedMetrics ? `${advancedMetrics.risk.winRate.toFixed(1)}% win rate` : 'N/A'} 
-                      {advancedMetrics && advancedMetrics.risk.winRate >= 40 ? ' - Excellent!' : 
-                       advancedMetrics && advancedMetrics.risk.winRate >= 30 ? ' - Good' : ' - Needs improvement'}
+                      {advancedData ? `${advancedData?.win_rate.toFixed(1)}% win rate` : 'N/A'} 
+                      {advancedData && advancedData?.win_rate >= 40 ? ' - Excellent!' : 
+                       advancedData && advancedData?.win_rate >= 30 ? ' - Good' : ' - Needs improvement'}
                     </Typography>
                   </Alert>
                 </Grid>
@@ -1081,7 +1121,7 @@ const Analytics: React.FC = () => {
       )}
 
       {/* Risk Management Tab */}
-      {tabValue === 1 && advancedMetrics && (
+      {tabValue === 1 && advancedData && (
         <Grid container spacing={3}>
           <Grid item xs={12}>
             <Typography variant="h5" gutterBottom sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
@@ -1099,10 +1139,10 @@ const Analytics: React.FC = () => {
                   </Typography>
                 </Tooltip>
                 <Typography variant="h5" color="error.main">
-                  {formatCurrency(advancedMetrics.risk.maxDrawdown)}
+                  {formatCurrency(advancedData?.max_drawdown)}
                 </Typography>
                 <Typography variant="body2" color="text.secondary">
-                  {advancedMetrics.risk.maxDrawdownPercent.toFixed(1)}% of peak
+                  {advancedData?.max_drawdown_percent.toFixed(1)}% of peak
                 </Typography>
               </CardContent>
             </Card>
@@ -1118,9 +1158,9 @@ const Analytics: React.FC = () => {
                 </Tooltip>
                 <Typography 
                   variant="h5" 
-                  color={advancedMetrics.risk.sharpeRatio > 1 ? 'success.main' : advancedMetrics.risk.sharpeRatio > 0 ? 'warning.main' : 'error.main'}
+                  color={advancedData?.sharpeRatio > 1 ? 'success.main' : advancedData?.sharpeRatio > 0 ? 'warning.main' : 'error.main'}
                 >
-                  {advancedMetrics.risk.sharpeRatio.toFixed(2)}
+                  {advancedData?.sharpeRatio.toFixed(2)}
                 </Typography>
                 <Typography variant="body2" color="text.secondary">
                   Risk-adjusted return
@@ -1139,9 +1179,9 @@ const Analytics: React.FC = () => {
                 </Tooltip>
                 <Typography 
                   variant="h5" 
-                  color={advancedMetrics.risk.recoveryFactor > 3 ? 'success.main' : 'warning.main'}
+                  color={advancedData?.recoveryFactor > 3 ? 'success.main' : 'warning.main'}
                 >
-                  {advancedMetrics.risk.recoveryFactor === 999 ? '8' : advancedMetrics.risk.recoveryFactor.toFixed(1)}
+                  {advancedData?.recoveryFactor === 999 ? '8' : advancedData?.recoveryFactor.toFixed(1)}
                 </Typography>
                 <Typography variant="body2" color="text.secondary">
                   Net profit / Max DD
@@ -1160,9 +1200,9 @@ const Analytics: React.FC = () => {
                 </Tooltip>
                 <Typography 
                   variant="h5" 
-                  color={advancedMetrics.risk.kellyPercentage > 0 ? 'success.main' : 'error.main'}
+                  color={advancedData?.kellyPercentage > 0 ? 'success.main' : 'error.main'}
                 >
-                  {advancedMetrics.risk.kellyPercentage.toFixed(1)}%
+                  {advancedData?.kellyPercentage.toFixed(1)}%
                 </Typography>
                 <Typography variant="body2" color="text.secondary">
                   Optimal position size
@@ -1182,8 +1222,8 @@ const Analytics: React.FC = () => {
                       Calmar Ratio ℹ️
                     </Typography>
                   </Tooltip>
-                  <Typography variant="h6" color={advancedMetrics.risk.calmarRatio > 1 ? 'success.main' : 'warning.main'}>
-                    {advancedMetrics.risk.calmarRatio === 999 ? '8' : advancedMetrics.risk.calmarRatio.toFixed(2)}
+                  <Typography variant="h6" color={advancedData?.calmar_ratio > 1 ? 'success.main' : 'warning.main'}>
+                    {advancedData?.calmar_ratio === 999 ? '8' : advancedData?.calmar_ratio.toFixed(2)}
                   </Typography>
                 </Grid>
                 <Grid item xs={6}>
@@ -1192,8 +1232,8 @@ const Analytics: React.FC = () => {
                       Sortino Ratio ℹ️
                     </Typography>
                   </Tooltip>
-                  <Typography variant="h6" color={advancedMetrics.risk.sortinoRatio > 1 ? 'success.main' : 'warning.main'}>
-                    {advancedMetrics.risk.sortinoRatio.toFixed(2)}
+                  <Typography variant="h6" color={advancedData?.sortino_ratio > 1 ? 'success.main' : 'warning.main'}>
+                    {advancedData?.sortino_ratio.toFixed(2)}
                   </Typography>
                 </Grid>
                 <Grid item xs={6}>
@@ -1202,8 +1242,8 @@ const Analytics: React.FC = () => {
                       Expectancy ℹ️
                     </Typography>
                   </Tooltip>
-                  <Typography variant="h6" color={advancedMetrics.risk.expectancy > 0 ? 'success.main' : 'error.main'}>
-                    {formatCurrency(advancedMetrics.risk.expectancy)}
+                  <Typography variant="h6" color={advancedData?.expectancy > 0 ? 'success.main' : 'error.main'}>
+                    {formatCurrency(advancedData?.expectancy)}
                   </Typography>
                 </Grid>
                 <Grid item xs={6}>
@@ -1212,8 +1252,8 @@ const Analytics: React.FC = () => {
                       Profit Factor ℹ️
                     </Typography>
                   </Tooltip>
-                  <Typography variant="h6" color={advancedMetrics.risk.profitFactor > 1.5 ? 'success.main' : 'warning.main'}>
-                    {advancedMetrics.risk.profitFactor.toFixed(2)}
+                  <Typography variant="h6" color={advancedData?.profit_factor > 1.5 ? 'success.main' : 'warning.main'}>
+                    {advancedData?.profit_factor.toFixed(2)}
                   </Typography>
                 </Grid>
               </Grid>
@@ -1232,7 +1272,7 @@ const Analytics: React.FC = () => {
                     </Typography>
                   </Tooltip>
                   <Typography variant="h6" color="success.main">
-                    {advancedMetrics.risk.consecutiveWins}
+                    {advancedData?.consecutive_wins}
                   </Typography>
                 </Grid>
                 <Grid item xs={6}>
@@ -1242,7 +1282,7 @@ const Analytics: React.FC = () => {
                     </Typography>
                   </Tooltip>
                   <Typography variant="h6" color="error.main">
-                    {advancedMetrics.risk.consecutiveLosses}
+                    {advancedData?.consecutive_losses}
                   </Typography>
                 </Grid>
                 <Grid item xs={6}>
@@ -1252,7 +1292,7 @@ const Analytics: React.FC = () => {
                     </Typography>
                   </Tooltip>
                   <Typography variant="h6" color="success.main">
-                    {advancedMetrics.risk.maxConsecutiveWins}
+                    {advancedData?.max_consecutive_wins}
                   </Typography>
                 </Grid>
                 <Grid item xs={6}>
@@ -1262,7 +1302,7 @@ const Analytics: React.FC = () => {
                     </Typography>
                   </Tooltip>
                   <Typography variant="h6" color="error.main">
-                    {advancedMetrics.risk.maxConsecutiveLosses}
+                    {advancedData?.max_consecutive_losses}
                   </Typography>
                 </Grid>
               </Grid>
