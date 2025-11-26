@@ -136,7 +136,7 @@ const TradesList: React.FC = () => {
       setError(null);
       
       console.log('Loading all positions from new API...');
-      const positionsData = await getAllPositions({ limit: 1000 }); // Get all positions
+      const positionsData = await getAllPositions({ limit: 100000 }); // Get all positions
       console.log('Loaded positions:', positionsData);
       
       setPositions(positionsData);
