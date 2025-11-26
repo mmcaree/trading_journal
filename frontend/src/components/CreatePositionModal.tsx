@@ -222,7 +222,7 @@ const CreatePositionModal: React.FC<CreatePositionModalProps> = ({
       if (selectedTags.length > 0) {
         await Promise.all(
           selectedTags.map(tag =>
-            api.post(`/tags/positions/${newPosition.id}/assign/${tag.id}`).catch(() => {
+            api.post(`/api/tags/tags/positions/${newPosition.id}/assign/${tag.id}`).catch(() => {
             })
           )
         );

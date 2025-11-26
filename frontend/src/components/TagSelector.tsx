@@ -1,17 +1,12 @@
-import React from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   Autocomplete,
   TextField,
-  createFilterOptions,
+  Chip,
   Box,
+  createFilterOptions,
 } from '@mui/material';
-import {
-  useQuery,
-  useMutation,
-  useQueryClient,
-} from '@tanstack/react-query';
 import api from '../services/apiConfig';
-import TagChip from './TagChip';
 import { PositionTag } from '../types/api';
 
 interface TagSelectorProps {
@@ -22,37 +17,36 @@ interface TagSelectorProps {
 const filter = createFilterOptions<PositionTag>();
 
 export default function TagSelector({ selectedTags, onChange }: TagSelectorProps) {
-  const queryClient = useQueryClient();
+  const [availableTags, setAvailableTags] = useState<PositionTag[]>([]);
+  const [loading, setLoading] = useState(true);
 
-  const { data: availableTags = [] } = useQuery<PositionTag[]>({
-    queryKey: ['tags'],
-    queryFn: async () => {
-      const res = await api.get('/tags');
-      return res.data;
-    },
-  });
+  useEffect(() => {
+    api.get('/api/tags/tags/')
+      .then(res => {
+        setAvailableTags(res.data);
+        setLoading(false);
+      })
+      .catch(() => setLoading(false));
+  }, []);
 
-  const createTagMutation = useMutation({
-    mutationFn: async (name: string): Promise<PositionTag> => {
-      const res = await api.post('/tags', { name, color: '#1976d2' });
-      return res.data;
-    },
-    onSuccess: (newTag) => {
-      queryClient.setQueryData<PositionTag[]>(['tags'], (old = []) => [...old, newTag]);
-    },
-  });
+  const handleCreateTag = async (name: string) => {
+    const res = await api.post('/api/tags/tags/', { name, color: '#1976d2' });
+    const newTag = res.data;
+    setAvailableTags(prev => [...prev, newTag]);
+    return newTag;
+  };
 
   return (
     <Autocomplete
       multiple
       freeSolo
+      loading={loading}
       options={availableTags}
       value={selectedTags}
-      onChange={async (_event, newValue) => {
+      onChange={async (_e, newValue) => {
         const last = newValue[newValue.length - 1];
-
         if (typeof last === 'string' && last.trim()) {
-          const created = await createTagMutation.mutateAsync(last.trim());
+          const created = await handleCreateTag(last.trim());
           onChange([...selectedTags, created]);
         } else {
           onChange(newValue.filter((v): v is PositionTag => typeof v !== 'string'));
@@ -61,11 +55,8 @@ export default function TagSelector({ selectedTags, onChange }: TagSelectorProps
       filterOptions={(options, params) => {
         const filtered = filter(options, params);
         const { inputValue } = params;
-
         if (inputValue && inputValue.trim()) {
-          const exists = availableTags.some(
-            (t) => t.name.toLowerCase() === inputValue.trim().toLowerCase()
-          );
+          const exists = availableTags.some(t => t.name.toLowerCase() === inputValue.trim().toLowerCase());
           if (!exists) {
             filtered.push({
               id: -Date.now(),
@@ -76,37 +67,29 @@ export default function TagSelector({ selectedTags, onChange }: TagSelectorProps
         }
         return filtered;
       }}
-      getOptionLabel={(option) => (typeof option === 'string' ? option : option.name)}
-      isOptionEqualToValue={(option, value) => option.id === value.id}
-      renderTags={(tags, getTagProps) =>
-        tags.map((tag, index) => {
-          const { key, ...tagProps } = getTagProps({ index });
-          return (
-            <TagChip
-              key={typeof tag === 'string' ? tag : tag.id}
-              tag={tag as PositionTag}
-              onDelete={tagProps.onDelete as () => void}
-            />
-          );
-        })
+      getOptionLabel={(option) => typeof option === 'string' ? option : option.name}
+      isOptionEqualToValue={(o, v) => o.id === v.id}
+      renderTags={(tags) => 
+        tags.map(tag => (
+          <Chip
+            key={typeof tag === 'string' ? tag : tag.id}
+            label={typeof tag === 'string' ? tag : tag.name}
+            size="small"
+            sx={{
+              backgroundColor: typeof tag === 'object' ? tag.color : '#1976d2',
+              color: 'white',
+            }}
+          />
+        ))
       }
       renderInput={(params) => (
-        <TextField
-          {...params}
-          label="Tags"
-          placeholder="Type to add or create tags..."
-          variant="outlined"
-        />
+        <TextField {...params} label="Tags" placeholder="Add tags..." />
       )}
       renderOption={(props, option) => {
         const isNew = typeof option !== 'string' && option.id < 0;
         return (
           <Box component="li" {...props} key={typeof option === 'string' ? option : option.id}>
-            {isNew ? (
-              <em style={{ color: '#666' }}>Add "{typeof option === 'string' ? option : option.name}"</em>
-            ) : (
-              <TagChip tag={option as PositionTag} size="small" />
-            )}
+            {isNew ? `Add "${typeof option === 'string' ? option : option.name}"` : (typeof option === 'string' ? option : option.name)}
           </Box>
         );
       }}
