@@ -7,7 +7,7 @@ Uses PositionService for core business logic
 from fastapi import APIRouter, Depends, HTTPException, status, Query
 from typing import List, Optional, Dict, Any
 import json
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, joinedload
 from datetime import datetime
 
 from app.api.deps import get_db, get_current_user
@@ -88,6 +88,11 @@ class JournalEntryResponse(BaseModel):
     updated_at: datetime
     attached_images: Optional[List[Dict[str, str]]] = None
     attached_charts: Optional[List[int]] = None
+
+class TagResponse(BaseModel):
+    id: int
+    name: str
+    color: str
     
     class Config:
         from_attributes = True
@@ -117,6 +122,7 @@ class PositionResponse(BaseModel):
     original_shares: Optional[int]          # Shares when position opened
     account_value_at_entry: Optional[float] # Account value when opened
     events: Optional[List['EventResponse']] = None  # Optional events for analytics
+    tags: List[TagResponse] = []
 
 class EventResponse(BaseModel):
     id: int
@@ -293,96 +299,91 @@ def get_positions(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user)
 ):
-    """Get user's positions with optional filtering"""
-    position_service = PositionService(db)
-    
-    # Convert status string to enum
-    status_enum = None
+    query = db.query(TradingPosition) \
+        .filter(TradingPosition.user_id == current_user.id) \
+        .options(joinedload(TradingPosition.tags))
+
     if status_filter:
         try:
             status_enum = PositionStatus(status_filter.lower())
+            query = query.filter(TradingPosition.status == status_enum)
         except ValueError:
             raise BadRequestException(f"Invalid status: {status_filter}")
-    
-    # Get positions with events preloaded to avoid N+1 queries (only if requested)
-    positions = position_service.get_user_positions(
-        user_id=current_user.id,
-        status=status_enum,
-        ticker=ticker,
-        include_events=include_events
-    )
-    
-    # Apply additional filters
+
+    if ticker:
+        query = query.filter(TradingPosition.ticker.ilike(f"%{ticker}%"))
+
     if strategy:
-        positions = [p for p in positions if p.strategy == strategy]
-    
-    # Apply pagination
-    positions = positions[skip:skip + limit]
-    
-    # Format responses (events already loaded)
+        query = query.filter(TradingPosition.strategy == strategy)
+
+    if include_events:
+        query = query.options(joinedload(TradingPosition.events))
+
+    positions = query.order_by(TradingPosition.opened_at.desc()).all()[skip:skip + limit]
+
     responses = []
     for position in positions:
-        events_count = len(position.events) if hasattr(position, 'events') else 0
-        
-        # Calculate return percentage for closed positions
-        return_percent = None
-        if position.status.value == 'closed' and position.total_realized_pnl is not None:
-            # Calculate original investment from buy events
-            buy_events = [e for e in position.events if e.event_type.value == 'buy']
-            if buy_events and position.avg_entry_price:
-                total_shares_bought = sum(event.shares for event in buy_events)
-                original_investment = position.avg_entry_price * total_shares_bought
-                if original_investment > 0:
-                    return_percent = round((position.total_realized_pnl / original_investment) * 100, 2)
-        
-        # Include events in response if requested
-        events_list = None
-        if include_events and hasattr(position, 'events'):
-            events_list = [
-                EventResponse(
-                    id=event.id,
-                    event_type=event.event_type.value,
-                    event_date=event.event_date,
-                    shares=event.shares,
-                    price=event.price,
-                    stop_loss=event.stop_loss,
-                    take_profit=event.take_profit,
-                    notes=event.notes,
-                    source=event.source.value,
-                    realized_pnl=event.realized_pnl,
-                    position_shares_before=event.position_shares_before,
-                    position_shares_after=event.position_shares_after
-                )
-                for event in position.events
-            ]
+        tags_list = [
+            {"id": tag.id, "name": tag.name, "color": tag.color}
+            for tag in position.tags
+        ]
 
-        responses.append(PositionResponse(
-            id=position.id,
-            ticker=position.ticker,
-            strategy=position.strategy,
-            setup_type=position.setup_type,
-            timeframe=position.timeframe,
-            status=position.status.value,
-            current_shares=position.current_shares,
-            avg_entry_price=position.avg_entry_price,
-            total_cost=position.total_cost,
-            total_realized_pnl=position.total_realized_pnl,
-            current_stop_loss=position.current_stop_loss,
-            current_take_profit=position.current_take_profit,
-            opened_at=position.opened_at,
-            closed_at=position.closed_at,
-            notes=position.notes,
-            lessons=position.lessons,
-            mistakes=position.mistakes,
-            events_count=events_count,
-            return_percent=return_percent,
-            original_risk_percent=position.original_risk_percent,
-            current_risk_percent=position.current_risk_percent,
-            original_shares=position.original_shares,
-            account_value_at_entry=position.account_value_at_entry,
-            events=events_list
-        ))
-    
+        events_list = None
+        if include_events and hasattr(position, "events") and position.events:
+            events_list = []
+            for event in position.events:
+                events_list.append({
+                    "id": event.id,
+                    "event_type": event.event_type.value,
+                    "event_date": event.event_date,
+                    "shares": event.shares,
+                    "price": event.price,
+                    "stop_loss": event.stop_loss,
+                    "take_profit": event.take_profit,
+                    "notes": event.notes,
+                    "source": event.source.value,
+                    "realized_pnl": event.realized_pnl,
+                    "position_shares_before": event.position_shares_before,
+                    "position_shares_after": event.position_shares_after,
+                })
+
+        return_percent = None
+        if position.status == PositionStatus.CLOSED and position.total_realized_pnl:
+            buy_events = [e for e in (getattr(position, "events", []) if include_events else []) 
+                         if e.event_type == EventType.BUY]
+            if buy_events and position.avg_entry_price:
+                total_invested = sum(e.shares * e.price for e in buy_events)
+                if total_invested > 0:
+                    return_percent = round((position.total_realized_pnl / total_invested) * 100, 2)
+
+        responses.append({
+            "id": position.id,
+            "ticker": position.ticker,
+            "strategy": position.strategy,
+            "setup_type": position.setup_type,
+            "timeframe": position.timeframe,
+            "status": position.status.value,
+            "current_shares": position.current_shares,
+            "avg_entry_price": position.avg_entry_price,
+            "total_cost": position.total_cost,
+            "total_realized_pnl": position.total_realized_pnl,
+            "current_stop_loss": position.current_stop_loss,
+            "current_take_profit": position.current_take_profit,
+            "opened_at": position.opened_at,
+            "closed_at": position.closed_at,
+            "notes": position.notes,
+            "lessons": position.lessons,
+            "mistakes": position.mistakes,
+            "events_count": len(position.events) if include_events and hasattr(position, "events") else 0,
+            "return_percent": return_percent,
+            "original_risk_percent": position.original_risk_percent,
+            "current_risk_percent": position.current_risk_percent,
+            "original_shares": position.original_shares,
+            "account_value_at_entry": position.account_value_at_entry,
+            "events": events_list,
+            "tags": tags_list
+        })
+
     return responses
 
 @router.get("/{position_id}", response_model=PositionSummaryResponse)

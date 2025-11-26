@@ -4,7 +4,7 @@ New Position-Based Models for Ground-Up Rebuild
 Clean, event-sourced architecture with immutable history
 """
 
-from sqlalchemy import Column, Integer, String, Float, DateTime, Boolean, ForeignKey, Text, Enum
+from sqlalchemy import Column, Integer, String, Float, DateTime, Boolean, ForeignKey, Text, Enum, Table, UniqueConstraint
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import relationship
 import enum
@@ -299,3 +299,49 @@ class InstructorNote(Base):
     instructor = relationship("User", foreign_keys=[instructor_id])
     student = relationship("User", foreign_keys=[student_id])
     position = relationship("TradingPosition", back_populates="instructor_notes")
+
+
+position_tag_assignment = Table(
+    "position_tag_assignment",
+    Base.metadata,
+    Column("position_id", Integer, ForeignKey("trading_positions.id"), primary_key=True),
+    Column("tag_id", Integer, ForeignKey("position_tags.id"), primary_key=True),
+    Column("assigned_at", DateTime, default=datetime.utcnow),
+)
+
+class PositionTag(Base):
+    __tablename__ = "position_tags"
+
+    id = Column(Integer, primary_key=True, index=True)
+    name = Column(String, nullable=False)
+    color = Column(String, default="#1976d2")
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=False, index=True)
+
+    user = relationship("User", back_populates="position_tags")
+    positions = relationship(
+        "TradingPosition",
+        secondary=position_tag_assignment,
+        back_populates="tags"
+    )
+
+    __table_args__ = (
+        UniqueConstraint('name', 'user_id', name='uix_user_tag_name'),
+    )
+
+    def __repr__(self):
+        return f"<PositionTag {self.name} ({self.color})>"
+    
+
+TradingPosition.tags = relationship(
+    "PositionTag",
+    secondary=position_tag_assignment,
+    back_populates="positions",
+    lazy="joined"
+)
+
+User.position_tags = relationship(
+    "PositionTag",
+    back_populates="user",
+    cascade="all, delete-orphan",
+    lazy="selectin"
+)#

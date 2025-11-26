@@ -1,4 +1,4 @@
-import React, { useState, useCallback } from 'react';
+import React, { useState, useCallback, memo } from 'react';
 import {
   Box,
   Button,
@@ -101,7 +101,6 @@ const UniversalImportModal: React.FC<UniversalImportModalProps> = ({
 
   // Load brokers on mount
   React.useEffect(() => {
-    console.log('Modal open state changed:', open);
     if (open) {
       loadBrokers();
       // Reset state on open
@@ -121,9 +120,7 @@ const UniversalImportModal: React.FC<UniversalImportModalProps> = ({
 
   const loadBrokers = async () => {
     try {
-      console.log('Loading brokers from /api/v2/positions/brokers...');
       const response = await api.get<{ brokers: BrokerInfo[] }>('/api/v2/positions/brokers');
-      console.log('Brokers loaded:', response.data.brokers);
       setBrokers(response.data.brokers);
     } catch (err) {
       console.error('Failed to load brokers:', err);
@@ -205,8 +202,6 @@ const UniversalImportModal: React.FC<UniversalImportModalProps> = ({
         }
       );
 
-      console.log('Validation response:', response.data);
-      console.log('Selected broker was:', selectedBroker);
       setValidationResult(response.data);
       
       if (response.data.valid) {
@@ -312,8 +307,6 @@ const UniversalImportModal: React.FC<UniversalImportModalProps> = ({
   // =====================================================
 
   const renderFileUpload = () => {
-    console.log('Rendering file upload. Brokers count:', brokers.length, 'Selected:', selectedBroker);
-    
     return (
     <Box>
       {/* Broker Selection */}
@@ -632,4 +625,4 @@ const UniversalImportModal: React.FC<UniversalImportModalProps> = ({
   );
 };
 
-export default UniversalImportModal;
+export default memo(UniversalImportModal);

@@ -38,6 +38,7 @@ import UpdateStopLossModal from '../components/UpdateStopLossModal';
 import PositionDetailsModal from '../components/PositionDetailsModal';
 import CreatePositionModal from '../components/CreatePositionModal';
 import UniversalImportModal from '../components/UniversalImportModal';
+import TagChip from '../components/TagChip';
 import { KeyboardShortcutsButton } from '../components/KeyboardShortcutsHelp';
 import { useKeyboardShortcuts, createTradingShortcuts } from '../hooks/useKeyboardShortcuts';
 
@@ -156,7 +157,8 @@ const Positions: React.FC = () => {
   const filteredPositions = positions.filter(position =>
     position.ticker.toLowerCase().includes(searchQuery.toLowerCase()) ||
     (position.setup_type && position.setup_type.toLowerCase().includes(searchQuery.toLowerCase())) ||
-    (position.strategy && position.strategy.toLowerCase().includes(searchQuery.toLowerCase()))
+    (position.strategy && position.strategy.toLowerCase().includes(searchQuery.toLowerCase())) ||
+    (position.tags && position.tags.some(tag => tag.name.toLowerCase().includes(searchQuery.toLowerCase())))  // ← ADD THIS LINE
   );
 
   const paginatedPositions = filteredPositions.slice(
@@ -357,6 +359,7 @@ const Positions: React.FC = () => {
                 <TableCell sx={{ color: 'primary.main', fontWeight: 'bold' }}>Ticker</TableCell>
                 <TableCell sx={{ color: 'primary.main', fontWeight: 'bold' }}>Strategy</TableCell>
                 <TableCell sx={{ color: 'primary.main', fontWeight: 'bold' }}>Setup</TableCell>
+                <TableCell sx={{ color: 'primary.main', fontWeight: 'bold' }}>Tags</TableCell>
                 <TableCell sx={{ color: 'primary.main', fontWeight: 'bold' }}>Shares</TableCell>
                 <TableCell sx={{ color: 'primary.main', fontWeight: 'bold' }}>Avg Entry</TableCell>
                 <TableCell sx={{ color: 'primary.main', fontWeight: 'bold' }}>Total Cost</TableCell>
@@ -407,6 +410,19 @@ const Positions: React.FC = () => {
                   </TableCell>
                   <TableCell>{position.strategy || 'N/A'}</TableCell>
                   <TableCell>{position.setup_type || 'N/A'}</TableCell>
+                  <TableCell>
+                    <Box sx={{ display: 'flex', gap: 0.5, flexWrap: 'wrap', maxWidth: 300 }}>
+                      {position.tags && position.tags.length > 0 ? (
+                        position.tags.map((tag) => (
+                          <TagChip key={tag.id} tag={tag} />
+                        ))
+                      ) : (
+                        <Typography variant="body2" color="text.disabled" fontStyle="italic">
+                          No tags
+                        </Typography>
+                      )}
+                    </Box>
+                  </TableCell>
                   <TableCell>{position.current_shares}</TableCell>
                   <TableCell>{formatCurrency(position.avg_entry_price || 0)}</TableCell>
                   <TableCell>{formatCurrency(position.total_cost)}</TableCell>
