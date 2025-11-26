@@ -7,6 +7,8 @@ from app.api.routes import router as api_router
 from app.core.config import settings
 from app.models.position_models import Base
 from app.db.session import engine
+from app.db.redis import get_redis_client, close_redis_connection, is_redis_available
+from app.utils.cache import get_cache_stats, CacheInvalidator
 from app.utils.exceptions import AppException, ErrorResponse, NotFoundException, UnauthorizedException
 import datetime
 import os
@@ -91,7 +93,30 @@ def after_cursor_execute(conn, cursor, statement, parameters, context, executema
 # Create database tables
 Base.metadata.create_all(bind=engine)
 
+# Initialize Redis connection
+get_redis_client()
+
 app = FastAPI(title="SwingTrader API", description="Trading journal API inspired by swing trading strategies")
+
+# Add lifecycle events
+@app.on_event("startup")
+async def startup_event():
+    """Initialize connections on startup"""
+    logger = logging.getLogger(__name__)
+    logger.info("🚀 Application starting up...")
+    
+    # Test Redis connection
+    if is_redis_available():
+        logger.info("✅ Redis cache available")
+    else:
+        logger.warning("⚠️  Redis cache unavailable - running without cache")
+
+@app.on_event("shutdown")
+async def shutdown_event():
+    """Clean up connections on shutdown"""
+    logger = logging.getLogger(__name__)
+    logger.info("👋 Application shutting down...")
+    close_redis_connection()
 
 # Add GZip compression middleware for better performance
 app.add_middleware(GZipMiddleware, minimum_size=1000)
@@ -170,6 +195,16 @@ async def query_stats_endpoint():
         "n_plus_one_suspects": n_plus_one_suspects[:10],
         "queries_over_100ms": len([s for s in stats if s['max_time_ms'] > 100])
     }
+
+@app.get("/api/debug/cache-stats")
+async def cache_stats_endpoint():
+    """
+    Get Redis cache statistics including hit rate, total requests, and availability.
+    Useful for monitoring cache performance and debugging cache behavior.
+    """
+    from app.utils.cache import get_cache_stats
+    
+    return get_cache_stats()
 
 # Include API routers FIRST (before static files)
 app.include_router(api_router, prefix="/api")
