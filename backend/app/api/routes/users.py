@@ -5,6 +5,8 @@ import uuid
 import shutil
 from pathlib import Path
 from PIL import Image
+import cloudinary
+import cloudinary.uploader
 
 from app.api.deps import get_current_user, get_current_active_user
 from app.db.session import get_db
@@ -27,6 +29,20 @@ from app.utils.exceptions import (
 )
 
 router = APIRouter()
+
+# Configure Cloudinary
+cloudinary.config(
+    cloud_name=os.getenv("CLOUDINARY_CLOUD_NAME"),
+    api_key=os.getenv("CLOUDINARY_API_KEY"),
+    api_secret=os.getenv("CLOUDINARY_API_SECRET")
+)
+
+# Check if Cloudinary is configured
+USE_CLOUDINARY = all([
+    os.getenv("CLOUDINARY_CLOUD_NAME"),
+    os.getenv("CLOUDINARY_API_KEY"),
+    os.getenv("CLOUDINARY_API_SECRET")
+])
 
 @router.get("/me", response_model=UserResponse)
 def read_users_me(current_user: User = Depends(get_current_active_user)):
@@ -194,35 +210,70 @@ def upload_profile_picture(
         if len(content) > max_size:
             raise BadRequestException("File too large. Maximum size is 5MB.")
         
-        file.file.seek(0)
-        upload_dir = Path("static/uploads")
-        upload_dir.mkdir(parents=True, exist_ok=True)
-        file_extension = file.filename.split('.')[-1].lower()
-        unique_filename = f"{uuid.uuid4()}.{file_extension}"
-        file_path = upload_dir / unique_filename
-        
-        with open(file_path, "wb") as buffer:
-            shutil.copyfileobj(file.file, buffer)
-        
-        try:
-            with Image.open(file_path) as img:
-                if img.mode in ('RGBA', 'LA', 'P'):
-                    background = Image.new('RGB', img.size, (255, 255, 255))
-                    if img.mode == 'P':
-                        img = img.convert('RGBA')
-                    background.paste(img, mask=img.split()[-1] if img.mode == 'RGBA' else None)
-                    img = background
-                img.thumbnail((400, 400), Image.Resampling.LANCZOS)
-                img.save(file_path, "JPEG", quality=85, optimize=True)
-        except Exception:
-            file_path.unlink(missing_ok=True)
-            raise BadRequestException("Invalid image file or image processing failed.")
-        
+        # Delete old profile picture if it exists
         if current_user.profile_picture_url:
-            old_path = Path(current_user.profile_picture_url.lstrip('/'))
-            old_path.unlink(missing_ok=True)
+            try:
+                if USE_CLOUDINARY and current_user.profile_picture_url.startswith('http'):
+                    # Extract public_id from Cloudinary URL
+                    # URL format: https://res.cloudinary.com/{cloud_name}/image/upload/{version}/{public_id}.{format}
+                    url_parts = current_user.profile_picture_url.split('/')
+                    if 'trading_journal_v2' in url_parts:
+                        idx = url_parts.index('trading_journal_v2')
+                        public_id_with_ext = '/'.join(url_parts[idx:])
+                        public_id = public_id_with_ext.rsplit('.', 1)[0]  # Remove extension
+                        cloudinary.uploader.destroy(public_id)
+                else:
+                    # Delete local file
+                    old_path = Path(current_user.profile_picture_url.lstrip('/'))
+                    old_path.unlink(missing_ok=True)
+            except Exception as e:
+                # Log but don't fail if old file deletion fails
+                print(f"Warning: Failed to delete old profile picture: {e}")
         
-        current_user.profile_picture_url = f"/static/uploads/{unique_filename}"
+        if USE_CLOUDINARY:
+            # Upload to Cloudinary
+            file.file.seek(0)
+            result = cloudinary.uploader.upload(
+                file.file,
+                folder="trading_journal_v2/profile_pictures",
+                resource_type="image",
+                public_id=f"user_{current_user.id}_{uuid.uuid4()}",
+                transformation=[
+                    {"width": 400, "height": 400, "crop": "fill", "gravity": "face"},
+                    {"quality": "auto:good"}
+                ],
+                format="jpg"
+            )
+            profile_picture_url = result["secure_url"]
+        else:
+            # Fallback to local storage
+            file.file.seek(0)
+            upload_dir = Path("static/uploads")
+            upload_dir.mkdir(parents=True, exist_ok=True)
+            file_extension = file.filename.split('.')[-1].lower()
+            unique_filename = f"{uuid.uuid4()}.{file_extension}"
+            file_path = upload_dir / unique_filename
+            
+            with open(file_path, "wb") as buffer:
+                shutil.copyfileobj(file.file, buffer)
+            
+            try:
+                with Image.open(file_path) as img:
+                    if img.mode in ('RGBA', 'LA', 'P'):
+                        background = Image.new('RGB', img.size, (255, 255, 255))
+                        if img.mode == 'P':
+                            img = img.convert('RGBA')
+                        background.paste(img, mask=img.split()[-1] if img.mode == 'RGBA' else None)
+                        img = background
+                    img.thumbnail((400, 400), Image.Resampling.LANCZOS)
+                    img.save(file_path, "JPEG", quality=85, optimize=True)
+            except Exception:
+                file_path.unlink(missing_ok=True)
+                raise BadRequestException("Invalid image file or image processing failed.")
+            
+            profile_picture_url = f"/static/uploads/{unique_filename}"
+        
+        current_user.profile_picture_url = profile_picture_url
         db.commit()
         
         return {
@@ -246,8 +297,23 @@ def delete_profile_picture(
         if not current_user.profile_picture_url:
             raise NotFoundException("No profile picture to delete")
         
-        file_path = Path(current_user.profile_picture_url.lstrip('/'))
-        file_path.unlink(missing_ok=True)
+        # Delete from Cloudinary or local storage
+        try:
+            if USE_CLOUDINARY and current_user.profile_picture_url.startswith('http'):
+                # Extract public_id from Cloudinary URL
+                url_parts = current_user.profile_picture_url.split('/')
+                if 'trading_journal_v2' in url_parts:
+                    idx = url_parts.index('trading_journal_v2')
+                    public_id_with_ext = '/'.join(url_parts[idx:])
+                    public_id = public_id_with_ext.rsplit('.', 1)[0]  # Remove extension
+                    cloudinary.uploader.destroy(public_id)
+            else:
+                # Delete local file
+                file_path = Path(current_user.profile_picture_url.lstrip('/'))
+                file_path.unlink(missing_ok=True)
+        except Exception as e:
+            # Log but don't fail if file deletion fails
+            print(f"Warning: Failed to delete profile picture file: {e}")
         
         current_user.profile_picture_url = None
         db.commit()

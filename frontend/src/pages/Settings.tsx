@@ -43,6 +43,7 @@ import {
   Save
 } from '@mui/icons-material';
 import { useAuth } from '../context/AuthContext';
+import { API_URL } from '../services/apiConfig';
 import { updateProfile, changePassword, UserUpdateData, ChangePasswordData, exportUserData, deleteUserAccount, clearAllUserData, uploadProfilePicture, deleteProfilePicture } from '../services/userService';
 import { AccountSettings } from '../services/types';
 import { accountService } from '../services/accountService';
@@ -530,7 +531,7 @@ const Settings: React.FC = () => {
                 <Grid item xs={12} display="flex" alignItems="center" gap={2}>
                   <Avatar 
                     sx={{ width: 80, height: 80 }}
-                    src={user?.profile_picture_url ? `http://localhost:8000${user.profile_picture_url}` : undefined}
+                    src={user?.profile_picture_url ? (user.profile_picture_url.startsWith('http') ? user.profile_picture_url : `${API_URL}${user.profile_picture_url}`) : undefined}
                   >
                     {!user?.profile_picture_url && getAvatarInitials()}
                   </Avatar>

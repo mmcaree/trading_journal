@@ -34,6 +34,7 @@ import {
 } from '@mui/icons-material';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
+import { API_URL } from '../services/apiConfig';
 import CurrencyToggle from '../components/CurrencyToggle';
 
 const drawerWidth = 240;
@@ -211,7 +212,7 @@ const DashboardLayout = () => {
           <Box sx={{ display: 'flex', flexDirection: 'column', alignItems: 'center', mb: 2 }}>
             <Avatar 
               sx={{ width: 64, height: 64, mb: 1 }}
-              src={user?.profile_picture_url ? `http://localhost:8000${user.profile_picture_url}` : undefined}
+              src={user?.profile_picture_url ? (user.profile_picture_url.startsWith('http') ? user.profile_picture_url : `${API_URL}${user.profile_picture_url}`) : undefined}
             >
               {!user?.profile_picture_url && getAvatarInitials()}
             </Avatar>
