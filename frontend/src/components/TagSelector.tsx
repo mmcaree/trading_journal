@@ -21,16 +21,19 @@ export default function TagSelector({ selectedTags, onChange }: TagSelectorProps
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    api.get('/api/tags/tags/')
+    api.get('/api/tags/')
       .then(res => {
         setAvailableTags(res.data);
         setLoading(false);
       })
-      .catch(() => setLoading(false));
+      .catch((error) => {
+        console.error('Failed to load tags:', error);
+        setLoading(false);
+      });
   }, []);
 
   const handleCreateTag = async (name: string) => {
-    const res = await api.post('/api/tags/tags/', { name, color: '#1976d2' });
+    const res = await api.post('/api/tags/', { name, color: '#1976d2' });
     const newTag = res.data;
     setAvailableTags(prev => [...prev, newTag]);
     return newTag;

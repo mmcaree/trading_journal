@@ -6,7 +6,7 @@ from app.api.deps import get_db, get_current_user
 from app.models.position_models import PositionTag, TradingPosition
 from app.models import User
 
-router = APIRouter(prefix="/tags", tags=["tags"])
+router = APIRouter()
 
 
 from pydantic import BaseModel

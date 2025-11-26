@@ -38,6 +38,7 @@ import UpdateStopLossModal from '../components/UpdateStopLossModal';
 import PositionDetailsModal from '../components/PositionDetailsModal';
 import CreatePositionModal from '../components/CreatePositionModal';
 import UniversalImportModal from '../components/UniversalImportModal';
+import TagChip from '../components/TagChip';
 import { KeyboardShortcutsButton } from '../components/KeyboardShortcutsHelp';
 import { useKeyboardShortcuts, createTradingShortcuts } from '../hooks/useKeyboardShortcuts';
 
@@ -413,18 +414,7 @@ const Positions: React.FC = () => {
                     <Box sx={{ display: 'flex', gap: 0.5, flexWrap: 'wrap', maxWidth: 300 }}>
                       {position.tags && position.tags.length > 0 ? (
                         position.tags.map((tag) => (
-                          <Chip
-                            key={tag.id}
-                            label={tag.name}
-                            size="small"
-                            sx={{
-                              backgroundColor: tag.color || '#1976d2',
-                              color: '#fff',
-                              fontWeight: 500,
-                              fontSize: '0.7rem',
-                              height: 20,
-                            }}
-                          />
+                          <TagChip key={tag.id} tag={tag} />
                         ))
                       ) : (
                         <Typography variant="body2" color="text.disabled" fontStyle="italic">

@@ -220,12 +220,16 @@ const CreatePositionModal: React.FC<CreatePositionModalProps> = ({
       const newPosition = await createPosition(positionData);
 
       if (selectedTags.length > 0) {
-        await Promise.all(
-          selectedTags.map(tag =>
-            api.post(`/api/tags/tags/positions/${newPosition.id}/assign/${tag.id}`).catch(() => {
-            })
-          )
-        );
+        try {
+          await Promise.all(
+            selectedTags.map(tag =>
+              api.post(`/api/tags/positions/${newPosition.id}/assign/${tag.id}`)
+            )
+          );
+        } catch (error) {
+          console.error('Failed to assign tags:', error);
+          // Don't fail the whole operation, just log the error
+        }
       }
 
       // Reset form
