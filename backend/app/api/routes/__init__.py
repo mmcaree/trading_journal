@@ -1,5 +1,6 @@
 from fastapi import APIRouter
 from . import users, auth, analytics, debug, positions_v2, position_images
+from . import tags
 
 router = APIRouter()
 
@@ -9,3 +10,4 @@ router.include_router(positions_v2.router, prefix="/v2/positions", tags=["positi
 router.include_router(analytics.router, prefix="/analytics", tags=["analytics"])
 router.include_router(debug.router, prefix="/debug", tags=["debug"])
 router.include_router(position_images.router, prefix="/position-images", tags=["position-images"])
+router.include_router(tags.router, prefix="/tags", tags=["tags"])

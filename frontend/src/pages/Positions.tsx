@@ -156,7 +156,8 @@ const Positions: React.FC = () => {
   const filteredPositions = positions.filter(position =>
     position.ticker.toLowerCase().includes(searchQuery.toLowerCase()) ||
     (position.setup_type && position.setup_type.toLowerCase().includes(searchQuery.toLowerCase())) ||
-    (position.strategy && position.strategy.toLowerCase().includes(searchQuery.toLowerCase()))
+    (position.strategy && position.strategy.toLowerCase().includes(searchQuery.toLowerCase())) ||
+    (position.tags && position.tags.some(tag => tag.name.toLowerCase().includes(searchQuery.toLowerCase())))  // ← ADD THIS LINE
   );
 
   const paginatedPositions = filteredPositions.slice(
@@ -357,6 +358,7 @@ const Positions: React.FC = () => {
                 <TableCell sx={{ color: 'primary.main', fontWeight: 'bold' }}>Ticker</TableCell>
                 <TableCell sx={{ color: 'primary.main', fontWeight: 'bold' }}>Strategy</TableCell>
                 <TableCell sx={{ color: 'primary.main', fontWeight: 'bold' }}>Setup</TableCell>
+                <TableCell sx={{ color: 'primary.main', fontWeight: 'bold' }}>Tags</TableCell>
                 <TableCell sx={{ color: 'primary.main', fontWeight: 'bold' }}>Shares</TableCell>
                 <TableCell sx={{ color: 'primary.main', fontWeight: 'bold' }}>Avg Entry</TableCell>
                 <TableCell sx={{ color: 'primary.main', fontWeight: 'bold' }}>Total Cost</TableCell>
@@ -407,6 +409,30 @@ const Positions: React.FC = () => {
                   </TableCell>
                   <TableCell>{position.strategy || 'N/A'}</TableCell>
                   <TableCell>{position.setup_type || 'N/A'}</TableCell>
+                  <TableCell>
+                    <Box sx={{ display: 'flex', gap: 0.5, flexWrap: 'wrap', maxWidth: 300 }}>
+                      {position.tags && position.tags.length > 0 ? (
+                        position.tags.map((tag) => (
+                          <Chip
+                            key={tag.id}
+                            label={tag.name}
+                            size="small"
+                            sx={{
+                              backgroundColor: tag.color || '#1976d2',
+                              color: '#fff',
+                              fontWeight: 500,
+                              fontSize: '0.7rem',
+                              height: 20,
+                            }}
+                          />
+                        ))
+                      ) : (
+                        <Typography variant="body2" color="text.disabled" fontStyle="italic">
+                          No tags
+                        </Typography>
+                      )}
+                    </Box>
+                  </TableCell>
                   <TableCell>{position.current_shares}</TableCell>
                   <TableCell>{formatCurrency(position.avg_entry_price || 0)}</TableCell>
                   <TableCell>{formatCurrency(position.total_cost)}</TableCell>

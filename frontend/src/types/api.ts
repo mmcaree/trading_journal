@@ -159,6 +159,7 @@ export interface Position {
   option_type?: 'CALL' | 'PUT';
   // Optional event history
   events?: PositionEvent[];
+  tags?: PositionTag[];
 }
 
 export interface PositionEvent {
@@ -524,4 +525,10 @@ export interface CacheEntry<T> {
   data: T;
   timestamp: number;
   ttl: number;
+}
+
+export interface PositionTag {
+  id: number;
+  name: string;
+  color: string;
 }

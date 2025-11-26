@@ -7,7 +7,7 @@ Uses PositionService for core business logic
 from fastapi import APIRouter, Depends, HTTPException, status, Query
 from typing import List, Optional, Dict, Any
 import json
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, joinedload
 from datetime import datetime
 
 from app.api.deps import get_db, get_current_user
@@ -117,6 +117,7 @@ class PositionResponse(BaseModel):
     original_shares: Optional[int]          # Shares when position opened
     account_value_at_entry: Optional[float] # Account value when opened
     events: Optional[List['EventResponse']] = None  # Optional events for analytics
+    tags: List[Dict[str, Any]] = []
 
 class EventResponse(BaseModel):
     id: int
@@ -297,20 +298,34 @@ def get_positions(
     position_service = PositionService(db)
     
     # Convert status string to enum
-    status_enum = None
-    if status_filter:
-        try:
-            status_enum = PositionStatus(status_filter.lower())
-        except ValueError:
-            raise BadRequestException(f"Invalid status: {status_filter}")
+    # if status_filter:
+    #     try:
+    #         status_enum = PositionStatus(status_filter.lower())
+    #     except ValueError:
+    #         raise BadRequestException(f"Invalid status: {status_filter}")
     
-    # Get positions with events preloaded to avoid N+1 queries (only if requested)
-    positions = position_service.get_user_positions(
-        user_id=current_user.id,
-        status=status_enum,
-        ticker=ticker,
-        include_events=include_events
-    )
+    # # Get positions with events preloaded to avoid N+1 queries (only if requested)
+    # positions = position_service.get_user_positions(
+    #     user_id=current_user.id,
+    #     status=status_enum,
+    #     ticker=ticker,
+    #     include_events=include_events
+    # )
+
+    status_enum = None
+    query = db.query(TradingPosition) \
+        .filter(TradingPosition.user_id == current_user.id) \
+        .options(joinedload(TradingPosition.tags))  # ← THIS LINE ADDS TAGS
+    
+    if status_enum:
+        query = query.filter(TradingPosition.status == status_enum)
+    if ticker:
+        query = query.filter(TradingPosition.ticker.ilike(f"%{ticker}%"))
+    
+    if include_events:
+        query = query.options(joinedload(TradingPosition.events))
+    
+    positions = query.all()
     
     # Apply additional filters
     if strategy:

@@ -32,6 +32,9 @@ import { useAuth } from '../context/AuthContext';
 import { accountService } from '../services/accountService';
 import { getCurrentLocalDateTime, parseLocalDateTimeToISO } from '../utils/dateUtils';
 import { HELPER_TEXT } from '../utils/validationSchemas';
+import TagSelector from './TagSelector';
+import { PositionTag } from '../types/api';
+import api from '../services/apiConfig';
 
 
 export interface CreatePositionFormData {
@@ -102,6 +105,7 @@ const CreatePositionModal: React.FC<CreatePositionModalProps> = ({
   const { user } = useAuth();
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [selectedTags, setSelectedTags] = useState<PositionTag[]>([]);
 
   // Form setup with React Hook Form
   const form = useForm<CreatePositionFormData>({
@@ -215,6 +219,15 @@ const CreatePositionModal: React.FC<CreatePositionModalProps> = ({
 
       const newPosition = await createPosition(positionData);
 
+      if (selectedTags.length > 0) {
+        await Promise.all(
+          selectedTags.map(tag =>
+            api.post(`/tags/positions/${newPosition.id}/assign/${tag.id}`).catch(() => {
+            })
+          )
+        );
+      }
+
       // Reset form
       reset({
         ticker: '',
@@ -232,6 +245,7 @@ const CreatePositionModal: React.FC<CreatePositionModalProps> = ({
         expiration_date: '',
         option_type: 'CALL'
       });
+      setSelectedTags([]);
       
       // Notify parent
       if (onSuccess) {
@@ -285,6 +299,7 @@ const CreatePositionModal: React.FC<CreatePositionModalProps> = ({
       expiration_date: '',
       option_type: 'CALL'
     });
+    setSelectedTags([]);
     setError(null);
     onClose();
   };
@@ -734,6 +749,13 @@ const CreatePositionModal: React.FC<CreatePositionModalProps> = ({
               </Paper>
             </Grid>
           )}
+
+          <Grid item xs={12}>
+            <TagSelector
+              selectedTags={selectedTags}
+              onChange={setSelectedTags}
+            />
+          </Grid>
 
           {/* Notes */}
           <Grid item xs={12}>
