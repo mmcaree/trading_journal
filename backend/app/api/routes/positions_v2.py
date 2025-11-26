@@ -394,7 +394,8 @@ def get_position_details(
     """Get detailed position information with event history"""
     position_service = PositionService(db)
     
-    position = position_service.get_position(position_id)
+    # Eager load events to avoid N+1 query
+    position = position_service.get_position(position_id, include_events=True)
     if not position:
         raise NotFoundException("Position")
     
@@ -474,7 +475,8 @@ def update_position(
     """Update position metadata"""
     position_service = PositionService(db)
     
-    position = position_service.get_position(position_id)
+    # Eager load events to avoid N+1 when calculating return percent
+    position = position_service.get_position(position_id, include_events=True)
     if not position:
         raise NotFoundException("Position")
 
@@ -1421,8 +1423,12 @@ async def get_bulk_position_chart_data(
     if len(position_ids) > 10:
         raise BadRequestException("Cannot fetch chart data for more than 10 positions at once")
     
-    # Verify all positions exist and user owns them
-    positions = db.query(TradingPosition).filter(
+    # Verify all positions exist and user owns them - eager load events to avoid N+1
+    from sqlalchemy.orm import joinedload
+    
+    positions = db.query(TradingPosition).options(
+        joinedload(TradingPosition.events)
+    ).filter(
         TradingPosition.id.in_(position_ids),
         TradingPosition.user_id == current_user.id
     ).all()
@@ -1434,23 +1440,23 @@ async def get_bulk_position_chart_data(
     market_service = MarketDataService()
     
     for position in positions:
-        # Get entry and exit dates
-        first_event = db.query(TradingPositionEvent).filter(
-            TradingPositionEvent.position_id == position.id,
-            TradingPositionEvent.event_type == EventType.BUY
-        ).order_by(TradingPositionEvent.event_date.asc()).first()
+        # Get entry and exit dates from preloaded events
+        buy_events = [e for e in position.events if e.event_type == EventType.BUY]
+        buy_events.sort(key=lambda e: e.event_date)
         
-        last_event = db.query(TradingPositionEvent).filter(
-            TradingPositionEvent.position_id == position.id
-        ).order_by(TradingPositionEvent.event_date.desc()).first()
-        
-        if not first_event:
+        if not buy_events:
             results.append({
                 "position_id": position.id,
                 "ticker": position.ticker,
                 "error": "No entry event found"
             })
             continue
+        
+        first_event = buy_events[0]
+        
+        # Get last event (any type)
+        all_events = sorted(position.events, key=lambda e: e.event_date, reverse=True)
+        last_event = all_events[0] if all_events else None
         
         try:
             chart_data = market_service.get_position_chart_data(

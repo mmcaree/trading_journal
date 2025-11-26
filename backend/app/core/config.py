@@ -49,6 +49,10 @@ class Settings(BaseSettings):
     BROKER_API_KEY: str = os.getenv("BROKER_API_KEY", "")
     MARKET_DATA_API_KEY: str = os.getenv("MARKET_DATA_API_KEY", "")
     
+    # Environment - defaults to production for safety
+    # Set ENVIRONMENT=development to enable debug features and detailed query logging
+    ENVIRONMENT: str = os.getenv("ENVIRONMENT", "production")  # development, staging, production
+    
     @property
     def cors_origins_list(self) -> list:
         """Convert CORS_ORIGINS string to list"""

@@ -167,13 +167,16 @@ def export_user_data(db: Session, user_id: int) -> dict:
     
     # Import v2 Position models
     from app.models.position_models import TradingPosition, TradingPositionEvent
+    from sqlalchemy.orm import joinedload
     
-    # Get all user positions
-    positions = db.query(TradingPosition).filter(TradingPosition.user_id == user_id).all()
+    # Get all user positions with eager-loaded events to avoid N+1 queries
+    positions = db.query(TradingPosition).options(
+        joinedload(TradingPosition.events)
+    ).filter(TradingPosition.user_id == user_id).all()
     
     positions_data = []
     for position in positions:
-        # Get events for this position
+        # Get events for this position (already loaded via joinedload)
         events_data = []
         for event in position.events:
             event_dict = {

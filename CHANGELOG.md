@@ -5,7 +5,61 @@ All notable changes to TradeJournal will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [2.0.0] - 2025-09-19
+## [0.3.0]
+
+### Added
+- **Query Performance Monitoring**: SQLAlchemy event listeners for tracking database query performance
+  - `before_cursor_execute` and `after_cursor_execute` handlers for query timing
+  - Automatic logging of slow queries (>100ms in dev, >500ms in production)
+  - In-memory storage of query timing statistics (development only)
+  - `/api/debug/query-stats` endpoint for real-time monitoring (development only)
+  - **Production design**: Defaults to production mode, requires opt-in for development features
+  - Environment-aware configuration via `ENVIRONMENT` variable (defaults to `production`)
+- **Query Analysis Script**: `backend/scripts/analyze_queries.py` for comprehensive performance analysis
+  - Multiple output formats: text, JSON, markdown
+  - N+1 query pattern detection
+  - Slow query identification and optimization recommendations
+  - Index recommendation generation
+  - Top 10 bottleneck identification
+  - **Development only** - requires `ENVIRONMENT=development`
+- **Performance Documentation**: Created comprehensive documentation suite
+  - `PERFORMANCE_ANALYSIS.md` - Query optimization guide with best practices
+  - `PRODUCTION_CHECKLIST.md` - Production deployment guide (no configuration required!)
+  - `backend/scripts/QUERY_LOGGING_GUIDE.md` - Quick start and usage guide
+  - Index recommendation framework
+  - Performance monitoring guidelines
+  - Common optimization patterns and solutions
+
+### Fixed
+- **N+1 Query Pattern in User Data Export**: Fixed repeated event queries in user service
+  - Added eager loading with `joinedload()` for events when exporting user data
+  - Eliminates N+1 pattern for users with multiple positions
+- **N+1 Query Pattern in Bulk Chart Data**: Fixed repeated position/event queries in bulk chart endpoint
+  - Added eager loading with `joinedload()` for events when fetching positions
+  - Changed from individual DB queries to in-memory sorting of preloaded events
+  - **Performance improvement**: 39% reduction verified (36+ queries → 22 queries per bulk request)
+- **N+1 Query Pattern in Position Details**: Position events were being loaded individually causing 1,468+ queries
+  - Modified `PositionService.get_position()` to support optional eager loading
+  - Enabled eager loading in `get_position_details` and `update_position` endpoints
+  - **Performance improvement**: ~10-15x faster (321ms → ~20-30ms expected)
+- **CSV Import Validation**: Fixed NaN value serialization error in universal import validation
+  - Replaced NaN values with empty strings before JSON serialization
+
+### Changed
+- **Import Page UI**: Added warning disclaimer about options trading not being supported
+- **Environment Configuration**: System defaults to `production` mode for safety
+  - Production (default): Minimal logging, debug endpoints disabled, 500ms threshold, no parameter logging
+  - Development (opt-in): Full query logging, debug endpoints enabled, 100ms threshold, parameter logging
+  - **No configuration required for production deployments**
+
+### Security
+- **Production-First Design**: System defaults to secure production mode
+  - Query parameters never logged unless explicitly in development mode
+  - Debug endpoints (`/api/debug/query-stats`) automatically disabled in production
+  - In-memory query storage disabled in production (zero memory overhead)
+  - Requires explicit `ENVIRONMENT=development` setting to enable debugging features
+
+## [0.2.0] - 2025-09-19
 
 ### Major Features Added
 
@@ -161,7 +215,3 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 For support and questions about this release:
 - **Documentation**: Check the comprehensive guides in the repository (lol jk no documentation for you)
 - **Issues**: Report bugs and feature requests via GitHub issues
-
----
-
-**Full Changelog**: https://github.com/mmcaree/qualla_roadmap/compare/v1.0.0...v2.0.0

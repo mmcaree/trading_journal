@@ -466,9 +466,16 @@ class PositionService:
     
     # === Query Methods ===
     
-    def get_position(self, position_id: int) -> Optional[TradingPosition]:
-        """Get position by ID"""
-        return self.db.query(TradingPosition).get(position_id)
+    def get_position(self, position_id: int, include_events: bool = False) -> Optional[TradingPosition]:
+        """Get position by ID with optional eager loading of events"""
+        from sqlalchemy.orm import joinedload
+        
+        query = self.db.query(TradingPosition).filter(TradingPosition.id == position_id)
+        
+        if include_events:
+            query = query.options(joinedload(TradingPosition.events))
+        
+        return query.first()
     
     def get_user_positions(
         self,

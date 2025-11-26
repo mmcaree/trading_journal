@@ -12,11 +12,81 @@ import datetime
 import os
 import mimetypes
 import traceback
+import logging
+import time
+from sqlalchemy import event
+from sqlalchemy.engine import Engine
 
 # Configure MIME types for JavaScript modules.
 mimetypes.add_type('application/javascript', '.js')
 mimetypes.add_type('application/javascript', '.mjs')
 mimetypes.add_type('text/css', '.css')
+
+# Configure query logging
+query_logger = logging.getLogger('sqlalchemy.query_performance')
+
+# Set logging level based on environment
+# In production, only log warnings (slow queries >100ms)
+# Query logging - production mode by default
+# Production (default): WARNING level, 500ms threshold, minimal logging
+# Development (opt-in): INFO level, 100ms threshold, full statistics
+# Set ENVIRONMENT=development to enable detailed query monitoring
+query_logger.setLevel(logging.INFO if settings.ENVIRONMENT == 'development' else logging.WARNING)
+
+# Store query timing data (in-memory - for development mode only)
+# In production, use external APM tools (DataDog, New Relic, Sentry)
+query_timings = {}
+
+# Slow query threshold in milliseconds
+SLOW_QUERY_THRESHOLD = 100 if settings.ENVIRONMENT == 'development' else 500
+
+@event.listens_for(Engine, "before_cursor_execute")
+def before_cursor_execute(conn, cursor, statement, parameters, context, executemany):
+    """
+    Event listener that runs before each SQL query execution.
+    Records the start time for query timing.
+    """
+    conn.info.setdefault('query_start_time', []).append(time.time())
+    query_logger.debug(f"Query starting: {statement[:100]}...")
+
+@event.listens_for(Engine, "after_cursor_execute")
+def after_cursor_execute(conn, cursor, statement, parameters, context, executemany):
+    """
+    Event listener that runs after each SQL query execution.
+    Calculates query duration and logs slow queries.
+    
+    In production: Only logs queries exceeding 500ms
+    In development: Logs queries exceeding 100ms
+    """
+    total_time = time.time() - conn.info['query_start_time'].pop(-1)
+    total_ms = total_time * 1000
+    
+    # Store timing data for analysis (development mode only)
+    if settings.ENVIRONMENT == 'development':
+        query_key = statement[:200]  # Use first 200 chars as key
+        if query_key not in query_timings:
+            query_timings[query_key] = {
+                'count': 0,
+                'total_time': 0,
+                'min_time': float('inf'),
+                'max_time': 0,
+                'statement': statement
+            }
+        
+        query_timings[query_key]['count'] += 1
+        query_timings[query_key]['total_time'] += total_ms
+        query_timings[query_key]['min_time'] = min(query_timings[query_key]['min_time'], total_ms)
+        query_timings[query_key]['max_time'] = max(query_timings[query_key]['max_time'], total_ms)
+    
+    # Log slow queries as warnings
+    if total_ms > SLOW_QUERY_THRESHOLD:
+        query_logger.warning(
+            f"SLOW QUERY ({total_ms:.2f}ms): {statement[:200]}..."
+        )
+        if settings.ENVIRONMENT == 'development':
+            query_logger.warning(f"Parameters: {parameters}")
+    else:
+        query_logger.debug(f"Query completed in {total_ms:.2f}ms")
 
 # Create database tables
 Base.metadata.create_all(bind=engine)
@@ -50,6 +120,55 @@ async def debug_endpoint():
         },
         "static_files": os.path.exists(os.path.join(os.path.dirname(__file__), "..", "static")),
         "secret_key_set": bool(settings.SECRET_KEY and settings.SECRET_KEY != "development_secret_key")
+    }
+
+@app.get("/api/debug/query-stats")
+async def query_stats_endpoint():
+    """
+    Debug endpoint to view query timing statistics.
+    Shows top 20 slowest queries and N+1 query patterns.
+    
+    ⚠️ DEVELOPMENT ONLY - Automatically disabled in production
+    """
+    # Only available in development mode
+    if settings.ENVIRONMENT != 'development':
+        return {
+            "error": "Query stats only available in development mode",
+            "message": "Set ENVIRONMENT=development to enable. Use APM tools for production monitoring."
+        }
+    
+    if not query_timings:
+        return {
+            "message": "No queries recorded yet",
+            "total_queries": 0
+        }
+    
+    # Calculate statistics
+    stats = []
+    for query_key, data in query_timings.items():
+        avg_time = data['total_time'] / data['count']
+        stats.append({
+            'query': query_key,
+            'count': data['count'],
+            'total_time_ms': round(data['total_time'], 2),
+            'avg_time_ms': round(avg_time, 2),
+            'min_time_ms': round(data['min_time'], 2),
+            'max_time_ms': round(data['max_time'], 2),
+        })
+    
+    # Sort by total time (biggest bottlenecks)
+    stats.sort(key=lambda x: x['total_time_ms'], reverse=True)
+    
+    # Identify potential N+1 patterns (same query executed many times)
+    n_plus_one_suspects = [s for s in stats if s['count'] > 10 and s['avg_time_ms'] > 10]
+    
+    return {
+        "total_unique_queries": len(stats),
+        "total_query_executions": sum(s['count'] for s in stats),
+        "total_time_ms": round(sum(s['total_time_ms'] for s in stats), 2),
+        "top_20_slowest": stats[:20],
+        "n_plus_one_suspects": n_plus_one_suspects[:10],
+        "queries_over_100ms": len([s for s in stats if s['max_time_ms'] > 100])
     }
 
 # Include API routers FIRST (before static files)
