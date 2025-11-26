@@ -10,7 +10,10 @@ def clear_all_user_data(db: Session, user_id: int) -> None:
         # Start with dependent tables first, then master tables
         
         # Delete current v2 API data (actively used)
-        trading_positions = db.query(TradingPosition).filter(TradingPosition.user_id == user_id).all()
+        from sqlalchemy.orm import joinedload
+        trading_positions = db.query(TradingPosition).options(
+            joinedload(TradingPosition.events)
+        ).filter(TradingPosition.user_id == user_id).all()
         for trading_position in trading_positions:
             # Delete journal entries for this position
             db.query(TradingPositionJournalEntry).filter(TradingPositionJournalEntry.position_id == trading_position.id).delete()

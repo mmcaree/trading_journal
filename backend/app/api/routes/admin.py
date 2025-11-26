@@ -222,7 +222,10 @@ async def get_student_positions(
     if not student:
         raise NotFoundException("Student")
     
-    positions = db.query(TradingPosition).filter(TradingPosition.user_id == student_id).all()
+    from sqlalchemy.orm import joinedload
+    positions = db.query(TradingPosition).options(
+        joinedload(TradingPosition.events)
+    ).filter(TradingPosition.user_id == student_id).all()
     return positions
 
 @router.get("/student/{student_id}/events")

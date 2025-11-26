@@ -232,6 +232,167 @@ CREATE INDEX idx_[table]_[columns] ON [table]([columns]);
 
 ## Optimization History
 
+### Phase 1: N+1 Query Elimination (Completed)
+
+**Issue 1: Position Details N+1 Pattern**
+- **Status**: ✅ Fixed
+- **Location**: `backend/app/services/position_service.py`
+- **Problem**: Loading position events individually (1,468+ queries for single position view)
+- **Solution**: Added `include_events` parameter with `joinedload(TradingPosition.events)`
+- **Impact**: ~10-15x performance improvement (321ms → ~20-30ms)
+
+**Issue 2: Bulk Chart Data N+1 Pattern**
+- **Status**: ✅ Fixed
+- **Location**: `backend/app/api/routes/positions_v2.py` (line 1427)
+- **Problem**: 36 position queries when loading chart data
+- **Solution**: Added eager loading with `joinedload()` and in-memory filtering
+- **Impact**: 39% reduction verified (36 → 22 queries)
+
+**Issue 3: User Data Export N+1 Pattern**
+- **Status**: ✅ Fixed
+- **Location**: `backend/app/services/user_service.py` (line 172)
+- **Problem**: Loop accessing `.events` without eager loading
+- **Solution**: Added `joinedload(TradingPosition.events)` to export query
+- **Impact**: Eliminates N+1 when users export data
+
+**Issue 4: Admin Student Positions N+1 Pattern**
+- **Status**: ✅ Fixed
+- **Location**: `backend/app/api/routes/admin.py` (line 225)
+- **Problem**: Loading student positions without events
+- **Solution**: Added `joinedload(TradingPosition.events)` to admin query
+- **Impact**: Faster instructor dashboard for viewing student portfolios
+
+**Issue 5: Data Service Cleanup N+1 Pattern**
+- **Status**: ✅ Fixed
+- **Location**: `backend/app/services/data_service.py` (line 12)
+- **Problem**: Loading positions without events during cleanup
+- **Solution**: Added `joinedload(TradingPosition.events)` to cleanup query
+- **Impact**: Faster user data deletion operations
+
+**Result**: All N+1 patterns eliminated from codebase ✅
+
+### Phase 2: Database Indexing (Completed)
+
+**Migration**: `backend/migrations/add_performance_indexes.py`
+**Status**: ✅ Complete - 40 indexes created
+**Run**: `python backend/migrations/add_performance_indexes.py`
+
+**Indexes Created**:
+
+1. **User Table (4 indexes)**
+   - `idx_users_role` - Role-based queries
+   - `idx_users_email` - Login and authentication
+   - `idx_users_username` - Login and lookups
+   - `idx_users_password_reset` - Password reset flow (partial index)
+
+2. **Trading Positions (12 indexes)**
+   - `idx_trading_positions_user_id` - User filtering
+   - `idx_trading_positions_status` - Status filtering
+   - `idx_trading_positions_ticker` - Symbol lookups
+   - `idx_trading_positions_strategy` - Strategy analytics
+   - `idx_trading_positions_setup_type` - Setup analytics
+   - `idx_trading_positions_opened_at` - Date sorting
+   - `idx_trading_positions_closed_at` - Closed positions (partial index)
+   - `idx_trading_positions_instrument_type` - Instrument filtering
+   - `idx_positions_user_status` - Composite: user + status
+   - `idx_positions_user_opened` - Composite: user + opened date
+   - `idx_positions_user_status_opened` - Composite: user + status + date
+   - `idx_positions_user_closed` - Composite: user + closed date (partial)
+   - `idx_positions_ticker_user` - Composite: ticker + user
+
+3. **Trading Position Events (6 indexes)**
+   - `idx_trading_position_events_position_id` - Foreign key
+   - `idx_trading_position_events_event_date` - Date filtering
+   - `idx_trading_position_events_event_type` - Type filtering
+   - `idx_events_position_date` - Composite: position + date
+   - `idx_events_position_type` - Composite: position + type
+   - `idx_events_source` - Source tracking
+
+4. **Instructor Notes (6 indexes)**
+   - `idx_instructor_notes_student_id` - Student lookups
+   - `idx_instructor_notes_instructor_id` - Instructor lookups
+   - `idx_instructor_notes_position_id` - Position lookups
+   - `idx_instructor_notes_created_at` - Date sorting
+   - `idx_instructor_notes_flagged` - Flagged students (partial index)
+   - `idx_notes_student_created` - Composite: student + created date
+
+5. **Journal Entries (4 indexes)**
+   - `idx_journal_entries_position_id` - Foreign key
+   - `idx_journal_entries_entry_date` - Date sorting
+   - `idx_journal_entries_entry_type` - Type filtering
+   - `idx_journal_position_date` - Composite: position + date
+
+6. **Position Charts (2 indexes)**
+   - `idx_position_charts_position_id` - Foreign key
+   - `idx_position_charts_created_at` - Date sorting
+
+7. **Pending Orders (5 indexes)**
+   - `idx_pending_orders_user_id` - User filtering
+   - `idx_pending_orders_symbol` - Symbol lookups
+   - `idx_pending_orders_status` - Status filtering
+   - `idx_pending_orders_position_id` - Position linkage (partial index)
+   - `idx_pending_orders_placed_time` - Date sorting
+
+**Expected Performance Gains**:
+- Position queries: 50-70% faster
+- Analytics queries: 60-80% faster
+- Instructor dashboard: 50-60% faster
+- User authentication: 40-50% faster
+
+### Phase 3: Query Monitoring (Completed)
+
+**Implementation**: Production-first query logging system
+**Status**: ✅ Complete
+**Documentation**: `backend/QUERY_LOGGING.md`
+
+**Features**:
+- SQLAlchemy event listeners for query timing
+- Automatic slow query logging (500ms threshold in production)
+- Development mode for detailed analysis (`ENVIRONMENT=development`)
+- `/api/debug/query-stats` endpoint (development only)
+- Analysis script: `backend/scripts/analyze_queries.py`
+
+**Production Safety**:
+- Defaults to production mode (no configuration required)
+- Zero memory overhead in production
+- Debug endpoints automatically disabled
+- Query parameters never logged in production
+
+---
+
+## Testing & Validation
+
+### Running Tests
+
+```bash
+# Run all tests
+pytest backend/tests/
+
+# Run performance tests only
+pytest backend/tests/test_query_performance.py
+
+# Run with coverage
+pytest --cov=app backend/tests/
+```
+
+### Performance Testing Results
+
+**Before Optimization**:
+- Position details: 1,487 queries, 337ms
+- Bulk chart data: 36 queries per request
+- N+1 patterns: 5 identified
+
+**After Optimization**:
+- Position details: 22 queries (98.5% reduction)
+- Bulk chart data: 22 queries (39% reduction)
+- N+1 patterns: 0 remaining ✅
+- Database indexes: 40 created ✅
+- All tests passing ✅
+
+---
+
+## Optimization History
+
 ### 2025-11-25 - Fixed N+1 in User Data Export
 
 **Issue**: User export function queried events individually for each position

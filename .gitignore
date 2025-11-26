@@ -169,3 +169,6 @@ backend/tests/README.md
 backend/tests/requirements-test.txt
 backend/tests/conftest.py
 test_data.zip
+N1_QUERY_AND_INDEXING_SUMMARY.md
+PERFORMANCE_ANALYSIS.md
+backend/migrations/add_performance_indexes.py
