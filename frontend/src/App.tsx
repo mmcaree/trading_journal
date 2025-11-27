@@ -3,7 +3,7 @@ import React from 'react';
 import { BrowserRouter as Router, Routes, Route } from 'react-router-dom';
 import { ThemeProvider, createTheme } from '@mui/material/styles';
 import CssBaseline from '@mui/material/CssBaseline';
-import { QueryClient, QueryClientProvider } from 'react-query';
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 
 // Layouts
 import DashboardLayout from './layouts/DashboardLayout';
@@ -41,7 +41,7 @@ const queryClient = new QueryClient({
   defaultOptions: {
     queries: {
       staleTime: 30000,        // 30 seconds before data considered stale
-      cacheTime: 300000,       // 5 minutes in cache after component unmounts
+      gcTime: 300000,       // 5 minutes in cache after component unmounts
       refetchOnWindowFocus: false, // Don't refetch on window focus
       refetchOnMount: false,   // Don't always refetch on mount if data exists
       retry: 1,                // Only retry once on failure

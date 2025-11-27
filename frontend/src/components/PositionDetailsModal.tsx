@@ -88,6 +88,7 @@ import { SmartJournal } from './SmartJournal';
 import ErrorBoundary from './ErrorBoundary';
 import EditPositionModal from './EditPositionModal';
 import EditEventModal from './EditEventModal';
+import { usePrefetch } from '../hooks/usePrefetch';
 
 export interface PositionDetailsModalProps {
   open: boolean;
@@ -124,6 +125,13 @@ const PositionDetailsModal: React.FC<PositionDetailsModalProps> = ({
   position,
   onRefresh
 }) => {
+
+  const { prefetchRelatedPositions } = usePrefetch();
+  useEffect(() => {
+    if (open && position) {
+      prefetchRelatedPositions(position);
+    }
+  }, [open, position, prefetchRelatedPositions]);
   const { formatCurrency } = useCurrency();
   const { user } = useAuth();
   
