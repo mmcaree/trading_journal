@@ -172,4 +172,4 @@ test_data.zip
 N1_QUERY_AND_INDEXING_SUMMARY.md
 PERFORMANCE_ANALYSIS.md
 backend/migrations/add_performance_indexes.py
-backend/run_production_migration.py
+backend/migrations/run_production_migration.py
