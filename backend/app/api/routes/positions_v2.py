@@ -143,6 +143,12 @@ class PositionSummaryResponse(BaseModel):
     events: List[EventResponse]
     metrics: Dict[str, Any]
 
+class PaginatedPositionsResponse(BaseModel):
+    positions: List[PositionResponse]
+    total: int
+    page: int
+    pages: int
+
 class PendingOrderResponse(BaseModel):
     id: int
     symbol: str
@@ -385,6 +391,114 @@ def get_positions(
         })
 
     return responses
+
+@router.get("/paginated", response_model=PaginatedPositionsResponse)
+def get_positions_paginated(
+    page: int = Query(1, ge=1, description="Page number"),
+    limit: int = Query(50, ge=1, le=100, description="Items per page"),
+    status_filter: Optional[str] = Query(None, alias="status"),
+    search: Optional[str] = Query(None, description="Search by ticker or tag name"),
+    strategy: Optional[str] = Query(None),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    """Get paginated positions for list views (Positions page)"""
+    from sqlalchemy import func, or_
+    from app.models.position_models import PositionTag, position_tag_assignment
+    
+    # Base query with tag join for search
+    query = db.query(TradingPosition).filter(TradingPosition.user_id == current_user.id)
+    
+    # Apply filters
+    if status_filter:
+        try:
+            status_enum = PositionStatus(status_filter.lower())
+            query = query.filter(TradingPosition.status == status_enum)
+        except ValueError:
+            raise BadRequestException(f"Invalid status: {status_filter}")
+    
+    if strategy:
+        query = query.filter(TradingPosition.strategy == strategy)
+    
+    # Search by ticker or tag name
+    if search:
+        # Join with tags for search
+        query = query.outerjoin(
+            position_tag_assignment,
+            TradingPosition.id == position_tag_assignment.c.position_id
+        ).outerjoin(
+            PositionTag,
+            position_tag_assignment.c.tag_id == PositionTag.id
+        ).filter(
+            or_(
+                TradingPosition.ticker.ilike(f"%{search}%"),
+                PositionTag.name.ilike(f"%{search}%")
+            )
+        ).distinct()
+    
+    # Get total count before pagination
+    total = query.count()
+    
+    # Calculate pagination
+    offset = (page - 1) * limit
+    pages = (total + limit - 1) // limit  # Ceiling division
+    
+    # Apply pagination and eager load tags
+    positions = query.options(joinedload(TradingPosition.tags)) \
+        .order_by(TradingPosition.opened_at.desc()) \
+        .offset(offset) \
+        .limit(limit) \
+        .all()
+    
+    # Build response list
+    responses = []
+    for position in positions:
+        tags_list = [
+            {"id": tag.id, "name": tag.name, "color": tag.color}
+            for tag in position.tags
+        ]
+        
+        # Calculate return percent for closed positions
+        return_percent = None
+        if position.status == PositionStatus.CLOSED and position.total_realized_pnl:
+            # Simple calculation based on total cost vs total PnL
+            if position.total_cost > 0:
+                return_percent = round((position.total_realized_pnl / position.total_cost) * 100, 2)
+        
+        responses.append({
+            "id": position.id,
+            "ticker": position.ticker,
+            "strategy": position.strategy,
+            "setup_type": position.setup_type,
+            "timeframe": position.timeframe,
+            "status": position.status.value,
+            "current_shares": position.current_shares,
+            "avg_entry_price": position.avg_entry_price,
+            "total_cost": position.total_cost,
+            "total_realized_pnl": position.total_realized_pnl,
+            "current_stop_loss": position.current_stop_loss,
+            "current_take_profit": position.current_take_profit,
+            "opened_at": position.opened_at,
+            "closed_at": position.closed_at,
+            "notes": position.notes,
+            "lessons": position.lessons,
+            "mistakes": position.mistakes,
+            "events_count": 0,  # Not loading events for list view
+            "return_percent": return_percent,
+            "original_risk_percent": position.original_risk_percent,
+            "current_risk_percent": position.current_risk_percent,
+            "original_shares": position.original_shares,
+            "account_value_at_entry": position.account_value_at_entry,
+            "events": None,  # Never include events in paginated list view
+            "tags": tags_list
+        })
+    
+    return {
+        "positions": responses,
+        "total": total,
+        "page": page,
+        "pages": pages
+    }
 
 @router.get("/{position_id}", response_model=PositionSummaryResponse)
 def get_position_details(

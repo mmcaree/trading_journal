@@ -9,7 +9,7 @@ import {
   TableContainer,
   TableHead,
   TableRow,
-  TablePagination,
+  Pagination,
   Chip,
   TextField,
   InputAdornment,
@@ -29,9 +29,9 @@ import {
   Upload as UploadIcon,
   Compare as CompareIcon
 } from '@mui/icons-material';
-import { getAllPositions, getPositionDetails, Position, PositionDetails } from '../services/positionsService';
+import { getPositionsPaginated, getPositionDetails, Position, PositionDetails } from '../services/positionsService';
 import { useCurrency } from '../context/CurrencyContext';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useSearchParams } from 'react-router-dom';
 import AddToPositionModal from '../components/AddToPositionModal';
 import SellFromPositionModal from '../components/SellFromPositionModal';
 import UpdateStopLossModal from '../components/UpdateStopLossModal';
@@ -46,12 +46,16 @@ const Positions: React.FC = () => {
   const [positions, setPositions] = useState<Position[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [searchQuery, setSearchQuery] = useState('');
-  const [page, setPage] = useState(0);
-  const [rowsPerPage, setRowsPerPage] = useState(20);
+  const [totalPositions, setTotalPositions] = useState(0);
+  const [totalPages, setTotalPages] = useState(0);
   const [selectedForComparison, setSelectedForComparison] = useState<number[]>([]);
   
+  const [searchParams, setSearchParams] = useSearchParams();
   const navigate = useNavigate();
+  
+  // Get params from URL or use defaults
+  const page = parseInt(searchParams.get('page') || '1', 10);
+  const searchQuery = searchParams.get('search') || '';
   
   // Modal state
   const [addToPositionModal, setAddToPositionModal] = useState<{
@@ -101,14 +105,14 @@ const Positions: React.FC = () => {
     },
     onSellPosition: () => {
       // Sell from selected position or first position
-      const position = selectedPosition || filteredPositions[0];
+      const position = selectedPosition || positions[0];
       if (position) {
         handleOpenSellFromPosition(position);
       }
     },
     onPositionDetails: () => {
       // Show details for selected position or first position
-      const position = selectedPosition || filteredPositions[0];
+      const position = selectedPosition || positions[0];
       if (position) {
         handleOpenPositionDetails(position);
       }
@@ -134,18 +138,21 @@ const Positions: React.FC = () => {
 
   useEffect(() => {
     loadPositions();
-  }, []);
+  }, [page, searchQuery]); // Reload when page or search changes
 
   const loadPositions = async () => {
     try {
       setLoading(true);
       setError(null);
       
-      console.log('Loading open positions from new API...');
-      const positionsData = await getAllPositions({ status: 'open', limit: 100 });
-      console.log('Loaded positions:', positionsData);
+      const result = await getPositionsPaginated(page, 50, {
+        status: 'open',
+        search: searchQuery || undefined
+      });
       
-      setPositions(positionsData);
+      setPositions(result.positions);
+      setTotalPositions(result.total);
+      setTotalPages(result.pages);
     } catch (err: any) {
       console.error('Failed to load positions:', err);
       setError(err.message || 'Failed to load positions');
@@ -154,25 +161,27 @@ const Positions: React.FC = () => {
     }
   };
 
-  const filteredPositions = positions.filter(position =>
-    position.ticker.toLowerCase().includes(searchQuery.toLowerCase()) ||
-    (position.setup_type && position.setup_type.toLowerCase().includes(searchQuery.toLowerCase())) ||
-    (position.strategy && position.strategy.toLowerCase().includes(searchQuery.toLowerCase())) ||
-    (position.tags && position.tags.some(tag => tag.name.toLowerCase().includes(searchQuery.toLowerCase())))  // ← ADD THIS LINE
-  );
-
-  const paginatedPositions = filteredPositions.slice(
-    page * rowsPerPage,
-    page * rowsPerPage + rowsPerPage
-  );
+  // No client-side filtering needed - server handles it
+  const paginatedPositions = positions;
 
   const handleChangePage = (event: unknown, newPage: number) => {
-    setPage(newPage);
+    setSearchParams(prev => {
+      prev.set('page', newPage.toString());
+      return prev;
+    });
   };
 
-  const handleChangeRowsPerPage = (event: React.ChangeEvent<HTMLInputElement>) => {
-    setRowsPerPage(parseInt(event.target.value, 25));
-    setPage(0);
+  const handleSearchChange = (event: React.ChangeEvent<HTMLInputElement>) => {
+    setSearchParams(prev => {
+      const newParams = new URLSearchParams(prev);
+      if (event.target.value) {
+        newParams.set('search', event.target.value);
+      } else {
+        newParams.delete('search');
+      }
+      newParams.set('page', '1'); // Reset to page 1 on search
+      return newParams;
+    });
   };
 
   const formatDate = (dateStr: string): string => {
@@ -332,9 +341,9 @@ const Positions: React.FC = () => {
       <Paper sx={{ p: 2, mb: 3 }}>
         <TextField
           fullWidth
-          placeholder="Search positions by ticker, strategy, or setup type... (Ctrl+F)"
+          placeholder="Search positions by ticker, strategy, setup, or tag... (Ctrl+F)"
           value={searchQuery}
-          onChange={(e) => setSearchQuery(e.target.value)}
+          onChange={handleSearchChange}
           InputProps={{
             startAdornment: (
               <InputAdornment position="start">
@@ -347,6 +356,20 @@ const Positions: React.FC = () => {
 
       {/* Positions Table */}
       <Paper>
+        {/* Pagination Info */}
+        <Box sx={{ px: 2, py: 1, display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderBottom: 1, borderColor: 'divider' }}>
+          <Typography variant="body2" color="text.secondary">
+            Showing {positions.length === 0 ? 0 : ((page - 1) * 50) + 1}-{Math.min(page * 50, totalPositions)} of {totalPositions} positions
+          </Typography>
+          <Pagination 
+            count={totalPages} 
+            page={page} 
+            onChange={handleChangePage}
+            color="primary"
+            size="small"
+          />
+        </Box>
+
         <TableContainer>
           <Table>
             <TableHead>
@@ -488,15 +511,15 @@ const Positions: React.FC = () => {
           </Table>
         </TableContainer>
 
-        <TablePagination
-          rowsPerPageOptions={[20, 30, 50, 100]}
-          component="div"
-          count={filteredPositions.length}
-          rowsPerPage={rowsPerPage}
-          page={page}
-          onPageChange={handleChangePage}
-          onRowsPerPageChange={handleChangeRowsPerPage}
-        />
+        {/* Bottom pagination */}
+        <Box sx={{ p: 2, display: 'flex', justifyContent: 'center' }}>
+          <Pagination 
+            count={totalPages} 
+            page={page} 
+            onChange={handleChangePage}
+            color="primary"
+          />
+        </Box>
       </Paper>
 
       {positions.length === 0 && !loading && !error && (
