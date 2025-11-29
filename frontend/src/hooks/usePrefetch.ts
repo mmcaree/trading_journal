@@ -42,7 +42,9 @@ export const usePrefetch = () => {
 
   const prefetchPositionDetails = async (positionId: number) => {
     try {
-      console.log('🔄 Prefetching position details for ID:', positionId);
+      if (process.env.NODE_ENV === 'development') {
+        console.debug('🔄 Prefetching position details for ID:', positionId);
+      }
       await queryClient.prefetchQuery({
         queryKey: [POSITION_DETAILS_KEY, positionId],
         queryFn: () => getPositionDetails(positionId),
@@ -58,7 +60,9 @@ export const usePrefetch = () => {
   const prefetchNextPage = async (currentPage: number, rowsPerPage: number, searchQuery: string = ''): Promise<void> => {
     try {
       const nextPage = currentPage + 1;
-      console.log('📄 Prefetching next page:', nextPage, 'Search:', searchQuery || 'none');
+      if (process.env.NODE_ENV === 'development') {
+        console.debug('📄 Prefetching next page:', nextPage, 'Search:', searchQuery || 'none');
+      }
 
       await queryClient.prefetchQuery({
         queryKey: [POSITIONS_PAGINATED_KEY, nextPage, searchQuery],

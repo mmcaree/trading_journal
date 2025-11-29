@@ -129,6 +129,7 @@ export async function getAllPositions(filters?: {
   strategy?: string;
   skip?: number;
   limit?: number;
+  include_events?: boolean;
 }): Promise<Position[]> {
   try {
     // Check cache first for common requests
@@ -146,6 +147,7 @@ export async function getAllPositions(filters?: {
     if (filters?.strategy) params.append('strategy', filters.strategy);
     if (filters?.skip) params.append('skip', filters.skip.toString());
     if (filters?.limit) params.append('limit', filters.limit.toString());
+    if (filters?.include_events) params.append('include_events', 'true');
     
     const url = `/api/v2/positions/${params.toString() ? `?${params.toString()}` : ''}`;
     console.log('Fetching fresh positions from:', url);
@@ -606,7 +608,8 @@ export interface LifetimeTickerAnalytics {
 
 export async function getLifetimeTickerAnalytics(ticker: string): Promise<LifetimeTickerAnalytics> {
   try {
-    const allPositions = await getAllPositions({ ticker, limit: 1000 });
+    // Include events to get return_percent calculation from backend
+    const allPositions = await getAllPositions({ ticker, limit: 1000, include_events: true });
     
     const openPositions = allPositions.filter(p => p.status === 'open');
     const closedPositions = allPositions.filter(p => p.status === 'closed');
