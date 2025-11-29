@@ -1,4 +1,5 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState } from 'react';
+import { useQuery } from '@tanstack/react-query';
 import { 
   Box, 
   Typography, 
@@ -29,7 +30,7 @@ import {
   Upload as UploadIcon,
   Compare as CompareIcon
 } from '@mui/icons-material';
-import { getPositionsPaginated, getPositionDetails, Position, PositionDetails } from '../services/positionsService';
+import { getPositionsPaginated, Position } from '../services/positionsService';
 import { useCurrency } from '../context/CurrencyContext';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import AddToPositionModal from '../components/AddToPositionModal';
@@ -41,13 +42,10 @@ import UniversalImportModal from '../components/UniversalImportModal';
 import TagChip from '../components/TagChip';
 import { KeyboardShortcutsButton } from '../components/KeyboardShortcutsHelp';
 import { useKeyboardShortcuts, createTradingShortcuts } from '../hooks/useKeyboardShortcuts';
+import { usePrefetch, POSITIONS_PAGINATED_KEY, CACHE_TTL } from '../hooks/usePrefetch';
+
 
 const Positions: React.FC = () => {
-  const [positions, setPositions] = useState<Position[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
-  const [totalPositions, setTotalPositions] = useState(0);
-  const [totalPages, setTotalPages] = useState(0);
   const [selectedForComparison, setSelectedForComparison] = useState<number[]>([]);
   
   const [searchParams, setSearchParams] = useSearchParams();
@@ -94,34 +92,64 @@ const Positions: React.FC = () => {
   const [importModal, setImportModal] = useState(false);
 
   const [selectedPosition, setSelectedPosition] = useState<Position | null>(null);
+  const [hoveredPositionId, setHoveredPositionId] = useState<number | null>(null);
+
   
   const { formatCurrency } = useCurrency();
+  const { prefetchPositionDetails, prefetchNextPage } = usePrefetch();
+
+  // React Query integration for paginated positions
+  const { 
+    data, 
+    isLoading: loading, 
+    error: queryError,
+    refetch: refetchPositions 
+  } = useQuery({
+    queryKey: [POSITIONS_PAGINATED_KEY, page, searchQuery],
+    queryFn: () => getPositionsPaginated(page, 50, {
+      status: 'open',
+      search: searchQuery || undefined
+    }),
+    staleTime: CACHE_TTL.POSITIONS_LIST_STALE, // 30 seconds
+    gcTime: CACHE_TTL.POSITIONS_LIST_GC, // 5 minutes
+  });
+
+  const positions = data?.positions || [];
+  const totalPositions = data?.total || 0;
+  const totalPages = data?.pages || 0;
+  const error = queryError ? (queryError as Error).message : null;
+
+  // Prefetch next page
+  React.useEffect(() => {
+    if (page < totalPages) {
+      prefetchNextPage(page, 50, searchQuery);
+    }
+  }, [page, totalPages, searchQuery, prefetchNextPage]);
+
+  // No client-side filtering needed - server handles it
+  const paginatedPositions = positions;
 
   // Keyboard shortcuts for positions page
   const tradingShortcuts = createTradingShortcuts({
     onAddPosition: () => {
-      // Open create position modal
       setCreatePositionModal(true);
     },
     onSellPosition: () => {
-      // Sell from selected position or first position
       const position = selectedPosition || positions[0];
       if (position) {
         handleOpenSellFromPosition(position);
       }
     },
     onPositionDetails: () => {
-      // Show details for selected position or first position
       const position = selectedPosition || positions[0];
       if (position) {
         handleOpenPositionDetails(position);
       }
     },
     onRefresh: () => {
-      loadPositions();
+      refetchPositions();
     },
     onSearch: () => {
-      // Focus search input
       const searchInput = document.querySelector('input[placeholder*="Search"]') as HTMLInputElement;
       if (searchInput) {
         searchInput.focus();
@@ -136,33 +164,15 @@ const Positions: React.FC = () => {
     context: 'positions'
   });
 
-  useEffect(() => {
-    loadPositions();
-  }, [page, searchQuery]); // Reload when page or search changes
-
-  const loadPositions = async () => {
-    try {
-      setLoading(true);
-      setError(null);
+  React.useEffect(() => {
+    if (hoveredPositionId) {
+      const timer = setTimeout(() => {
+        prefetchPositionDetails(hoveredPositionId);
+      }, 300);
       
-      const result = await getPositionsPaginated(page, 50, {
-        status: 'open',
-        search: searchQuery || undefined
-      });
-      
-      setPositions(result.positions);
-      setTotalPositions(result.total);
-      setTotalPages(result.pages);
-    } catch (err: any) {
-      console.error('Failed to load positions:', err);
-      setError(err.message || 'Failed to load positions');
-    } finally {
-      setLoading(false);
+      return () => clearTimeout(timer);
     }
-  };
-
-  // No client-side filtering needed - server handles it
-  const paginatedPositions = positions;
+  }, [hoveredPositionId, prefetchPositionDetails]);
 
   const handleChangePage = (event: unknown, newPage: number) => {
     setSearchParams(prev => {
@@ -197,11 +207,8 @@ const Positions: React.FC = () => {
     setAddToPositionModal({ open: false, position: null });
   };
 
-  const handleAddToPositionSuccess = (updatedPosition: Position) => {
-    // Update the position in the list with optimistic update
-    setPositions(prev => 
-      prev.map(p => p.id === updatedPosition.id ? updatedPosition : p)
-    );
+  const handleAddToPositionSuccess = () => {
+    refetchPositions();
   };
 
   const handleOpenSellFromPosition = (position: Position) => {
@@ -212,17 +219,8 @@ const Positions: React.FC = () => {
     setSellFromPositionModal({ open: false, position: null });
   };
 
-  const handleSellFromPositionSuccess = (updatedPosition: Position) => {
-    // Handle both partial sale and complete position closure
-    if (updatedPosition.status === 'closed' || updatedPosition.current_shares === 0) {
-      // Position was closed, remove from the list
-      setPositions(prev => prev.filter(p => p.id !== updatedPosition.id));
-    } else {
-      // Partial sale, update the position in the list
-      setPositions(prev => 
-        prev.map(p => p.id === updatedPosition.id ? updatedPosition : p)
-      );
-    }
+  const handleSellFromPositionSuccess = () => {
+    refetchPositions();
   };
 
   const handleOpenUpdateStopLoss = (position: Position) => {
@@ -233,11 +231,8 @@ const Positions: React.FC = () => {
     setUpdateStopLossModal({ open: false, position: null });
   };
 
-  const handleUpdateStopLossSuccess = (updatedPosition: Position) => {
-    // Update the position in the list with new stop loss/take profit levels
-    setPositions(prev => 
-      prev.map(p => p.id === updatedPosition.id ? updatedPosition : p)
-    );
+  const handleUpdateStopLossSuccess = () => {
+    refetchPositions();
   };
 
   const handleOpenPositionDetails = (position: Position) => {
@@ -249,14 +244,11 @@ const Positions: React.FC = () => {
   };
 
   const handlePositionDetailsRefresh = () => {
-    // Refresh the positions list when details modal is refreshed
-    loadPositions();
+    refetchPositions();
   };
 
-  // Create Position Modal handlers
-  const handleCreatePositionSuccess = (newPosition: Position) => {
-    // Refresh positions list to include the new position
-    loadPositions();
+  const handleCreatePositionSuccess = () => {
+    refetchPositions();
   };
 
   // Comparison handlers
@@ -331,7 +323,7 @@ const Positions: React.FC = () => {
       {error && (
         <Alert severity="error" sx={{ mb: 3 }}>
           {error}
-          <Button onClick={loadPositions} sx={{ ml: 2 }}>
+          <Button onClick={() => refetchPositions()} sx={{ ml: 2 }}>
             Retry
           </Button>
         </Alert>
@@ -395,6 +387,9 @@ const Positions: React.FC = () => {
               {paginatedPositions.map((position) => (
                 <TableRow 
                   key={position.id}
+                  hover
+                  onMouseEnter={() => setHoveredPositionId(position.id)}
+                  onMouseLeave={() => setHoveredPositionId(null)}
                   sx={{ 
                     cursor: 'pointer',
                     '&:hover': { backgroundColor: 'rgba(255, 255, 255, 0.05)' },
@@ -407,7 +402,6 @@ const Positions: React.FC = () => {
                     borderLeftColor: 'primary.main'
                   }}
                   onClick={(e) => {
-                    // Allow double-click to open details, single click to select
                     if (e.detail === 2) {
                       handleOpenPositionDetails(position);
                     } else {
@@ -585,7 +579,7 @@ const Positions: React.FC = () => {
         open={importModal}
         onClose={() => setImportModal(false)}
         onImportSuccess={() => {
-          loadPositions();
+          refetchPositions();
           setImportModal(false);
         }}
       />

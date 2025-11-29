@@ -88,7 +88,8 @@ import { SmartJournal } from './SmartJournal';
 import ErrorBoundary from './ErrorBoundary';
 import EditPositionModal from './EditPositionModal';
 import EditEventModal from './EditEventModal';
-import { usePrefetch } from '../hooks/usePrefetch';
+import { usePrefetch, POSITION_DETAILS_KEY, LIFETIME_ANALYTICS_KEY, CACHE_TTL } from '../hooks/usePrefetch';
+import { useQuery } from '@tanstack/react-query';
 
 export interface PositionDetailsModalProps {
   open: boolean;
@@ -137,14 +138,8 @@ const PositionDetailsModal: React.FC<PositionDetailsModalProps> = ({
   
   // Memoize account balance to prevent unnecessary calls on every render
   const accountBalance = useMemo(() => accountService.getCurrentBalance(), []);
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const [positionDetails, setPositionDetails] = useState<PositionDetails | null>(null);
-  const [lifetimeAnalytics, setLifetimeAnalytics] = useState<LifetimeTickerAnalytics | null>(null);
-  const [activeTab, setActiveTab] = useState(0);
   
   // Notes & Journal tab state
-  const [charts, setCharts] = useState<PositionChart[]>([]);
   const [uploadingImage, setUploadingImage] = useState(false);
   
   // Chart viewing state  
@@ -156,50 +151,55 @@ const PositionDetailsModal: React.FC<PositionDetailsModalProps> = ({
   const [editPositionModalOpen, setEditPositionModalOpen] = useState(false);
   const [editEventModalOpen, setEditEventModalOpen] = useState(false);
   const [selectedEvent, setSelectedEvent] = useState<PositionEvent | null>(null);
+  const [activeTab, setActiveTab] = useState(0);
 
-  // Load position details when modal opens
-  useEffect(() => {
-    if (open) {
-      loadPositionDetails();
-    }
-  }, [open, position.id]);
+  const { 
+    data: positionDetails, 
+    isLoading: loadingDetails,
+    refetch: refetchDetails 
+  } = useQuery({
+    queryKey: [POSITION_DETAILS_KEY, position.id],
+    queryFn: () => getPositionDetails(position.id),
+    enabled: open,
+    staleTime: CACHE_TTL.POSITION_DETAILS_STALE,
+    gcTime: CACHE_TTL.POSITION_DETAILS_GC,
+  });
 
-  const loadPositionDetails = async () => {
-    try {
-      setLoading(true);
-      setError(null);
-      
-      console.log('Loading position details for:', position.id);
-      
-      // Load position details and lifetime analytics in parallel
-      const [details, analytics] = await Promise.all([
-        getPositionDetails(position.id),
-        getLifetimeTickerAnalytics(position.ticker)
-      ]);
-      
-      setPositionDetails(details);
-      setLifetimeAnalytics(analytics);
-      
-      // Load charts for the Notes & Journal tab
-      try {
-        const chartsResponse = await positionImageService.getPositionCharts(position.id);
-        setCharts(chartsResponse.charts);
-      } catch (err) {
-        console.error('Failed to load charts:', err);
-        // Don't fail the whole modal if charts fail to load
-        setCharts([]);
-      }
-      
-    } catch (err: any) {
-      console.error('Failed to load position details:', err);
-      setError(err.message || 'Failed to load position details');
-    } finally {
-      setLoading(false);
-    }
-  };
+  const { 
+    data: lifetimeAnalytics,
+    isLoading: loadingAnalytics 
+  } = useQuery({
+    queryKey: [LIFETIME_ANALYTICS_KEY, position.ticker],
+    queryFn: () => getLifetimeTickerAnalytics(position.ticker),
+    enabled: open,
+    staleTime: CACHE_TTL.LIFETIME_ANALYTICS_STALE,
+    gcTime: CACHE_TTL.LIFETIME_ANALYTICS_GC,
+  });
+
+  const { 
+    data: charts = [],
+    refetch: refetchCharts 
+  } = useQuery({
+    queryKey: ['position-charts', position.id],
+    queryFn: async () => {
+      const response = await positionImageService.getPositionCharts(position.id);
+      return response.charts;
+    },
+    enabled: open && activeTab === 3,
+    staleTime: 1000 * 30,
+    gcTime: 1000 * 60 * 5,
+  });
+
+const loading = loadingDetails || loadingAnalytics;
+
+  const [error, setError] = useState<string | null>(null);
+
 
   const handleRefresh = async () => {
-    await loadPositionDetails();
+    await Promise.all([
+      refetchDetails(),
+      refetchCharts(),
+    ]);
     if (onRefresh) {
       onRefresh();
     }
@@ -229,8 +229,7 @@ const PositionDetailsModal: React.FC<PositionDetailsModalProps> = ({
       );
       
       // Reload charts
-      const chartsResponse = await positionImageService.getPositionCharts(position.id);
-      setCharts(chartsResponse.charts);
+      await refetchCharts();
       
     } catch (err: any) {
       console.error('Failed to upload image:', err);
@@ -261,8 +260,7 @@ const PositionDetailsModal: React.FC<PositionDetailsModalProps> = ({
       await positionImageService.deleteChart(chartId);
       
       // Reload charts
-      const chartsResponse = await positionImageService.getPositionCharts(position.id);
-      setCharts(chartsResponse.charts);
+      await refetchCharts();
       
     } catch (err: any) {
       console.error('Failed to delete chart:', err);
@@ -288,42 +286,33 @@ const PositionDetailsModal: React.FC<PositionDetailsModalProps> = ({
   };
 
   const handleEditPositionSuccess = (updatedPosition: Position) => {
-    // Refresh the position details to reflect changes
-    loadPositionDetails();
-    onRefresh?.(); // Also refresh parent component
+    refetchDetails();
+    onRefresh?.();
     setEditPositionModalOpen(false);
   };
 
   const handleEditEventSuccess = (updatedEvent: PositionEvent) => {
-    // Refresh the position details to reflect event changes
-    loadPositionDetails();
-    onRefresh?.(); // Also refresh parent component
+    refetchDetails();
+    onRefresh?.();
     setEditEventModalOpen(false);
     setSelectedEvent(null);
   };
 
   const handleUpdateEventStopLoss = async (eventId: number, newStopLoss: number | null) => {
     try {
-      setLoading(true);
-      
-      // Import the updatePositionEvent function
       const { updatePositionEvent } = await import('../services/positionsService');
       
-      // Update the event
       await updatePositionEvent(eventId, {
         stop_loss: newStopLoss
       });
       
-      // Refresh the position details to show updated data
-      await loadPositionDetails();
+      await refetchDetails();
       
     } catch (err: any) {
       console.error('Failed to update event stop loss:', err);
       setError(err.message || 'Failed to update stop loss');
-    } finally {
-      setLoading(false);
     }
-  };
+};
 
   const handleTabChange = (event: React.SyntheticEvent, newValue: number) => {
     setActiveTab(newValue);
