@@ -41,7 +41,6 @@ import UniversalImportModal from '../components/UniversalImportModal';
 import TagChip from '../components/TagChip';
 import { KeyboardShortcutsButton } from '../components/KeyboardShortcutsHelp';
 import { useKeyboardShortcuts, createTradingShortcuts } from '../hooks/useKeyboardShortcuts';
-import { usePrefetch } from '../hooks/usePrefetch';
 
 const Positions: React.FC = () => {
   const [positions, setPositions] = useState<Position[]>([]);
@@ -93,14 +92,6 @@ const Positions: React.FC = () => {
   const [selectedPosition, setSelectedPosition] = useState<Position | null>(null);
   
   const { formatCurrency } = useCurrency();
-
-  const { prefetchPositionDetails, prefetchNextPage } = usePrefetch();
-
-  useEffect(() => {
-  if (paginatedPositions.length > 0 && page > 2) { 
-    prefetchNextPage(page, rowsPerPage, searchQuery);
-  }
-}, [page, rowsPerPage, searchQuery, prefetchNextPage]);
 
   // Keyboard shortcuts for positions page
   const tradingShortcuts = createTradingShortcuts({
@@ -381,8 +372,6 @@ const Positions: React.FC = () => {
               {paginatedPositions.map((position) => (
                 <TableRow 
                   key={position.id}
-                  hover
-                  onMouseEnter={() => prefetchPositionDetails(position.id)}
                   sx={{ 
                     cursor: 'pointer',
                     '&:hover': { backgroundColor: 'rgba(255, 255, 255, 0.05)' },
