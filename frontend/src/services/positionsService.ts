@@ -368,6 +368,47 @@ export async function getAllPositionsForAnalytics(): Promise<Position[]> {
   return getAllPositions({ limit: 100000 });
 }
 
+/**
+ * Get paginated positions for list views
+ * Returns positions with pagination metadata
+ */
+export async function getPositionsPaginated(
+  page: number = 1,
+  limit: number = 50,
+  filters?: {
+    status?: 'open' | 'closed';
+    search?: string;
+    strategy?: string;
+  }
+): Promise<{
+  positions: Position[];
+  total: number;
+  page: number;
+  pages: number;
+}> {
+  try {
+    const params = new URLSearchParams();
+    params.append('page', page.toString());
+    params.append('limit', limit.toString());
+    
+    if (filters?.status) {
+      params.append('status', filters.status);
+    }
+    if (filters?.search) {
+      params.append('search', filters.search);
+    }
+    if (filters?.strategy) {
+      params.append('strategy', filters.strategy);
+    }
+    
+    const response = await api.get(`/api/v2/positions/paginated?${params}`);
+    return response.data;
+  } catch (error) {
+    console.error('Error fetching paginated positions:', error);
+    throw error;
+  }
+}
+
 // =====================================================
 // LEGACY INTERFACE COMPATIBILITY
 // =====================================================
@@ -768,6 +809,7 @@ export async function getBulkPositionChartData(
 export default {
   getAllPositions,
   getAllPositionsWithEvents,
+  getPositionsPaginated,
   getPositionDetails,
   createPosition,
   addToPosition,
