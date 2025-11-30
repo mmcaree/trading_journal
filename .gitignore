@@ -81,7 +81,7 @@ logs/
 
 # One-time migration and test scripts
 debug_*.py
-test_*.py
+#test_*.py
 check_*.py
 migrate_*.py
 reset_*.py
@@ -161,13 +161,12 @@ backend/static/uploads/
 scripts/create_additional_issues.py
 backend/tests/requirements-test.txt
 backend/tests/README.md
-backend/tests/conftest.py
+#backend/tests/conftest.py
 backend/pyproject.toml
 backend/pyproject.toml
 .gitignore
 backend/tests/README.md
 backend/tests/requirements-test.txt
-backend/tests/conftest.py
 test_data.zip
 N1_QUERY_AND_INDEXING_SUMMARY.md
 PERFORMANCE_ANALYSIS.md
