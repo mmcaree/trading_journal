@@ -57,5 +57,12 @@ def client():
 
 def pytest_sessionfinish():
     import os
+    import time
     if os.path.exists("test.db"):
-        os.remove("test.db")
+        # Try to remove the database, but don't fail if it's locked
+        try:
+            time.sleep(0.1)  # Brief delay to let connections close
+            os.remove("test.db")
+        except PermissionError:
+            # File is still in use, skip cleanup
+            pass
