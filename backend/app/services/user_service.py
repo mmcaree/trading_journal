@@ -269,9 +269,8 @@ def delete_user_account(db: Session, user_id: int) -> bool:
     from app.models.position_models import (
         TradingPosition, TradingPositionEvent, ImportedPendingOrder,
         TradingPositionJournalEntry, TradingPositionChart, InstructorNote, PositionTag,
-        position_tag_assignment
-    )
-    from app.models.account_transaction import AccountTransaction
+        position_tag_assignment, AccountTransaction
+)
 
     # Gracefully handle legacy data cleanup — safe even if models.py is gone
     Trade = Chart = PartialExit = TradeEntry = None

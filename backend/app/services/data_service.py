@@ -2,9 +2,8 @@ from sqlalchemy.orm import Session
 from app.models.position_models import (
     TradingPosition, TradingPositionEvent, ImportedPendingOrder, 
     TradingPositionJournalEntry, TradingPositionChart, InstructorNote, PositionTag,
-    position_tag_assignment
+    position_tag_assignment, AccountTransaction
 )
-from app.models.account_transaction import AccountTransaction
 
 
 def clear_all_user_data(db: Session, user_id: int) -> None:
