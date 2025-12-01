@@ -353,35 +353,113 @@ def get_advanced_performance_metrics(
     win_rate = standard.win_rate
     avg_win = standard.average_profit
     avg_loss = standard.average_loss or 1  # avoid div by zero
-    gross_profit = standard.total_profit_loss + abs(standard.total_profit_loss) if standard.total_profit_loss < 0 else standard.total_profit_loss
-    gross_loss = abs(standard.total_profit_loss - gross_profit)
+    
+    # Use the correctly calculated gross profit and loss from standard metrics
+    # gross_profit is sum of all winning trades, gross_loss is sum of all losing trades (as positive value)
+    winning_trades_total = 0.0
+    losing_trades_total = 0.0
+    
+    for pos in positions:
+        realized_pnl = pos.total_realized_pnl or 0.0
+        if realized_pnl > 0:
+            winning_trades_total += realized_pnl
+        elif realized_pnl < 0:
+            losing_trades_total += abs(realized_pnl)
+    
+    gross_profit = winning_trades_total
+    gross_loss = losing_trades_total
 
-    # === 2. Daily P&L for equity curve & drawdown ===
+    # Get user's initial account balance
+    from app.models.position_models import User, AccountTransaction
+    user = db.query(User).filter(User.id == user_id).first()
+    
+    # Use initial_account_balance if available, otherwise use a default or first position cost as estimate
+    if user and user.initial_account_balance:
+        starting_capital = user.initial_account_balance
+    elif positions and positions[0].total_cost:
+        # Estimate: assume starting capital was at least enough to cover first position
+        starting_capital = max(10000, positions[0].total_cost * 2)
+    else:
+        starting_capital = 10000  # Default fallback
+
+    # === 2. Query deposits/withdrawals for the date range ===
+    transactions_query = db.query(AccountTransaction).filter(
+        AccountTransaction.user_id == user_id
+    )
+    
+    # Apply date filters to transactions if provided
+    if start_date:
+        try:
+            start_date_obj = datetime.fromisoformat(start_date.replace('Z', '+00:00'))
+            transactions_query = transactions_query.filter(AccountTransaction.transaction_date >= start_date_obj)
+        except ValueError:
+            pass
+    
+    if end_date:
+        try:
+            end_date_obj = datetime.fromisoformat(end_date.replace('Z', '+00:00'))
+            transactions_query = transactions_query.filter(AccountTransaction.transaction_date <= end_date_obj)
+        except ValueError:
+            pass
+    
+    transactions = transactions_query.all()
+    
+    # Build daily transaction totals (net cash flow per day)
+    daily_transactions = defaultdict(float)
+    total_deposits = 0.0
+    total_withdrawals = 0.0
+    
+    for txn in transactions:
+        day = txn.transaction_date.date()
+        if txn.transaction_type == "DEPOSIT":
+            daily_transactions[day] += txn.amount
+            total_deposits += txn.amount
+        else:  # WITHDRAWAL
+            daily_transactions[day] -= txn.amount
+            total_withdrawals += txn.amount
+
+    # === 3. Daily P&L for equity curve & drawdown ===
     daily_pnl = defaultdict(float)
     for pos in positions:
         if pos.closed_at:
             day = pos.closed_at.date()
             daily_pnl[day] += float(pos.total_realized_pnl or 0)
 
-    sorted_days = sorted(daily_pnl.items())
-    dates = [d[0] for d in sorted_days]
-    daily_returns = np.array([d[1] for d in sorted_days])
-
-    equity = 0.0
-    peak = 0.0
+    # Combine all dates (P&L dates + transaction dates)
+    all_dates = set(daily_pnl.keys()) | set(daily_transactions.keys())
+    sorted_days = sorted(all_dates)
+    
+    # Build equity curve from actual account value (starting capital + cumulative P&L + net deposits/withdrawals)
+    account_value = starting_capital
+    peak = starting_capital
     max_dd = 0.0
+    max_dd_percent = 0.0
     equity_curve = []
+    dates = []
 
-    for pnl in daily_returns:
-        equity += pnl
-        equity_curve.append(round(equity, 2))
-        if equity > peak:
-            peak = equity
-        dd = peak - equity
+    for day in sorted_days:
+        # Add trading P&L for this day
+        account_value += daily_pnl.get(day, 0.0)
+        
+        # Add net deposits/withdrawals for this day
+        account_value += daily_transactions.get(day, 0.0)
+        
+        equity_curve.append(round(account_value, 2))
+        dates.append(day)
+        
+        # Track peak account value
+        if account_value > peak:
+            peak = account_value
+        
+        # Calculate drawdown in dollars
+        dd = peak - account_value
         if dd > max_dd:
             max_dd = dd
-
-    max_dd_percent = (max_dd / peak * 100) if peak > 0 else 0
+            # Calculate percentage based on peak account value
+            max_dd_percent = (dd / peak * 100) if peak > 0 else 0
+    
+    # Calculate daily returns array for risk metrics (P&L only, excluding cash flows)
+    daily_returns = np.array([daily_pnl.get(day, 0.0) for day in sorted_days])
 
     # === 3. Risk Metrics ===
     # Sharpe (annualized, risk-free rate = 0)
@@ -399,10 +477,21 @@ def get_advanced_performance_metrics(
 
     # Calmar Ratio
     years = max(1, (dates[-1] - dates[0]).days / 365.25) if len(dates) > 1 else 1
-    # Use first equity point as starting capital, or 10000 as fallback
-    starting_capital = abs(equity_curve[0]) if equity_curve and equity_curve[0] != 0 else 10000
-    annualized_return = ((equity_curve[-1] + starting_capital) / starting_capital) ** (1 / years) - 1 if equity_curve and starting_capital > 0 else 0
-    calmar = abs(annualized_return / (max_dd / peak)) if max_dd > 0 and peak > 0 and annualized_return != 0 else float('inf')
+    # Calculate annualized return based on actual account growth
+    final_account_value = equity_curve[-1] if equity_curve else starting_capital
+    
+    # Calculate net deposits/withdrawals for the period
+    net_cash_flow = total_deposits - total_withdrawals
+    
+    # Adjusted return: exclude cash flows from return calculation
+    # Return = (Ending Value - Starting Value - Net Deposits) / Starting Value
+    if starting_capital > 0:
+        total_return = (final_account_value - starting_capital - net_cash_flow) / starting_capital
+        annualized_return = (1 + total_return) ** (1 / years) - 1 if years > 0 else 0
+    else:
+        annualized_return = 0
+    
+    calmar = abs(annualized_return / (max_dd_percent / 100)) if max_dd_percent > 0 and annualized_return != 0 else float('inf')
 
     # Kelly Criterion (%)
     win_prob = win_rate / 100.0
@@ -416,11 +505,21 @@ def get_advanced_performance_metrics(
     # Expectancy
     expectancy = (win_prob * avg_win) - (loss_prob * avg_loss)
 
-    # Recovery Factor
-    recovery_factor = abs(total_pnl / max_dd) if max_dd > 0 else float('inf')
+    # Recovery Factor: Net profit divided by maximum drawdown
+    # Only makes sense if there was a drawdown, otherwise it's undefined
+    if max_dd > 0:
+        recovery_factor = abs(total_pnl / max_dd)
+    else:
+        # No drawdown means no losses yet - return None instead of infinity
+        recovery_factor = None
 
-    # Profit Factor
-    profit_factor = gross_profit / gross_loss if gross_loss > 0 else float('inf')
+    # Profit Factor: Gross profit divided by gross loss
+    # If there are no losses, profit factor is technically infinite, but we'll return None for clarity
+    if gross_loss > 0:
+        profit_factor = gross_profit / gross_loss
+    else:
+        # No losses yet - return None instead of infinity
+        profit_factor = None
 
     # Streaks
     curr_win, curr_loss, max_win, max_loss = _calculate_streaks(positions)
@@ -443,26 +542,19 @@ def get_advanced_performance_metrics(
         for k, v in sorted(monthly.items())
     ]
 
-    # Helper function to handle infinity values for JSON serialization
-    def json_safe_value(value, default=None):
-        """Convert infinity to None or default value for JSON compatibility"""
-        if value == float('inf') or value == float('-inf'):
-            return default
-        return value
-
     return {
         "total_trades": len(positions),
         "total_pnl": round(total_pnl, 2),
         "win_rate": round(win_rate, 2),
-        "profit_factor": json_safe_value(round(profit_factor, 2) if profit_factor != float('inf') else profit_factor, None),
+        "profit_factor": round(profit_factor, 2) if profit_factor is not None else None,
         "max_drawdown": round(max_dd, 2),
         "max_drawdown_percent": round(max_dd_percent, 2),
         "sharpe_ratio": round(sharpe, 2),
         "sortino_ratio": round(sortino, 2),
-        "calmar_ratio": json_safe_value(round(calmar, 2) if calmar != float('inf') else calmar, None),
+        "calmar_ratio": round(calmar, 2) if calmar != float('inf') else None,
         "kelly_percentage": kelly_percentage,
         "expectancy": round(expectancy, 2),
-        "recovery_factor": json_safe_value(round(recovery_factor, 2) if recovery_factor != float('inf') else recovery_factor, None),
+        "recovery_factor": round(recovery_factor, 2) if recovery_factor is not None else None,
         "consecutive_wins": curr_win,
         "consecutive_losses": curr_loss,
         "max_consecutive_wins": max_win,
@@ -471,5 +563,10 @@ def get_advanced_performance_metrics(
         "equity_curve": [
             {"date": d.strftime("%Y-%m-%d"), "equity": e}
             for d, e in zip(dates, equity_curve)
-        ]
+        ],
+        "starting_capital": round(starting_capital, 2),
+        "total_deposits": round(total_deposits, 2),
+        "total_withdrawals": round(total_withdrawals, 2),
+        "net_cash_flow": round(net_cash_flow, 2),
+        "annualized_return_percent": round(annualized_return * 100, 2)
     }

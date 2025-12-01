@@ -253,6 +253,13 @@ class UniversalImportService:
                 # For CANCELLED orders, use the "Price" column (order/limit price)
                 # For FILLED orders, use mapped price column (typically "Avg Price")
                 price = 0.0
+                is_options = False  # Track if this is an options trade (for Webull USA)
+                
+                # Detect options for Webull USA (before price parsing)
+                if broker_profile.name == 'webull_usa':
+                    from app.utils.options_parser import is_options_symbol, parse_options_symbol
+                    is_options = is_options_symbol(symbol)
+                
                 if status == 'CANCELLED':
                     # Cancelled orders have empty Avg Price, use Price column for stop loss price
                     price_cols = ['Price', 'Limit Price', 'Order Price']
@@ -261,6 +268,10 @@ class UniversalImportService:
                             try:
                                 price = clean_currency_value(row[col])
                                 if price > 0:
+                                    # Apply options multiplier for Webull USA options
+                                    if is_options and broker_profile.name == 'webull_usa':
+                                        from app.utils.options_parser import convert_options_price
+                                        price = convert_options_price(price)
                                     break
                             except:
                                 continue
@@ -275,6 +286,10 @@ class UniversalImportService:
                         if price <= 0:
                             self.warnings.append(f"Row {idx + 2}: Invalid price, skipping")
                             continue
+                        # Apply options multiplier for Webull USA options
+                        if is_options and broker_profile.name == 'webull_usa':
+                            from app.utils.options_parser import convert_options_price
+                            price = convert_options_price(price)
                     except (ValueError, TypeError, KeyError):
                         self.warnings.append(f"Row {idx + 2}: Invalid price, skipping")
                         continue
@@ -327,6 +342,12 @@ class UniversalImportService:
                 else:
                     take_profit = 0.0
                 
+                # Detect options for Webull USA and parse options info
+                options_info = None
+                if is_options and broker_profile.name == 'webull_usa':
+                    from app.utils.options_parser import parse_options_symbol
+                    options_info = parse_options_symbol(symbol)
+                
                 # Build standardized event
                 event = {
                     'symbol': symbol,
@@ -338,7 +359,8 @@ class UniversalImportService:
                     'commission': commission,
                     'stop_loss': stop_loss,
                     'take_profit': take_profit,
-                    'instrument_type': 'STOCK',  # Default, can be enhanced
+                    'instrument_type': 'OPTIONS' if is_options else 'STOCK',
+                    'options_info': options_info,
                     'notes': f"Imported from {broker_profile.display_name}"
                 }
                 

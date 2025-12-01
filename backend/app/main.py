@@ -214,6 +214,10 @@ from app.api.routes.positions_v2 import router as positions_v2_router, journal_r
 app.include_router(positions_v2_router, prefix="/api/v2")
 app.include_router(journal_router, prefix="/api/v2")
 
+# Include account transactions routes
+from app.api.routes.account_transactions import router as transactions_router
+app.include_router(transactions_router, prefix="/api/account-transactions", tags=["account-transactions"])
+
 # Include admin routes with error handling
 try:
     from app.api.routes.admin import router as admin_router

@@ -279,6 +279,10 @@ class User(Base):
     
     # Admin system - simple role-based access
     role = Column(String, default='STUDENT')  # 'STUDENT' or 'INSTRUCTOR'
+    
+    # Relationships
+    position_tags = relationship("PositionTag", back_populates="user")
+    account_transactions = relationship("AccountTransaction", back_populates="user", cascade="all, delete-orphan")
 
 
 class InstructorNote(Base):
@@ -327,6 +331,25 @@ class PositionTag(Base):
     __table_args__ = (
         UniqueConstraint('name', 'user_id', name='uix_user_tag_name'),
     )
+
+
+class AccountTransaction(Base):
+    """Track deposits and withdrawals to calculate accurate returns"""
+    __tablename__ = "account_transactions"
+
+    id = Column(Integer, primary_key=True, index=True)
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=False, index=True)
+    
+    transaction_type = Column(String, nullable=False)  # 'DEPOSIT' or 'WITHDRAWAL'
+    amount = Column(Float, nullable=False)  # Positive for both types
+    transaction_date = Column(DateTime, nullable=False, index=True)
+    
+    description = Column(String, nullable=True)  # Optional note
+    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False)
+    
+    # Relationship
+    user = relationship("User", back_populates="account_transactions")
 
     def __repr__(self):
         return f"<PositionTag {self.name} ({self.color})>"

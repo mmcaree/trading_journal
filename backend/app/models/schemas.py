@@ -454,3 +454,37 @@ class ImportResponse(BaseModel):
     error: Optional[str] = None
     available_columns: Optional[List[str]] = None
     column_map: Optional[Dict[str, Optional[str]]] = None
+
+
+# Account Transaction schemas
+class TransactionType(str, Enum):
+    DEPOSIT = "DEPOSIT"
+    WITHDRAWAL = "WITHDRAWAL"
+
+
+class AccountTransactionBase(BaseModel):
+    transaction_type: TransactionType
+    amount: float
+    transaction_date: datetime
+    description: Optional[str] = None
+
+
+class AccountTransactionCreate(AccountTransactionBase):
+    pass
+
+
+class AccountTransactionUpdate(BaseModel):
+    transaction_type: Optional[TransactionType] = None
+    amount: Optional[float] = None
+    transaction_date: Optional[datetime] = None
+    description: Optional[str] = None
+
+
+class AccountTransactionResponse(AccountTransactionBase):
+    id: int
+    user_id: int
+    created_at: datetime
+    updated_at: datetime
+
+    class Config:
+        from_attributes = True

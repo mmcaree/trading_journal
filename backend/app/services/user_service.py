@@ -271,6 +271,7 @@ def delete_user_account(db: Session, user_id: int) -> bool:
         TradingPositionJournalEntry, TradingPositionChart, InstructorNote, PositionTag,
         position_tag_assignment
     )
+    from app.models.account_transaction import AccountTransaction
 
     # Gracefully handle legacy data cleanup — safe even if models.py is gone
     Trade = Chart = PartialExit = TradeEntry = None
@@ -304,6 +305,9 @@ def delete_user_account(db: Session, user_id: int) -> bool:
         db.query(InstructorNote).filter(InstructorNote.instructor_id == user_id).delete(synchronize_session=False)
         # Delete instructor notes about this user (if they're a student)
         db.query(InstructorNote).filter(InstructorNote.student_id == user_id).delete(synchronize_session=False)
+        
+        # Delete account transactions
+        db.query(AccountTransaction).filter(AccountTransaction.user_id == user_id).delete(synchronize_session=False)
 
         # Delete any legacy data that might still exist
         if Trade is not None:

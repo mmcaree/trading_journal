@@ -1,5 +1,6 @@
 import { AccountSettings } from '../types/api';
 import { calculateRiskPercent as calcRisk } from '../utils/calculations';
+import { API_URL } from './apiConfig';
 
 // Re-export for backward compatibility
 export type { AccountSettings };
@@ -137,9 +138,48 @@ export const accountService = {
 
   /**
    * Get account growth statistics
+   * Now accounts for deposits and withdrawals to show true trading performance
    */
-  getAccountGrowth() {
+  async getAccountGrowth() {
     const settings = this.getAccountSettings();
+    
+    try {
+      // Try to fetch transaction summary to exclude deposits/withdrawals
+      const token = localStorage.getItem('token');
+      if (token) {
+        const response = await fetch(`${API_URL}/api/account-transactions/summary/totals`, {
+          headers: {
+            Authorization: `Bearer ${token}`,
+          },
+        });
+        
+        if (response.ok) {
+          const summary = await response.json();
+          const netCashFlow = summary.total_deposits - summary.total_withdrawals;
+          
+          // True trading growth = (Current - Starting - Net Deposits)
+          const tradingGrowth = settings.current_balance - settings.starting_balance - netCashFlow;
+          const tradingGrowthPercent = (tradingGrowth / settings.starting_balance) * 100;
+          
+          return {
+            growth: tradingGrowth,
+            growthPercent: tradingGrowthPercent,
+            startingBalance: settings.starting_balance,
+            currentBalance: settings.current_balance,
+            totalDeposits: summary.total_deposits,
+            totalWithdrawals: summary.total_withdrawals,
+            netCashFlow: netCashFlow,
+            // Raw growth including cash flows (for reference)
+            rawGrowth: settings.current_balance - settings.starting_balance,
+            rawGrowthPercent: ((settings.current_balance - settings.starting_balance) / settings.starting_balance) * 100
+          };
+        }
+      }
+    } catch (error) {
+      console.error('Error fetching transaction summary:', error);
+    }
+    
+    // Fallback to simple calculation if API fails or no token
     const growth = settings.current_balance - settings.starting_balance;
     const growthPercent = (growth / settings.starting_balance) * 100;
     
@@ -147,7 +187,12 @@ export const accountService = {
       growth,
       growthPercent,
       startingBalance: settings.starting_balance,
-      currentBalance: settings.current_balance
+      currentBalance: settings.current_balance,
+      totalDeposits: 0,
+      totalWithdrawals: 0,
+      netCashFlow: 0,
+      rawGrowth: growth,
+      rawGrowthPercent: growthPercent
     };
   },
 

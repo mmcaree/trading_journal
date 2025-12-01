@@ -4,6 +4,7 @@ from app.models.position_models import (
     TradingPositionJournalEntry, TradingPositionChart, InstructorNote, PositionTag,
     position_tag_assignment
 )
+from app.models.account_transaction import AccountTransaction
 
 
 def clear_all_user_data(db: Session, user_id: int) -> None:
@@ -38,6 +39,9 @@ def clear_all_user_data(db: Session, user_id: int) -> None:
         
         # Delete user's custom tags
         db.query(PositionTag).filter(PositionTag.user_id == user_id).delete(synchronize_session=False)
+        
+        # Delete account transactions
+        db.query(AccountTransaction).filter(AccountTransaction.user_id == user_id).delete(synchronize_session=False)
         
         # Commit all changes
         db.commit()

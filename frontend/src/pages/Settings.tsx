@@ -40,7 +40,12 @@ import {
   VpnKey,
   AccountBalance,
   TrendingUp,
-  Save
+  Save,
+  Add,
+  Delete,
+  Edit,
+  ArrowUpward,
+  ArrowDownward
 } from '@mui/icons-material';
 import { useAuth } from '../context/AuthContext';
 import { API_URL } from '../services/apiConfig';
@@ -56,6 +61,15 @@ import {
   type NotificationSettings,
   type TwoFactorSetup
 } from '../services/notificationService';
+import {
+  getTransactions,
+  createTransaction,
+  updateTransaction,
+  deleteTransaction,
+  getTransactionSummary,
+  type AccountTransaction,
+  type TransactionCreate
+} from '../services/transactionService';
 
 const Settings: React.FC = () => {
   const { user, setUser } = useAuth();
@@ -98,13 +112,55 @@ const Settings: React.FC = () => {
   const [tempAccountBalance, setTempAccountBalance] = useState<string>(accountService.getCurrentBalance().toString());
   const [tempStartingBalance, setTempStartingBalance] = useState<string>(accountService.getAccountSettings().starting_balance.toString());
 
+  // Transaction state
+  const [transactions, setTransactions] = useState<AccountTransaction[]>([]);
+  const [showTransactionDialog, setShowTransactionDialog] = useState(false);
+  const [editingTransaction, setEditingTransaction] = useState<AccountTransaction | null>(null);
+  const [transactionForm, setTransactionForm] = useState<TransactionCreate>({
+    transaction_type: 'DEPOSIT',
+    amount: 0,
+    transaction_date: new Date().toISOString().split('T')[0],
+    description: '',
+  });
+  const [transactionSummary, setTransactionSummary] = useState({ 
+    total_deposits: 0, 
+    total_withdrawals: 0, 
+    net_flow: 0 
+  });
+  const [accountGrowth, setAccountGrowth] = useState({
+    growth: 0,
+    growthPercent: 0,
+    startingBalance: 0,
+    currentBalance: 0,
+    totalDeposits: 0,
+    totalWithdrawals: 0,
+    netCashFlow: 0,
+    rawGrowth: 0,
+    rawGrowthPercent: 0
+  });
+
   // Load account settings from service on component mount
   useEffect(() => {
     const settings = accountService.getAccountSettings();
     setAccountSettings(settings);
     setTempAccountBalance(settings.current_balance.toString());
     setTempStartingBalance(settings.starting_balance.toString());
+    loadAccountGrowth();
   }, []);
+
+  // Load transactions on mount
+  useEffect(() => {
+    loadTransactions();
+  }, []);
+
+  const loadAccountGrowth = async () => {
+    try {
+      const growth = await accountService.getAccountGrowth();
+      setAccountGrowth(growth);
+    } catch (error) {
+      console.error('Failed to load account growth:', error);
+    }
+  };
 
   const getDisplayName = () => {
     if (user?.display_name) return user.display_name;
@@ -219,10 +275,6 @@ const Settings: React.FC = () => {
 
   const formatCurrency = (amount: number) => {
     return accountService.formatCurrency(amount);
-  };
-
-  const calculateAccountGrowth = () => {
-    return accountService.getAccountGrowth();
   };
 
   // Notification handlers
@@ -358,6 +410,87 @@ const Settings: React.FC = () => {
 
   const [showDeleteConfirmation, setShowDeleteConfirmation] = useState(false);
   const [showClearDataConfirmation, setShowClearDataConfirmation] = useState(false);
+
+  // Transaction handlers
+  const loadTransactions = async () => {
+    try {
+      const [txnData, summary] = await Promise.all([
+        getTransactions(),
+        getTransactionSummary()
+      ]);
+      setTransactions(txnData);
+      setTransactionSummary(summary);
+      await loadAccountGrowth(); // Reload growth when transactions change
+    } catch (error: any) {
+      console.error('Failed to load transactions:', error);
+    }
+  };
+
+  const handleOpenTransactionDialog = (transaction?: AccountTransaction) => {
+    if (transaction) {
+      setEditingTransaction(transaction);
+      setTransactionForm({
+        transaction_type: transaction.transaction_type,
+        amount: transaction.amount,
+        transaction_date: transaction.transaction_date.split('T')[0],
+        description: transaction.description || '',
+      });
+    } else {
+      setEditingTransaction(null);
+      setTransactionForm({
+        transaction_type: 'DEPOSIT',
+        amount: 0,
+        transaction_date: new Date().toISOString().split('T')[0],
+        description: '',
+      });
+    }
+    setShowTransactionDialog(true);
+  };
+
+  const handleSaveTransaction = async () => {
+    if (transactionForm.amount <= 0) {
+      setAlert({ type: 'error', message: 'Amount must be greater than 0' });
+      return;
+    }
+
+    setLoading(true);
+    try {
+      const txnData = {
+        ...transactionForm,
+        transaction_date: `${transactionForm.transaction_date}T12:00:00`,
+      };
+
+      if (editingTransaction) {
+        await updateTransaction(editingTransaction.id, txnData);
+        setAlert({ type: 'success', message: 'Transaction updated successfully!' });
+      } else {
+        await createTransaction(txnData);
+        setAlert({ type: 'success', message: 'Transaction created successfully!' });
+      }
+
+      await loadTransactions();
+      setShowTransactionDialog(false);
+    } catch (error: any) {
+      setAlert({ type: 'error', message: error.response?.data?.detail || error.message });
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleDeleteTransaction = async (transactionId: number) => {
+    if (!window.confirm('Are you sure you want to delete this transaction?')) return;
+
+    setLoading(true);
+    try {
+      await deleteTransaction(transactionId);
+      setAlert({ type: 'success', message: 'Transaction deleted successfully!' });
+      await loadTransactions();
+    } catch (error: any) {
+      setAlert({ type: 'error', message: error.response?.data?.detail || error.message });
+    } finally {
+      setLoading(false);
+    }
+  };
 
   const handleDeleteAccount = async () => {
     setShowDeleteConfirmation(true);
@@ -746,17 +879,12 @@ const Settings: React.FC = () => {
                   <Typography variant="body2" color="text.secondary" sx={{ mr: 1 }}>
                     Starting Balance: {formatCurrency(accountSettings.starting_balance)}
                   </Typography>
-                  {(() => {
-                    const { growth, growthPercent } = calculateAccountGrowth();
-                    return (
-                      <Chip 
-                        icon={<TrendingUp />}
-                        label={`${growth >= 0 ? '+' : ''}${formatCurrency(growth)} (${growthPercent >= 0 ? '+' : ''}${growthPercent.toFixed(1)}%)`}
-                        color={growth >= 0 ? 'success' : 'error'}
-                        size="small"
-                      />
-                    );
-                  })()}
+                  <Chip 
+                    icon={<TrendingUp />}
+                    label={`${accountGrowth.growth >= 0 ? '+' : ''}${formatCurrency(accountGrowth.growth)} (${accountGrowth.growthPercent >= 0 ? '+' : ''}${accountGrowth.growthPercent.toFixed(1)}%)`}
+                    color={accountGrowth.growth >= 0 ? 'success' : 'error'}
+                    size="small"
+                  />
                 </Box>
 
                 <TextField
@@ -868,17 +996,19 @@ const Settings: React.FC = () => {
                   <Grid item xs={12}>
                     <Paper sx={{ p: 2, textAlign: 'center', backgroundColor: 'background.default' }}>
                       <Typography variant="body2" color="text.secondary">
-                        Account Growth
+                        Trading Performance (Excludes Deposits/Withdrawals)
                       </Typography>
                       <Typography 
                         variant="h6" 
-                        color={calculateAccountGrowth().growth >= 0 ? 'success.main' : 'error.main'}
+                        color={accountGrowth.growth >= 0 ? 'success.main' : 'error.main'}
                       >
-                        {(() => {
-                          const { growth, growthPercent } = calculateAccountGrowth();
-                          return `${growth >= 0 ? '+' : ''}${formatCurrency(growth)} (${growthPercent >= 0 ? '+' : ''}${growthPercent.toFixed(1)}%)`;
-                        })()}
+                        {`${accountGrowth.growth >= 0 ? '+' : ''}${formatCurrency(accountGrowth.growth)} (${accountGrowth.growthPercent >= 0 ? '+' : ''}${accountGrowth.growthPercent.toFixed(1)}%)`}
                       </Typography>
+                      {accountGrowth.netCashFlow !== 0 && (
+                        <Typography variant="caption" color="text.secondary" display="block" sx={{ mt: 0.5 }}>
+                          Net deposits/withdrawals: {accountGrowth.netCashFlow >= 0 ? '+' : ''}{formatCurrency(accountGrowth.netCashFlow)}
+                        </Typography>
+                      )}
                     </Paper>
                   </Grid>
                 </Grid>
@@ -888,11 +1018,155 @@ const Settings: React.FC = () => {
                     <strong>Why track account size?</strong>
                     <br />
                     Your account balance helps calculate proper position sizes and risk percentages. 
-                    Update it regularly as your account grows to maintain optimal risk management.
+                    The Trading Performance metric excludes deposits/withdrawals to show your actual trading results.
                   </Typography>
                 </Alert>
               </Grid>
             </Grid>
+          </Paper>
+        </Grid>
+
+        {/* Account Transactions (Deposits & Withdrawals) */}
+        <Grid item xs={12}>
+          <Paper sx={{ p: 3 }}>
+            <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 2 }}>
+              <Typography variant="h6">
+                Account Transactions
+              </Typography>
+              <Button
+                variant="contained"
+                startIcon={<Add />}
+                onClick={() => handleOpenTransactionDialog()}
+                disabled={loading}
+              >
+                Add Transaction
+              </Button>
+            </Box>
+            <Divider sx={{ mb: 3 }} />
+
+            {/* Summary Cards */}
+            <Grid container spacing={2} sx={{ mb: 3 }}>
+              <Grid item xs={12} sm={4}>
+                <Paper sx={{ p: 2, backgroundColor: 'success.light', color: 'success.contrastText' }}>
+                  <Box display="flex" alignItems="center" gap={1} mb={1}>
+                    <ArrowDownward fontSize="small" />
+                    <Typography variant="body2">Total Deposits</Typography>
+                  </Box>
+                  <Typography variant="h5">
+                    {formatCurrency(transactionSummary.total_deposits)}
+                  </Typography>
+                </Paper>
+              </Grid>
+              <Grid item xs={12} sm={4}>
+                <Paper sx={{ p: 2, backgroundColor: 'error.light', color: 'error.contrastText' }}>
+                  <Box display="flex" alignItems="center" gap={1} mb={1}>
+                    <ArrowUpward fontSize="small" />
+                    <Typography variant="body2">Total Withdrawals</Typography>
+                  </Box>
+                  <Typography variant="h5">
+                    {formatCurrency(transactionSummary.total_withdrawals)}
+                  </Typography>
+                </Paper>
+              </Grid>
+              <Grid item xs={12} sm={4}>
+                <Paper sx={{ 
+                  p: 2, 
+                  backgroundColor: transactionSummary.net_flow >= 0 ? 'info.light' : 'warning.light',
+                  color: transactionSummary.net_flow >= 0 ? 'info.contrastText' : 'warning.contrastText'
+                }}>
+                  <Box display="flex" alignItems="center" gap={1} mb={1}>
+                    <AccountBalance fontSize="small" />
+                    <Typography variant="body2">Net Cash Flow</Typography>
+                  </Box>
+                  <Typography variant="h5">
+                    {transactionSummary.net_flow >= 0 ? '+' : ''}{formatCurrency(transactionSummary.net_flow)}
+                  </Typography>
+                </Paper>
+              </Grid>
+            </Grid>
+
+            <Alert severity="info" sx={{ mb: 3 }}>
+              <Typography variant="body2">
+                <strong>Track deposits and withdrawals</strong> to ensure accurate performance metrics. 
+                Your returns will be calculated excluding these cash flows, matching professional broker standards.
+              </Typography>
+            </Alert>
+
+            {/* Transactions Table */}
+            {transactions.length === 0 ? (
+              <Box sx={{ textAlign: 'center', py: 4 }}>
+                <Typography variant="body1" color="text.secondary" gutterBottom>
+                  No transactions recorded yet
+                </Typography>
+                <Typography variant="body2" color="text.secondary">
+                  Add deposits and withdrawals to track accurate account performance
+                </Typography>
+              </Box>
+            ) : (
+              <Box sx={{ overflowX: 'auto' }}>
+                <List>
+                  {transactions.map((txn) => (
+                    <ListItem
+                      key={txn.id}
+                      sx={{
+                        border: 1,
+                        borderColor: 'divider',
+                        borderRadius: 1,
+                        mb: 1,
+                        '&:hover': { backgroundColor: 'action.hover' }
+                      }}
+                      secondaryAction={
+                        <Box>
+                          <Button
+                            size="small"
+                            startIcon={<Edit />}
+                            onClick={() => handleOpenTransactionDialog(txn)}
+                            disabled={loading}
+                          >
+                            Edit
+                          </Button>
+                          <Button
+                            size="small"
+                            color="error"
+                            startIcon={<Delete />}
+                            onClick={() => handleDeleteTransaction(txn.id)}
+                            disabled={loading}
+                          >
+                            Delete
+                          </Button>
+                        </Box>
+                      }
+                    >
+                      <ListItemIcon>
+                        {txn.transaction_type === 'DEPOSIT' ? (
+                          <ArrowDownward color="success" />
+                        ) : (
+                          <ArrowUpward color="error" />
+                        )}
+                      </ListItemIcon>
+                      <ListItemText
+                        primary={
+                          <Box display="flex" alignItems="center" gap={2}>
+                            <Chip
+                              label={txn.transaction_type}
+                              size="small"
+                              color={txn.transaction_type === 'DEPOSIT' ? 'success' : 'error'}
+                            />
+                            <Typography variant="h6">
+                              {formatCurrency(txn.amount)}
+                            </Typography>
+                            <Typography variant="body2" color="text.secondary">
+                              {new Date(txn.transaction_date).toLocaleDateString()}
+                            </Typography>
+                          </Box>
+                        }
+                        secondary={txn.description || 'No description'}
+                      />
+                    </ListItem>
+                  ))}
+                </List>
+              </Box>
+            )}
           </Paper>
         </Grid>
 
@@ -1222,6 +1496,88 @@ const Settings: React.FC = () => {
             disabled={loading}
           >
             {loading ? 'Deleting...' : 'Delete Account'}
+          </Button>
+        </DialogActions>
+      </Dialog>
+
+      {/* Add/Edit Transaction Dialog */}
+      <Dialog open={showTransactionDialog} onClose={() => setShowTransactionDialog(false)} maxWidth="sm" fullWidth>
+        <DialogTitle>
+          {editingTransaction ? 'Edit Transaction' : 'Add Transaction'}
+        </DialogTitle>
+        <DialogContent>
+          <Grid container spacing={2} sx={{ mt: 0.5 }}>
+            <Grid item xs={12}>
+              <FormControl fullWidth>
+                <InputLabel>Transaction Type</InputLabel>
+                <Select
+                  value={transactionForm.transaction_type}
+                  onChange={(e: SelectChangeEvent) => 
+                    setTransactionForm({ ...transactionForm, transaction_type: e.target.value as 'DEPOSIT' | 'WITHDRAWAL' })
+                  }
+                  label="Transaction Type"
+                >
+                  <MenuItem value="DEPOSIT">
+                    <Box display="flex" alignItems="center" gap={1}>
+                      <ArrowDownward color="success" fontSize="small" />
+                      Deposit
+                    </Box>
+                  </MenuItem>
+                  <MenuItem value="WITHDRAWAL">
+                    <Box display="flex" alignItems="center" gap={1}>
+                      <ArrowUpward color="error" fontSize="small" />
+                      Withdrawal
+                    </Box>
+                  </MenuItem>
+                </Select>
+              </FormControl>
+            </Grid>
+            <Grid item xs={12}>
+              <TextField
+                fullWidth
+                label="Amount"
+                type="number"
+                value={transactionForm.amount || ''}
+                onChange={(e) => setTransactionForm({ ...transactionForm, amount: parseFloat(e.target.value) || 0 })}
+                InputProps={{
+                  startAdornment: <InputAdornment position="start">$</InputAdornment>,
+                }}
+                helperText="Enter the amount (always positive)"
+              />
+            </Grid>
+            <Grid item xs={12}>
+              <TextField
+                fullWidth
+                label="Date"
+                type="date"
+                value={transactionForm.transaction_date}
+                onChange={(e) => setTransactionForm({ ...transactionForm, transaction_date: e.target.value })}
+                InputLabelProps={{
+                  shrink: true,
+                }}
+              />
+            </Grid>
+            <Grid item xs={12}>
+              <TextField
+                fullWidth
+                label="Description (Optional)"
+                value={transactionForm.description}
+                onChange={(e) => setTransactionForm({ ...transactionForm, description: e.target.value })}
+                multiline
+                rows={2}
+                helperText="e.g., Initial funding, Profit withdrawal, etc."
+              />
+            </Grid>
+          </Grid>
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => setShowTransactionDialog(false)}>Cancel</Button>
+          <Button 
+            onClick={handleSaveTransaction} 
+            variant="contained"
+            disabled={loading || transactionForm.amount <= 0}
+          >
+            {loading ? 'Saving...' : 'Save'}
           </Button>
         </DialogActions>
       </Dialog>

@@ -1364,7 +1364,7 @@ const Analytics: React.FC = () => {
               </Typography>
               <Box sx={{ width: '100%', height: 400 }}>
                 <ResponsiveContainer width="100%" height="100%">
-                  <LineChart data={timeAnalysisData.cumulativeReturns} margin={{ top: 20, right: 40, left: 30, bottom: 70 }}>
+                  <LineChart data={timeAnalysisData.cumulativeReturns} margin={{ top: 30, right: 40, left: 30, bottom: 20 }}>
                     <CartesianGrid strokeDasharray="4 4" stroke={CHART_COLORS.grid} />
                     <XAxis
                       dataKey="date"
@@ -1385,7 +1385,7 @@ const Analytics: React.FC = () => {
                       dataKey="cumulative" 
                       stroke={CHART_COLORS.primary}
                       strokeWidth={3}
-                      dot={{ fill: CHART_COLORS.primary, r: 4 }}
+                      dot={{ fill: CHART_COLORS.primary, r: 2 }}
                       activeDot={{ r: 7 }}
                     />
                   </LineChart>
