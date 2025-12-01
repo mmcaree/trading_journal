@@ -335,10 +335,17 @@ class PerformanceMetrics(BaseModel):
 
 class SetupPerformance(BaseModel):
     setup_type: str
-    trade_count: int
+    total_trades: int
+    winning_trades: int
+    losing_trades: int
     win_rate: float
-    average_profit_loss: float
+    average_profit: float
+    average_loss: float
+    profit_factor: float
+    largest_win: float
+    largest_loss: float
     total_profit_loss: float
+    total_profit_loss_percent: float
 
 # Authentication schemas
 class Token(BaseModel):

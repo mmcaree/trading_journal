@@ -52,6 +52,7 @@ const ImportData: React.FC = () => {
       <Alert severity="warning" sx={{ mb: 4 }}>
         <Typography variant="body2">
           <strong>Note:</strong> Importing options trades is not currently supported. Options trades will need to be input manually until I get access to more broker data for options formatting.
+          <strong>Note:</strong> If your data doesn't import correctly, please reach out to @theburlywizard on Discord with a sample CSV file from your broker so I can implement a fix, I only have access to so much broker data for testing. Thank you for your patience!
         </Typography>
       </Alert>
 

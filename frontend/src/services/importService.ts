@@ -22,22 +22,6 @@ export const validateImportFile = async (file: File): Promise<ValidationResult> 
 };
 
 /**
- * Import a validated CSV file
- */
-export const importWebullFile = async (file: File): Promise<ImportResult> => {
-  const formData = new FormData();
-  formData.append('file', file);
-
-  const response = await api.post('/api/v2/positions/import/webull', formData, {
-    headers: {
-      'Content-Type': 'multipart/form-data',
-    },
-  });
-
-  return response.data;
-};
-
-/**
  * Format file size for display
  */
 export const formatFileSize = (bytes: number): string => {

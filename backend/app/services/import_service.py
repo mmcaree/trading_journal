@@ -26,6 +26,7 @@ from app.models.position_models import (
 )
 from app.models import User
 from app.utils.datetime_utils import utc_now
+from app.services.broker_profiles import WEBULL_USA_PROFILE
 
 logger = logging.getLogger(__name__)
 
@@ -63,6 +64,9 @@ class IndividualPositionTracker:
         # Update position based on event
         self._update_position_from_event(current_position, event, event_data)
         
+        # Flush changes so they're visible to the session
+        self.db.flush()
+        
         return current_position
     
     def _get_current_position(self, symbol: str, event_data: Dict[str, Any]) -> TradingPosition:
@@ -76,11 +80,13 @@ class IndividualPositionTracker:
         
         # No open position found - create new one
         # This happens for the first buy/short or when starting new position after closure
-        if event_data['side'].upper() in ['BUY', 'SHORT'] or len(positions) == 0:
+        side_upper = event_data['side'].upper()
+        
+        if side_upper in ['BUY', 'SHORT'] or len(positions) == 0:
             return self._create_new_position(symbol, event_data)
         else:
             # Sell order but no open position - this shouldn't happen in clean data
-            logger.warning(f"Sell order for {symbol} but no open position exists")
+            logger.warning(f"Sell order for {symbol} but no open position exists (side='{event_data['side']}')")
             return self._create_new_position(symbol, event_data)
     
     def _create_new_position(self, symbol: str, event_data: Dict[str, Any]) -> TradingPosition:
@@ -239,19 +245,43 @@ class IndividualPositionTracker:
                 sell_qty = min(position.current_shares, event.shares)
                 
                 # Calculate P&L
-                if position.avg_entry_price:
+                if position.avg_entry_price and position.avg_entry_price > 0:
                     pnl_per_share = event.price - position.avg_entry_price
                     realized_pnl = pnl_per_share * sell_qty
                     position.total_realized_pnl += realized_pnl
                     event.realized_pnl = realized_pnl
+                else:
+                    logger.warning(f"Cannot calculate P&L for sell - avg_entry_price is {position.avg_entry_price}")
                 
                 position.current_shares -= sell_qty
                 
-                # Adjust cost basis
-                if position.current_shares > 0:
-                    position.total_cost = position.avg_entry_price * position.current_shares
+                # Check if selling MORE than owned (going short)
+                remaining_sell = event.shares - sell_qty
+                if remaining_sell > 0:
+                    logger.info(f"Sell of {event.shares} exceeds position of {sell_qty}, creating short position of {remaining_sell} shares")
+                    # Create short position with remaining shares
+                    position.current_shares = -remaining_sell
+                    position.avg_entry_price = event.price
+                    position.total_cost = event.price * remaining_sell
                 else:
-                    position.total_cost = 0.0
+                    # Adjust cost basis for remaining long shares
+                    if position.current_shares > 0 and position.avg_entry_price:
+                        position.total_cost = position.avg_entry_price * position.current_shares
+                    # Note: When current_shares = 0 (position closed), we preserve total_cost
+                    # as it represents the total capital deployed for return calculations
+            elif position.current_shares == 0:
+                # Selling with no position - create short
+                logger.info(f"Sell of {event.shares} with no position, creating short position")
+                position.current_shares = -event.shares
+                position.avg_entry_price = event.price
+                position.total_cost = event.price * event.shares
+            else:
+                # Already short, adding to short position
+                logger.info(f"Adding {event.shares} to existing short position of {position.current_shares}")
+                total_proceeds = position.total_cost + (event.price * event.shares)
+                position.current_shares -= event.shares  # Make more negative
+                position.avg_entry_price = total_proceeds / abs(position.current_shares)
+                position.total_cost = total_proceeds
     
     def _map_instrument_type(self, instrument_type: str) -> InstrumentType:
         """Map string to InstrumentType enum"""
@@ -347,6 +377,9 @@ class IndividualPositionImportService:
             self.validation_errors = []
             self.warnings = []
             
+            # Set broker profile for parsing
+            self.broker_profile = WEBULL_USA_PROFILE
+            
             # Parse CSV events
             events = self._parse_webull_csv(csv_content)
             
@@ -413,7 +446,7 @@ class IndividualPositionImportService:
             logger.error(f"Import failed: {e}")
             return {
                 'success': False,
-                'error': str(e),
+                'errors': [{'message': str(e), 'row_number': None, 'field': None}],
                 'imported_events': 0
             }
     
@@ -470,9 +503,13 @@ class IndividualPositionImportService:
                     order_price = convert_options_price(order_price)
                     avg_price = convert_options_price(avg_price)
                 
+                # Normalize the side value using action_mappings from broker profile
+                raw_side = safe_strip(row['Side'])
+                normalized_side = self.broker_profile.action_mappings.get(raw_side, raw_side.upper())
+                
                 event_data = {
                     'symbol': symbol,
-                    'side': safe_strip(row['Side']),
+                    'side': normalized_side,  # Use normalized side
                     'status': safe_strip(row['Status']),
                     'filled_qty': int(float(safe_strip(row.get('Filled Qty') or row.get('Filled'), '0'))),
                     'total_qty': int(float(safe_strip(row.get('Total Qty'), '0'))),
@@ -496,13 +533,15 @@ class IndividualPositionImportService:
                 if not event_data['symbol']:
                     raise ImportValidationError("Symbol cannot be empty", row_number, 'Symbol')
                 
-                # Only validate filled quantity for filled orders
-                if event_data['status'].upper() == 'FILLED' and event_data['filled_qty'] <= 0:
-                    raise ImportValidationError("Filled quantity must be positive for filled orders", row_number, 'Filled')
-                
-                # Only validate price for filled orders (cancelled/pending may have 0 prices)
-                if event_data['status'].upper() == 'FILLED' and event_data['avg_price'] <= 0:
-                    raise ImportValidationError("Average price must be positive for filled orders", row_number, 'Avg Price')
+                # Only validate filled orders - cancelled/pending orders can have empty prices and 0 quantities
+                if event_data['status'].upper() == 'FILLED':
+                    if event_data['filled_qty'] <= 0:
+                        raise ImportValidationError("Filled quantity must be positive for filled orders", row_number, 'Filled')
+                    
+                    if event_data['avg_price'] <= 0:
+                        # Log warning instead of raising error to help debug
+                        logger.warning(f"Row {row_number}: Filled order with zero/invalid price - Symbol: {event_data['symbol']}, Side: {event_data['side']}, Qty: {event_data['filled_qty']}")
+                        raise ImportValidationError("Average price must be positive for filled orders", row_number, 'Avg Price')
                 
                 events.append(event_data)
                 

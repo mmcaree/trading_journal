@@ -148,8 +148,11 @@ def delete_account(
     try:
         delete_user_account(db, current_user.id)
         return {"message": "Account deleted successfully"}
-    except Exception:
-        raise InternalServerException("Failed to delete account")
+    except Exception as e:
+        import traceback
+        print(f"Delete account error: {str(e)}")
+        print(traceback.format_exc())
+        raise InternalServerException(f"Failed to delete account: {str(e)}")
 
 @router.delete("/me/data")
 def clear_all_data(
@@ -159,8 +162,11 @@ def clear_all_data(
     try:
         clear_all_user_data(db, current_user.id)
         return {"message": "All trading data cleared successfully"}
-    except Exception:
-        raise InternalServerException("Failed to clear user data")
+    except Exception as e:
+        import traceback
+        print(f"Clear data error: {str(e)}")
+        print(traceback.format_exc())
+        raise InternalServerException(f"Failed to clear user data: {str(e)}")
 
 @router.get("/account-balance")
 def get_account_balance(

@@ -266,17 +266,44 @@ def delete_user_account(db: Session, user_id: int) -> bool:
     if not user:
         raise ValueError("User not found")
     
-    from app.models import TradingPosition, TradingPositionEvent, ImportedPendingOrder
+    from app.models.position_models import (
+        TradingPosition, TradingPositionEvent, ImportedPendingOrder,
+        TradingPositionJournalEntry, TradingPositionChart, InstructorNote, PositionTag,
+        position_tag_assignment
+    )
 
     # Gracefully handle legacy data cleanup — safe even if models.py is gone
     Trade = Chart = PartialExit = TradeEntry = None
 
     try:
-        # Delete current v2 data
-        for pos in db.query(TradingPosition).filter(TradingPosition.user_id == user_id):
-            db.query(TradingPositionEvent).filter(TradingPositionEvent.position_id == pos.id).delete()
-        db.query(TradingPosition).filter(TradingPosition.user_id == user_id).delete()
-        db.query(ImportedPendingOrder).filter(ImportedPendingOrder.user_id == user_id).delete()
+        # Get all position IDs for this user
+        position_ids = [p.id for p in db.query(TradingPosition.id).filter(TradingPosition.user_id == user_id).all()]
+        
+        if position_ids:
+            # Delete position_tag_assignment entries using the table object
+            db.execute(
+                position_tag_assignment.delete().where(
+                    position_tag_assignment.c.position_id.in_(position_ids)
+                )
+            )
+            
+            # Delete dependent data for these positions
+            db.query(InstructorNote).filter(InstructorNote.position_id.in_(position_ids)).delete(synchronize_session=False)
+            db.query(TradingPositionJournalEntry).filter(TradingPositionJournalEntry.position_id.in_(position_ids)).delete(synchronize_session=False)
+            db.query(TradingPositionChart).filter(TradingPositionChart.position_id.in_(position_ids)).delete(synchronize_session=False)
+            db.query(TradingPositionEvent).filter(TradingPositionEvent.position_id.in_(position_ids)).delete(synchronize_session=False)
+        
+        # Delete trading positions
+        db.query(TradingPosition).filter(TradingPosition.user_id == user_id).delete(synchronize_session=False)
+        db.query(ImportedPendingOrder).filter(ImportedPendingOrder.user_id == user_id).delete(synchronize_session=False)
+        
+        # Delete user's custom tags
+        db.query(PositionTag).filter(PositionTag.user_id == user_id).delete(synchronize_session=False)
+        
+        # Delete instructor notes created by this user
+        db.query(InstructorNote).filter(InstructorNote.instructor_id == user_id).delete(synchronize_session=False)
+        # Delete instructor notes about this user (if they're a student)
+        db.query(InstructorNote).filter(InstructorNote.student_id == user_id).delete(synchronize_session=False)
 
         # Delete any legacy data that might still exist
         if Trade is not None:

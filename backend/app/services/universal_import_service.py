@@ -137,6 +137,9 @@ class UniversalImportService:
                     'broker_detected': broker_detected
                 }
             
+            # Detect stop losses from cancelled orders (similar to IndividualPositionImportService)
+            events = self._detect_stop_losses_universal(events)
+            
             # Process events using individual position tracking
             tracker = IndividualPositionTracker(self.db, user_id)
             
@@ -228,7 +231,7 @@ class UniversalImportService:
                     # No mapping found, use as-is and uppercase it
                     action = action_raw.upper()
                     
-                if action not in ['BUY', 'SELL']:
+                if action not in ['BUY', 'SELL', 'SHORT']:
                     self.warnings.append(f"Row {idx + 2}: Unknown action '{action_raw}', skipping")
                     continue
                 
@@ -242,27 +245,63 @@ class UniversalImportService:
                     self.warnings.append(f"Row {idx + 2}: Invalid quantity, skipping")
                     continue
                 
+                # Get status first to handle cancelled orders differently
+                status_col = column_map.get('status')
+                status = str(row[status_col]).strip().upper() if status_col and status_col in df.columns and pd.notna(row.get(status_col)) else 'FILLED'
+                
                 # Extract and clean price
-                price_col = column_map.get('price')
-                try:
-                    price = clean_currency_value(row[price_col])
+                # For CANCELLED orders, use the "Price" column (order/limit price)
+                # For FILLED orders, use mapped price column (typically "Avg Price")
+                price = 0.0
+                if status == 'CANCELLED':
+                    # Cancelled orders have empty Avg Price, use Price column for stop loss price
+                    price_cols = ['Price', 'Limit Price', 'Order Price']
+                    for col in price_cols:
+                        if col in df.columns and pd.notna(row.get(col)):
+                            try:
+                                price = clean_currency_value(row[col])
+                                if price > 0:
+                                    break
+                            except:
+                                continue
+                    # If no valid price found, skip this cancelled order
                     if price <= 0:
+                        continue
+                else:
+                    # For filled orders, use the mapped price column
+                    price_col = column_map.get('price')
+                    try:
+                        price = clean_currency_value(row[price_col])
+                        if price <= 0:
+                            self.warnings.append(f"Row {idx + 2}: Invalid price, skipping")
+                            continue
+                    except (ValueError, TypeError, KeyError):
                         self.warnings.append(f"Row {idx + 2}: Invalid price, skipping")
                         continue
-                except (ValueError, TypeError, KeyError):
-                    self.warnings.append(f"Row {idx + 2}: Invalid price, skipping")
-                    continue
                 
                 # Parse date
                 date_col = column_map.get('date')
                 date_value = row[date_col] if date_col else None
                 
-                # Try to combine date and time if separate columns exist
+                # For CANCELLED orders, Filled Time is empty - use Placed Time instead
+                if status == 'CANCELLED' and (pd.isna(date_value) or date_value is None):
+                    # Try to get Placed Time for cancelled orders
+                    placed_time_cols = ['Placed Time', 'Submission Time', 'Order Time']
+                    for col in placed_time_cols:
+                        if col in df.columns and pd.notna(row.get(col)):
+                            date_value = row[col]
+                            break
+                
+                # Try to combine date and time if separate columns exist (but only if date_value is valid)
                 time_col = column_map.get('time')
-                if time_col and time_col in row:
+                if time_col and time_col in row and pd.notna(date_value):
                     time_value = row[time_col]
                     if pd.notna(time_value):
                         date_value = f"{date_value} {time_value}"
+                
+                # Skip if still no valid date
+                if pd.isna(date_value) or date_value is None:
+                    continue
                 
                 filled_time = parse_date_flexible(date_value, broker_profile.date_formats)
                 if not filled_time:
@@ -288,9 +327,6 @@ class UniversalImportService:
                 else:
                     take_profit = 0.0
                 
-                status_col = column_map.get('status')
-                status = str(row[status_col]).strip().upper() if status_col and status_col in df.columns and pd.notna(row.get(status_col)) else 'FILLED'
-                
                 # Build standardized event
                 event = {
                     'symbol': symbol,
@@ -315,7 +351,106 @@ class UniversalImportService:
         # Sort events chronologically
         events.sort(key=lambda e: e['filled_time'])
         
+        # For brokers that don't support shorting (like Webull Australia),
+        # reorder same-timestamp BUY/SELL pairs to prevent short positions
+        if broker_profile.name in ['webull_au']:
+            events = self._reorder_wash_trades(events)
+        
         return events
+    
+    def _detect_stop_losses_universal(self, events: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+        """
+        Detect stop loss orders by matching BUY events with their corresponding CANCELLED sell orders.
+        Similar to IndividualPositionImportService._detect_stop_losses but adapted for universal format.
+        """
+        from collections import defaultdict
+        
+        # Group events by symbol
+        symbol_groups = defaultdict(list)
+        for event in events:
+            symbol = event['symbol']
+            symbol_groups[symbol].append(event)
+        
+        enhanced_events = []
+        
+        # Process each symbol group
+        for symbol, symbol_events in symbol_groups.items():
+            # Sort by time
+            symbol_events.sort(key=lambda x: x['filled_time'])
+            
+            # Separate by status
+            filled_events = [e for e in symbol_events if e['status'].upper() in ['FILLED', 'COMPLETED', 'EXECUTED']]
+            cancelled_events = [e for e in symbol_events if e['status'].upper() == 'CANCELLED']
+            
+            # Match each BUY with corresponding CANCELLED sell orders
+            for event in filled_events:
+                if event['side'].upper() == 'BUY':
+                    event_time = event['filled_time']
+                    buy_shares = event['filled_qty']
+                    
+                    # Find matching cancelled sell orders
+                    matching_stops = [e for e in cancelled_events 
+                                    if e['side'].upper() == 'SELL' and 
+                                    e['filled_time'] == event_time and
+                                    e.get('filled_qty', 0) == buy_shares]
+                    
+                    if matching_stops:
+                        stop_order = matching_stops[0]
+                        # Use avg_price from cancelled order as stop loss
+                        stop_loss_price = stop_order.get('avg_price', 0)
+                        if stop_loss_price and stop_loss_price > 0:
+                            event['stop_loss'] = stop_loss_price
+                            logger.info(f"Matched BUY {buy_shares} shares of {symbol} at {event_time} with CANCELLED sell stop loss at {stop_loss_price}")
+            
+            enhanced_events.extend(filled_events)
+        
+        return enhanced_events
+    
+    def _reorder_wash_trades(self, events: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+        """
+        Reorder same-timestamp BUY/SELL pairs to prevent short positions.
+        For brokers that don't support shorting (like Webull Australia),
+        ensure BUY always comes before SELL at the same timestamp.
+        
+        This handles wash trades / day trades where both legs happen simultaneously.
+        """
+        from collections import defaultdict
+        from datetime import datetime
+        
+        # Group events by symbol and timestamp
+        grouped = defaultdict(list)
+        for event in events:
+            key = (event['symbol'], event['filled_time'])
+            grouped[key].append(event)
+        
+        reordered_events = []
+        
+        for (symbol, timestamp), group in grouped.items():
+            if len(group) > 1:
+                # Check if we have both BUY and SELL at same timestamp
+                has_buy = any(e['side'].upper() == 'BUY' for e in group)
+                has_sell = any(e['side'].upper() == 'SELL' for e in group)
+                
+                if has_buy and has_sell:
+                    # Reorder: BUY first, then SELL (prevents short position)
+                    buys = [e for e in group if e['side'].upper() == 'BUY']
+                    sells = [e for e in group if e['side'].upper() == 'SELL']
+                    others = [e for e in group if e['side'].upper() not in ['BUY', 'SELL']]
+                    
+                    reordered_events.extend(buys)
+                    reordered_events.extend(sells)
+                    reordered_events.extend(others)
+                    
+                    logger.info(f"Reordered wash trade for {symbol} at {timestamp}: {len(buys)} BUY, {len(sells)} SELL")
+                else:
+                    reordered_events.extend(group)
+            else:
+                reordered_events.extend(group)
+        
+        # Re-sort to maintain chronological order (stable sort keeps our reordering within same timestamps)
+        reordered_events.sort(key=lambda e: (e['filled_time'], 0 if e['side'].upper() == 'BUY' else 1))
+        
+        return reordered_events
     
     def validate_csv(
         self,

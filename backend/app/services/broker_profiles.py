@@ -88,8 +88,12 @@ def parse_date_flexible(date_str: Any, formats: List[str]) -> Optional[datetime]
             continue
     
     # Last resort: try pandas date parser
+    # Strip unrecognized timezone abbreviations to avoid FutureWarning
     try:
-        return pd.to_datetime(date_str)
+        # Remove common timezone abbreviations (EDT, EST, PDT, PST, etc.)
+        import re
+        cleaned_str = re.sub(r'\s+(EDT|EST|PDT|PST|CDT|CST|MDT|MST)$', '', str(date_str))
+        return pd.to_datetime(cleaned_str)
     except:
         return None
 
@@ -120,10 +124,13 @@ WEBULL_USA_PROFILE = BrokerProfile(
     action_mappings={
         "BUY": "BUY",
         "SELL": "SELL",
+        "SHORT": "SHORT",
         "Buy": "BUY",
         "Sell": "SELL",
+        "Short": "SHORT",
         "buy": "BUY",
         "sell": "SELL",
+        "short": "SHORT",
     },
     signature_columns=["Name", "Side", "Filled Time", "Time-in-Force"],
     default_currency="USD"
