@@ -121,7 +121,7 @@ const Dashboard: React.FC = () => {
       const openPositions = allPositions.filter(p => p.status === 'open');
       const closedPositions = allPositions.filter(p => p.status === 'closed');
       
-      const totalInvested = allPositions.reduce((sum, p) => sum + (p.total_cost || 0), 0);
+      const totalInvested = openPositions.reduce((sum, p) => sum + (p.total_cost || 0), 0);
       const totalRealized = closedPositions.reduce((sum, p) => sum + (p.total_realized_pnl || 0), 0);
       
       // Calculate unrealized P&L for open positions (simplified - would need current prices)

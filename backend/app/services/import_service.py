@@ -666,36 +666,85 @@ class IndividualPositionImportService:
             cancelled_events = [e for e in symbol_events if e['status'].upper() == 'CANCELLED']
             pending_events = [e for e in symbol_events if e['status'].upper() == 'PENDING']
             
-            # Process filled events and match each BUY with its corresponding cancelled SELL
+            msg = f"Symbol {symbol}: {len(filled_events)} filled, {len(cancelled_events)} cancelled, {len(pending_events)} pending"
+            logger.info(msg)
+            print(f"[IMPORT] {msg}")
+            
+            # Process filled events and match each BUY with its corresponding cancelled/pending SELL
+            # Track running position to match stop losses with correct buys
+            position_shares = 0
+            used_stop_orders = set()  # Track which cancelled orders we've already matched
+            
             for event in filled_events:
                 stop_loss_price = None
                 
-                # For BUY events, look for a corresponding CANCELLED sell order
+                # For BUY events, look for a corresponding CANCELLED/PENDING sell order
                 if event['side'].upper() == 'BUY':
-                    # Look for cancelled sell orders placed at the same time with matching share quantity
                     event_time = event['filled_time']
                     buy_shares = event['filled_qty']
+                    position_shares += buy_shares
                     
-                    # Find cancelled sell orders that match this buy
+                    logger.debug(f"Processing BUY: {buy_shares} shares at {event_time}, position size now {position_shares}")
+                    
+                    # Strategy 1: Match cancelled sells with SAME placed_time and matching quantity
+                    # Cancelled orders have placed_time == filled_time, so compare with event's filled_time
                     matching_stops = [e for e in cancelled_events 
                                     if e['side'].upper() == 'SELL' and 
-                                    e['filled_time'] == event_time and
-                                    e.get('filled_qty', e.get('total_qty', 0)) == buy_shares]
+                                    e.get('placed_time') == event_time and
+                                    e.get('filled_qty', e.get('total_qty', 0)) == buy_shares and
+                                    id(e) not in used_stop_orders]
+                    
+                    if not matching_stops:
+                        # Log all cancelled sells for debugging
+                        for ce in cancelled_events:
+                            if ce['side'].upper() == 'SELL' and id(ce) not in used_stop_orders:
+                                ce_time = ce.get('placed_time')
+                                ce_qty = ce.get('filled_qty', ce.get('total_qty', 0))
+                                logger.debug(f"  Available cancelled sell: qty={ce_qty}, placed_time={ce_time}, time_match={ce_time == event_time}")
+                    
+                    # Strategy 2: If no exact match, try matching with current position size
+                    # (in case stop was set for entire position, not individual trade)
+                    if not matching_stops:
+                        matching_stops = [e for e in cancelled_events 
+                                        if e['side'].upper() == 'SELL' and 
+                                        e.get('placed_time') == event_time and
+                                        e.get('filled_qty', e.get('total_qty', 0)) == position_shares and
+                                        id(e) not in used_stop_orders]
+                    
+                    # Strategy 3: Also check pending sell orders placed at same time
+                    if not matching_stops:
+                        matching_stops = [e for e in pending_events 
+                                        if e['side'].upper() == 'SELL' and 
+                                        e.get('placed_time') == event_time and
+                                        (e.get('filled_qty', e.get('total_qty', 0)) == buy_shares or 
+                                         e.get('filled_qty', e.get('total_qty', 0)) == position_shares) and
+                                        id(e) not in used_stop_orders]
                     
                     if matching_stops:
-                        # Use the first (should be only one) matching cancelled sell as stop loss
+                        # Use the first matching stop order
                         stop_order = matching_stops[0]
-                        # For cancelled orders, use order_price (the intended stop loss price) not avg_price
+                        used_stop_orders.add(id(stop_order))
+                        
+                        # For cancelled/pending orders, use order_price (the intended stop loss price) not avg_price
                         stop_loss_price = self._parse_price(stop_order.get('order_price', stop_order.get('avg_price')))
                         if stop_loss_price:
                             event['stop_loss'] = stop_loss_price
-                            logger.info(f"Matched BUY {buy_shares} shares at {event_time} with CANCELLED sell stop loss at {stop_loss_price}")
+                            match_type = "PENDING" if stop_order in pending_events else "CANCELLED"
+                            stop_qty = stop_order.get('filled_qty', stop_order.get('total_qty', 0))
+                            msg = f"✓ Matched BUY {buy_shares} shares at {event_time} with {match_type} sell stop loss at ${stop_loss_price} (stop qty: {stop_qty}, position size: {position_shares})"
+                            logger.info(msg)
+                            print(f"[IMPORT] {msg}")
                         else:
-                            logger.warning(f"Found matching cancelled sell for BUY at {event_time} but no valid price")
+                            logger.warning(f"Found matching stop order for BUY at {event_time} but no valid price: order_price={stop_order.get('order_price')}, avg_price={stop_order.get('avg_price')}")
                     else:
-                        logger.warning(f"No matching cancelled sell found for BUY {buy_shares} shares at {event_time}")
+                        msg = f"✗ No matching stop order found for BUY {buy_shares} shares at {event_time} (position size: {position_shares})"
+                        logger.warning(msg)
+                        print(f"[IMPORT] {msg}")
                 
-                # SELL events don't need stop losses as the risk was already realized
+                elif event['side'].upper() == 'SELL':
+                    # Track position reduction
+                    position_shares -= event['filled_qty']
+                    # SELL events don't need stop losses as the risk was already realized
             
             # Add all filled events (enhanced with stop loss info)
             enhanced_events.extend(filled_events)
