@@ -240,7 +240,6 @@ def export_user_data(db: Session, user_id: int) -> dict:
             "display_name": user.display_name,
             "bio": user.bio,
             "profile_picture_url": user.profile_picture_url,
-            "default_account_size": float(user.default_account_size) if user.default_account_size else None,
             "email_notifications_enabled": user.email_notifications_enabled,
             "daily_email_enabled": user.daily_email_enabled,
             "daily_email_time": user.daily_email_time,

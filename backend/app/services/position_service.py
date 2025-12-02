@@ -16,6 +16,7 @@ from app.models.position_models import (
     TradingPosition, TradingPositionEvent, PositionStatus, EventType, EventSource
 )
 from app.models import User
+from app.services.account_value_service import AccountValueService
 
 
 class PositionService:
@@ -23,6 +24,7 @@ class PositionService:
     
     def __init__(self, db: Session):
         self.db = db
+        self.account_value_service = AccountValueService(db)
     
     # === Position Creation ===
     
@@ -581,4 +583,48 @@ class PositionService:
         position.updated_at = utc_now()
         self.db.commit()
         
+        return position
+    
+    # === Phase 2.2: Dynamic Account Value Integration ===
+    
+    def calculate_account_value_at_entry(
+        self,
+        user_id: int,
+        position: TradingPosition
+    ) -> float:
+        """
+        Calculate account value when position was opened.
+        
+        Uses dynamic calculation if available, falls back to manual if not set.
+        """
+        # Try to get value at position open time
+        if position.opened_at:
+            try:
+                return self.account_value_service.get_account_value_at_date(
+                    user_id=user_id,
+                    target_date=position.opened_at
+                )
+            except Exception as e:
+                # Fallback to default if calculation fails
+                return 10000.0
+        
+        # Fallback for positions without opened_at
+        return 10000.0
+    
+    def update_position_risk_metrics(self, position: TradingPosition):
+        """Update risk metrics using historical account value (calculated dynamically)"""
+        # Calculate account value at entry dynamically - never store static value
+        # This ensures accuracy when user updates starting balance or transactions
+        account_value_at_entry = self.calculate_account_value_at_entry(
+            position.user_id,
+            position
+        )
+        
+        # Calculate risk percentage if we have stop loss data
+        if position.current_stop_loss and position.avg_entry_price and account_value_at_entry > 0:
+            max_loss_per_share = abs(position.avg_entry_price - position.current_stop_loss)
+            max_loss_amount = max_loss_per_share * position.current_shares
+            position.current_risk_percent = (max_loss_amount / account_value_at_entry) * 100
+        
+        self.db.commit()
         return position

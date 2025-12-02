@@ -49,7 +49,8 @@ import {
 } from '@mui/icons-material';
 import { useAuth } from '../context/AuthContext';
 import { API_URL } from '../services/apiConfig';
-import { updateProfile, changePassword, UserUpdateData, ChangePasswordData, exportUserData, deleteUserAccount, clearAllUserData, uploadProfilePicture, deleteProfilePicture } from '../services/userService';
+import api from '../services/apiConfig';
+import { updateProfile, changePassword, UserUpdateData, ChangePasswordData, exportUserData, deleteUserAccount, clearAllUserData, clearTradeHistory, uploadProfilePicture, deleteProfilePicture } from '../services/userService';
 import { AccountSettings } from '../services/types';
 import { accountService } from '../services/accountService';
 import { 
@@ -111,6 +112,9 @@ const Settings: React.FC = () => {
   const [accountSettings, setAccountSettings] = useState<AccountSettings>(accountService.getAccountSettings());
   const [tempAccountBalance, setTempAccountBalance] = useState<string>(accountService.getCurrentBalance().toString());
   const [tempStartingBalance, setTempStartingBalance] = useState<string>(accountService.getAccountSettings().starting_balance.toString());
+  const [startingBalanceDate, setStartingBalanceDate] = useState<string>(
+    new Date().toISOString().split('T')[0] // Default to today
+  );
 
   // Transaction state
   const [transactions, setTransactions] = useState<AccountTransaction[]>([]);
@@ -146,7 +150,21 @@ const Settings: React.FC = () => {
     setTempAccountBalance(settings.current_balance.toString());
     setTempStartingBalance(settings.starting_balance.toString());
     loadAccountGrowth();
+    loadUserStartingBalanceDate();
   }, []);
+
+  const loadUserStartingBalanceDate = async () => {
+    try {
+      const response = await api.get('/api/users/me');
+      if (response.data.starting_balance_date) {
+        // Convert ISO date to YYYY-MM-DD format for input
+        const date = new Date(response.data.starting_balance_date);
+        setStartingBalanceDate(date.toISOString().split('T')[0]);
+      }
+    } catch (error) {
+      console.error('Failed to load starting balance date:', error);
+    }
+  };
 
   // Load transactions on mount
   useEffect(() => {
@@ -261,11 +279,24 @@ const Settings: React.FC = () => {
     setLoading(true);
     
     try {
-      accountService.updateStartingBalance(newStartingBalance);
-      const updatedSettings = accountService.getAccountSettings();
-      setAccountSettings(updatedSettings);
+      // Call backend API to update starting balance with date (query params)
+      const params: any = {
+        starting_balance: newStartingBalance
+      };
       
-      setAlert({ type: 'success', message: 'Starting balance updated successfully!' });
+      if (startingBalanceDate) {
+        params.starting_date = new Date(startingBalanceDate).toISOString();
+      }
+      
+      const response = await api.put('/api/users/me/starting-balance', null, { params });
+
+      if (response.data.success) {
+        accountService.updateStartingBalance(newStartingBalance);
+        const updatedSettings = accountService.getAccountSettings();
+        setAccountSettings(updatedSettings);
+        
+        setAlert({ type: 'success', message: 'Starting balance updated successfully!' });
+      }
     } catch (error: any) {
       setAlert({ type: 'error', message: error.message });
     } finally {
@@ -410,6 +441,7 @@ const Settings: React.FC = () => {
 
   const [showDeleteConfirmation, setShowDeleteConfirmation] = useState(false);
   const [showClearDataConfirmation, setShowClearDataConfirmation] = useState(false);
+  const [showClearTradeHistoryConfirmation, setShowClearTradeHistoryConfirmation] = useState(false);
 
   // Transaction handlers
   const loadTransactions = async () => {
@@ -498,6 +530,57 @@ const Settings: React.FC = () => {
 
   const handleClearAllData = async () => {
     setShowClearDataConfirmation(true);
+  };
+
+  const handleClearTradeHistory = async () => {
+    setShowClearTradeHistoryConfirmation(true);
+  };
+
+  const confirmClearTradeHistory = async () => {
+    setLoading(true);
+    try {
+      // Call API to clear only trade history (not deposits/withdrawals or user settings)
+      await clearTradeHistory();
+
+      // Clear only trade-related cached data in localStorage (keep account settings)
+      const keysToRemove = [
+        'dashboardData',
+        'analyticsData', 
+        'tradesCache',
+        'chartData',
+        'positionsCache',
+        'importCache',
+        'portfolioCache',
+        'tradingPositionsCache',
+        'eventCache',
+        'performanceCache',
+        'cachedPositions',
+        'cachedEvents'
+      ];
+      
+      keysToRemove.forEach(key => {
+        localStorage.removeItem(key);
+      });
+      
+      // Clear any cached data with key patterns (but keep account settings)
+      const allKeys = Object.keys(localStorage);
+      allKeys.forEach(key => {
+        if (key.includes('trade') || key.includes('position') || key.includes('import') || 
+            key.includes('chart') || key.includes('portfolio') || key.includes('analytics')) {
+          localStorage.removeItem(key);
+        }
+      });
+      
+      setAlert({ 
+        type: 'success', 
+        message: 'Trade history cleared successfully! Your deposits, withdrawals, and account settings have been preserved. You can now re-import your trades.' 
+      });
+    } catch (error: any) {
+      setAlert({ type: 'error', message: error.message || 'Failed to clear trade history' });
+    } finally {
+      setLoading(false);
+      setShowClearTradeHistoryConfirmation(false);
+    }
   };
 
   const confirmClearAllData = async () => {
@@ -929,7 +1012,7 @@ const Settings: React.FC = () => {
                 </Box>
                 
                 <Grid container spacing={3} alignItems="center">
-                  <Grid item xs={12} md={8}>
+                  <Grid item xs={12} md={5}>
                     <TextField
                       fullWidth
                       label="Set Starting Balance"
@@ -940,6 +1023,20 @@ const Settings: React.FC = () => {
                         startAdornment: <InputAdornment position="start">$</InputAdornment>,
                       }}
                       helperText="Set your account's starting balance for accurate growth calculations"
+                      sx={{ mb: 2 }}
+                    />
+                  </Grid>
+                  <Grid item xs={12} md={3}>
+                    <TextField
+                      fullWidth
+                      label="Starting Date"
+                      value={startingBalanceDate}
+                      onChange={(e) => setStartingBalanceDate(e.target.value)}
+                      type="date"
+                      InputLabelProps={{
+                        shrink: true,
+                      }}
+                      helperText="Date when you started with this balance"
                       sx={{ mb: 2 }}
                     />
                   </Grid>
@@ -1333,6 +1430,14 @@ const Settings: React.FC = () => {
                 <Box sx={{ display: 'flex', gap: 2, flexWrap: 'wrap' }}>
                   <Button 
                     variant="outlined" 
+                    color="info"
+                    onClick={handleClearTradeHistory}
+                    disabled={loading}
+                  >
+                    Clear Trade History
+                  </Button>
+                  <Button 
+                    variant="outlined" 
                     color="warning"
                     onClick={handleClearAllData}
                     disabled={loading}
@@ -1349,7 +1454,9 @@ const Settings: React.FC = () => {
                   </Button>
                 </Box>
                 <Typography variant="caption" color="text.secondary" sx={{ mt: 1, display: 'block' }}>
-                  Clear All Data: Permanently deletes ALL trading data including positions, trades, imports, charts, events, and cached data. Resets account balance to $10,000. (Keeps your account and login)
+                  Clear Trade History: Deletes only positions and trades. Keeps your deposits, withdrawals, and account settings.
+                  <br />
+                  Clear All Data: Permanently deletes ALL trading data including positions, trades, imports, charts, events, deposits, and withdrawals. Resets account balance to $10,000.
                   <br />
                   Delete Account: Permanently removes your account and all data
                 </Typography>
@@ -1622,6 +1729,51 @@ const Settings: React.FC = () => {
             disabled={loading}
           >
             {loading ? 'Clearing...' : 'Clear All Data'}
+          </Button>
+        </DialogActions>
+      </Dialog>
+
+      {/* Clear Trade History Confirmation Dialog */}
+      <Dialog open={showClearTradeHistoryConfirmation} onClose={() => setShowClearTradeHistoryConfirmation(false)} maxWidth="sm">
+        <DialogTitle color="info">Clear Trade History</DialogTitle>
+        <DialogContent>
+          <Typography variant="body1" paragraph>
+            This will delete all positions and trades, but keep your account settings intact.
+          </Typography>
+          <Typography variant="body2" color="text.secondary" paragraph>
+            This will delete:
+          </Typography>
+          <Typography variant="body2" color="text.secondary" component="div">
+            • All positions and trades
+            <br />
+            • All charts and journal entries
+            <br />
+            • All imports and cached data
+          </Typography>
+          <Typography variant="body2" color="success.main" sx={{ mt: 2, fontWeight: 'bold' }} paragraph>
+            This will preserve:
+          </Typography>
+          <Typography variant="body2" color="text.secondary" component="div">
+            • Your deposits and withdrawals
+            <br />
+            • Your starting balance settings
+            <br />
+            • Your account configuration
+            <br />
+            • Your custom tags
+          </Typography>
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => setShowClearTradeHistoryConfirmation(false)}>
+            Cancel
+          </Button>
+          <Button 
+            onClick={confirmClearTradeHistory}
+            color="info" 
+            variant="contained"
+            disabled={loading}
+          >
+            {loading ? 'Clearing...' : 'Clear Trade History'}
           </Button>
         </DialogActions>
       </Dialog>

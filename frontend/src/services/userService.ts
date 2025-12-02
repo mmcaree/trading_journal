@@ -87,6 +87,17 @@ export const clearAllUserData = async (): Promise<void> => {
   }
 };
 
+// Clear only trade history (keep deposits/withdrawals and settings)
+export const clearTradeHistory = async (): Promise<void> => {
+  try {
+    await api.delete('/api/users/me/trade-history');
+  } catch (error) {
+    const axiosError = error as AxiosErrorResponse;
+    console.error('Clear trade history error:', axiosError);
+    throw new Error('Failed to clear trade history. Please try again.');
+  }
+};
+
 // Upload profile picture
 export const uploadProfilePicture = async (file: File): Promise<ProfilePictureUploadResponse> => {
   try {

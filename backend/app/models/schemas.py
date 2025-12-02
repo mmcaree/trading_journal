@@ -75,7 +75,6 @@ class UserUpdate(BaseModel):
     bio: Optional[str] = None
     email: Optional[str] = None
     timezone: Optional[str] = None  # User's local timezone
-    default_account_size: Optional[float] = None
 
 class NotificationSettings(BaseModel):
     email_notifications_enabled: bool = True
@@ -113,9 +112,6 @@ class UserResponse(UserBase):
     
     # 2FA status (excluding secret)
     two_factor_enabled: bool = False
-    
-    # Trading settings
-    default_account_size: Optional[float] = None
     
     # Admin system
     role: Optional[str] = None  # 'STUDENT' or 'INSTRUCTOR'

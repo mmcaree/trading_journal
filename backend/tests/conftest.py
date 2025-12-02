@@ -11,7 +11,7 @@ from sqlalchemy.orm import sessionmaker
 from app.models import Base
 from app.main import app
 from app.db.session import get_db
-
+from app.models.position_models import User
 router_for_test = APIRouter()
 
 @router_for_test.get("/positions")
@@ -40,6 +40,18 @@ def test_db():
     db.close()
     transaction.rollback()
     connection.close()
+
+@pytest.fixture
+def test_user(test_db):
+    user = User(
+        username="testuser",
+        email="test@example.com",
+        hashed_password="fakehashedpassword"
+    )
+    test_db.add(user)
+    test_db.commit()
+    test_db.refresh(user)
+    return user
 
 
 @pytest.fixture(autouse=True)

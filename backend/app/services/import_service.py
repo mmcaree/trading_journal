@@ -27,6 +27,7 @@ from app.models.position_models import (
 from app.models import User
 from app.utils.datetime_utils import utc_now
 from app.services.broker_profiles import WEBULL_USA_PROFILE
+from app.services.account_value_service import AccountValueService
 
 logger = logging.getLogger(__name__)
 
@@ -41,9 +42,10 @@ class ImportValidationError(Exception):
 class IndividualPositionTracker:
     """Tracks individual position lifecycles during import"""
     
-    def __init__(self, db: Session, user_id: int):
+    def __init__(self, db: Session, user_id: int, account_value_service=None):
         self.db = db
         self.user_id = user_id
+        self.account_value_service = account_value_service
         self.symbol_positions: Dict[str, List[TradingPosition]] = {}
         self.position_counter = 0
     
@@ -92,6 +94,9 @@ class IndividualPositionTracker:
     def _create_new_position(self, symbol: str, event_data: Dict[str, Any]) -> TradingPosition:
         """Create a new position"""
         self.position_counter += 1
+        
+        # Note: account_value_at_entry is calculated dynamically via AccountValueService
+        # No need to store static value - always compute fresh for accuracy
         
         position = TradingPosition(
             user_id=self.user_id,
@@ -323,38 +328,62 @@ class IndividualPositionTracker:
             raise ImportValidationError(f"Unknown side: {side}")
     
     def _calculate_original_risk_percent(self, position: TradingPosition, event: TradingPositionEvent):
-        """Calculate original risk percentage for new position"""
-        from app.models import User
+        """Calculate original risk percentage for new position entry
         
-        # Get user's account value at entry
-        user = self.db.query(User).filter(User.id == self.user_id).first()
-        if not user or not user.current_account_balance:
-            logger.warning(f"No account balance found for user {self.user_id}")
+        Uses the actual shares from the buy event (not accumulated original_shares)
+        and dynamically calculates account value at the time of entry.
+        """
+        # Get dynamically calculated account value at event time
+        account_value = self.account_value_service.get_account_value_at_date(
+            self.user_id, 
+            event.event_date
+        )
+        
+        if not account_value or account_value <= 0:
+            logger.warning(f"Invalid account value {account_value} at {event.event_date}")
             return
         
-        # Calculate original risk: (entry_price - stop_loss) × original_shares / account_value
-        if event.stop_loss and position.avg_entry_price and position.original_shares:
-            risk_per_share = position.avg_entry_price - event.stop_loss
-            total_risk = risk_per_share * position.original_shares
-            risk_percent = (total_risk / user.current_account_balance) * 100
+        # Calculate original risk: (entry_price - stop_loss) × event_shares / account_value
+        # Use event.shares (the actual shares bought), NOT position.original_shares
+        if event.stop_loss and event.price and event.shares:
+            risk_per_share = event.price - event.stop_loss
+            total_risk = risk_per_share * event.shares  # Use THIS event's shares
+            risk_percent = (total_risk / account_value) * 100
             
             position.original_risk_percent = round(risk_percent, 2)
-            logger.info(f"Calculated original risk for {position.ticker}: {risk_percent:.2f}%")
+            logger.info(f"Calculated original risk for {position.ticker}: {risk_percent:.2f}% "
+                       f"(${total_risk:.2f} / ${account_value:.2f})")
     
     def _calculate_current_risk_percent(self, position: TradingPosition):
-        """Calculate current risk percentage based on current position and stop loss"""
-        from app.models import User
+        """Calculate current risk percentage based on current position and stop loss
         
-        # Get current account value
-        user = self.db.query(User).filter(User.id == self.user_id).first()
-        if not user or not user.current_account_balance:
+        Uses dynamically calculated account value at the time of the event.
+        """
+        # Get dynamically calculated account value at event time
+        # Use the most recent event time or position opened_at
+        from app.models import TradingPositionEvent
+        
+        latest_event = self.db.query(TradingPositionEvent).filter(
+            TradingPositionEvent.position_id == position.id
+        ).order_by(TradingPositionEvent.event_date.desc()).first()
+        
+        event_date = latest_event.event_date if latest_event else position.opened_at
+        if not event_date:
+            return
+        
+        account_value = self.account_value_service.get_account_value_at_date(
+            self.user_id,
+            event_date
+        )
+        
+        if not account_value or account_value <= 0:
             return
         
         # Calculate current risk: (avg_entry_price - current_stop_loss) × current_shares / current_account_value
         if position.current_stop_loss and position.avg_entry_price and position.current_shares > 0:
             risk_per_share = position.avg_entry_price - position.current_stop_loss
             total_risk = risk_per_share * position.current_shares
-            risk_percent = (total_risk / user.current_account_balance) * 100
+            risk_percent = (total_risk / account_value) * 100
             
             position.current_risk_percent = round(risk_percent, 2)
             logger.info(f"Updated current risk for {position.ticker}: {risk_percent:.2f}%")
@@ -364,6 +393,7 @@ class IndividualPositionImportService:
     
     def __init__(self, db: Session):
         self.db = db
+        self.account_value_service = AccountValueService(db)
         self.validation_errors: List[ImportValidationError] = []
         self.warnings: List[str] = []
     
@@ -394,7 +424,7 @@ class IndividualPositionImportService:
             enhanced_events, pending_orders_data = self._detect_stop_losses(events)
             
             # Process events using individual position tracking
-            tracker = IndividualPositionTracker(self.db, user_id)
+            tracker = IndividualPositionTracker(self.db, user_id, self.account_value_service)
             
             imported_count = 0
             position_count = 0
@@ -636,36 +666,103 @@ class IndividualPositionImportService:
             cancelled_events = [e for e in symbol_events if e['status'].upper() == 'CANCELLED']
             pending_events = [e for e in symbol_events if e['status'].upper() == 'PENDING']
             
-            # Process filled events and match each BUY with its corresponding cancelled SELL
+            # Also identify FILLED sell orders that were stop losses (placed at same time as buy, filled later)
+            # These are stop losses that got triggered, not manual sells
+            stop_loss_sells = []
+            for e in filled_events:
+                if e['side'].upper() == 'SELL' and e.get('placed_time') and e.get('filled_time'):
+                    # If placed_time != filled_time, this was a pending order that got filled (likely stop loss)
+                    if e['placed_time'] != e['filled_time']:
+                        stop_loss_sells.append(e)
+            
+            msg = f"Symbol {symbol}: {len(filled_events)} filled, {len(cancelled_events)} cancelled, {len(pending_events)} pending, {len(stop_loss_sells)} triggered stops"
+            logger.info(msg)
+            print(f"[IMPORT] {msg}")
+            
+            # Process filled events and match each BUY with its corresponding cancelled/pending SELL
+            # Track running position to match stop losses with correct buys
+            position_shares = 0
+            used_stop_orders = set()  # Track which cancelled orders we've already matched
+            
             for event in filled_events:
                 stop_loss_price = None
                 
-                # For BUY events, look for a corresponding CANCELLED sell order
+                # For BUY events, look for a corresponding stop loss order (cancelled, pending, or triggered)
                 if event['side'].upper() == 'BUY':
-                    # Look for cancelled sell orders placed at the same time with matching share quantity
                     event_time = event['filled_time']
                     buy_shares = event['filled_qty']
+                    position_shares += buy_shares
                     
-                    # Find cancelled sell orders that match this buy
-                    matching_stops = [e for e in cancelled_events 
-                                    if e['side'].upper() == 'SELL' and 
-                                    e['filled_time'] == event_time and
-                                    e.get('filled_qty', e.get('total_qty', 0)) == buy_shares]
+                    logger.debug(f"Processing BUY: {buy_shares} shares at {event_time}, position size now {position_shares}")
+                    
+                    # Strategy 1: Match with FILLED sells that were placed at same time (triggered stop losses)
+                    # These are stop orders that got executed
+                    matching_stops = [e for e in stop_loss_sells
+                                    if e.get('placed_time') == event_time and
+                                    e.get('filled_qty', e.get('total_qty', 0)) == buy_shares and
+                                    id(e) not in used_stop_orders]
+                    
+                    # Strategy 2: Match cancelled sells with SAME placed_time and matching quantity
+                    if not matching_stops:
+                        matching_stops = [e for e in cancelled_events 
+                                        if e['side'].upper() == 'SELL' and 
+                                        e.get('placed_time') == event_time and
+                                        e.get('filled_qty', e.get('total_qty', 0)) == buy_shares and
+                                        id(e) not in used_stop_orders]
+                    
+                    # Strategy 3: Try matching with current position size (for both triggered and cancelled)
+                    if not matching_stops:
+                        matching_stops = [e for e in stop_loss_sells
+                                        if e.get('placed_time') == event_time and
+                                        e.get('filled_qty', e.get('total_qty', 0)) == position_shares and
+                                        id(e) not in used_stop_orders]
+                    
+                    if not matching_stops:
+                        matching_stops = [e for e in cancelled_events 
+                                        if e['side'].upper() == 'SELL' and 
+                                        e.get('placed_time') == event_time and
+                                        e.get('filled_qty', e.get('total_qty', 0)) == position_shares and
+                                        id(e) not in used_stop_orders]
+                    
+                    # Strategy 4: Also check pending sell orders placed at same time
+                    if not matching_stops:
+                        matching_stops = [e for e in pending_events 
+                                        if e['side'].upper() == 'SELL' and 
+                                        e.get('placed_time') == event_time and
+                                        (e.get('filled_qty', e.get('total_qty', 0)) == buy_shares or 
+                                         e.get('filled_qty', e.get('total_qty', 0)) == position_shares) and
+                                        id(e) not in used_stop_orders]
                     
                     if matching_stops:
-                        # Use the first (should be only one) matching cancelled sell as stop loss
+                        # Use the first matching stop order
                         stop_order = matching_stops[0]
-                        # For cancelled orders, use order_price (the intended stop loss price) not avg_price
+                        used_stop_orders.add(id(stop_order))
+                        
+                        # For stop orders, use order_price (for cancelled/pending) or avg_price (for filled stops)
                         stop_loss_price = self._parse_price(stop_order.get('order_price', stop_order.get('avg_price')))
                         if stop_loss_price:
                             event['stop_loss'] = stop_loss_price
-                            logger.info(f"Matched BUY {buy_shares} shares at {event_time} with CANCELLED sell stop loss at {stop_loss_price}")
+                            if stop_order in stop_loss_sells:
+                                match_type = "TRIGGERED"
+                            elif stop_order in pending_events:
+                                match_type = "PENDING"
+                            else:
+                                match_type = "CANCELLED"
+                            stop_qty = stop_order.get('filled_qty', stop_order.get('total_qty', 0))
+                            msg = f"✓ Matched BUY {buy_shares} shares at {event_time} with {match_type} sell stop loss at ${stop_loss_price} (stop qty: {stop_qty}, position size: {position_shares})"
+                            logger.info(msg)
+                            print(f"[IMPORT] {msg}")
                         else:
-                            logger.warning(f"Found matching cancelled sell for BUY at {event_time} but no valid price")
+                            logger.warning(f"Found matching stop order for BUY at {event_time} but no valid price: order_price={stop_order.get('order_price')}, avg_price={stop_order.get('avg_price')}")
                     else:
-                        logger.warning(f"No matching cancelled sell found for BUY {buy_shares} shares at {event_time}")
+                        msg = f"✗ No matching stop order found for BUY {buy_shares} shares at {event_time} (position size: {position_shares})"
+                        logger.warning(msg)
+                        print(f"[IMPORT] {msg}")
                 
-                # SELL events don't need stop losses as the risk was already realized
+                elif event['side'].upper() == 'SELL':
+                    # Track position reduction
+                    position_shares -= event['filled_qty']
+                    # SELL events don't need stop losses as the risk was already realized
             
             # Add all filled events (enhanced with stop loss info)
             enhanced_events.extend(filled_events)

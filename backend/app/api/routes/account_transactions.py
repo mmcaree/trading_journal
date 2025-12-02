@@ -97,6 +97,11 @@ def create_account_transaction(
     db.commit()
     db.refresh(db_transaction)
     
+    # Invalidate cached account values since transaction added
+    from app.services.account_value_service import AccountValueService
+    account_value_service = AccountValueService(db)
+    account_value_service.invalidate_cache(current_user.id)
+    
     return db_transaction
 
 
@@ -151,6 +156,10 @@ def update_account_transaction(
     
     # Recalculate balance if amount or type changed
     if transaction_update.amount is not None or transaction_update.transaction_type is not None:
+        # Initialize balance if None
+        if current_user.current_account_balance is None:
+            current_user.current_account_balance = 0.0
+        
         # Reverse old transaction effect
         if old_type == "DEPOSIT":
             current_user.current_account_balance -= old_amount
@@ -165,6 +174,11 @@ def update_account_transaction(
     
     db.commit()
     db.refresh(transaction)
+    
+    # Invalidate cached account values since transaction updated
+    from app.services.account_value_service import AccountValueService
+    account_value_service = AccountValueService(db)
+    account_value_service.invalidate_cache(current_user.id)
     
     return transaction
 
@@ -189,12 +203,23 @@ def delete_account_transaction(
     
     # Reverse transaction effect on balance
     if transaction.transaction_type == "DEPOSIT":
-        current_user.current_account_balance -= transaction.amount
-    else:
-        current_user.current_account_balance += transaction.amount
+        if current_user.current_account_balance:
+            current_user.current_account_balance -= transaction.amount
+        else:
+            current_user.current_account_balance = -transaction.amount
+    else:  # WITHDRAWAL
+        if current_user.current_account_balance:
+            current_user.current_account_balance += transaction.amount
+        else:
+            current_user.current_account_balance = transaction.amount
     
     db.delete(transaction)
     db.commit()
+    
+    # Invalidate cached account values since transaction deleted
+    from app.services.account_value_service import AccountValueService
+    account_value_service = AccountValueService(db)
+    account_value_service.invalidate_cache(current_user.id)
     
     return None
 
