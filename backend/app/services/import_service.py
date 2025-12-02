@@ -328,41 +328,62 @@ class IndividualPositionTracker:
             raise ImportValidationError(f"Unknown side: {side}")
     
     def _calculate_original_risk_percent(self, position: TradingPosition, event: TradingPositionEvent):
-        """Calculate original risk percentage for new position"""
-        from app.models import User
+        """Calculate original risk percentage for new position entry
         
-        # Get user's account value at entry
-        user = self.db.query(User).filter(User.id == self.user_id).first()
-        if not user or not user.current_account_balance:
-            logger.warning(f"No account balance found for user {self.user_id}")
+        Uses the actual shares from the buy event (not accumulated original_shares)
+        and dynamically calculates account value at the time of entry.
+        """
+        # Get dynamically calculated account value at event time
+        account_value = self.account_value_service.get_account_value_at_date(
+            self.user_id, 
+            event.event_date
+        )
+        
+        if not account_value or account_value <= 0:
+            logger.warning(f"Invalid account value {account_value} at {event.event_date}")
             return
         
-        # Store account value at entry
-        position.account_value_at_entry = user.current_account_balance
-        
-        # Calculate original risk: (entry_price - stop_loss) × original_shares / account_value
-        if event.stop_loss and position.avg_entry_price and position.original_shares:
-            risk_per_share = position.avg_entry_price - event.stop_loss
-            total_risk = risk_per_share * position.original_shares
-            risk_percent = (total_risk / user.current_account_balance) * 100
+        # Calculate original risk: (entry_price - stop_loss) × event_shares / account_value
+        # Use event.shares (the actual shares bought), NOT position.original_shares
+        if event.stop_loss and event.price and event.shares:
+            risk_per_share = event.price - event.stop_loss
+            total_risk = risk_per_share * event.shares  # Use THIS event's shares
+            risk_percent = (total_risk / account_value) * 100
             
             position.original_risk_percent = round(risk_percent, 2)
-            logger.info(f"Calculated original risk for {position.ticker}: {risk_percent:.2f}%")
+            logger.info(f"Calculated original risk for {position.ticker}: {risk_percent:.2f}% "
+                       f"(${total_risk:.2f} / ${account_value:.2f})")
     
     def _calculate_current_risk_percent(self, position: TradingPosition):
-        """Calculate current risk percentage based on current position and stop loss"""
-        from app.models import User
+        """Calculate current risk percentage based on current position and stop loss
         
-        # Get current account value
-        user = self.db.query(User).filter(User.id == self.user_id).first()
-        if not user or not user.current_account_balance:
+        Uses dynamically calculated account value at the time of the event.
+        """
+        # Get dynamically calculated account value at event time
+        # Use the most recent event time or position opened_at
+        from app.models import TradingPositionEvent
+        
+        latest_event = self.db.query(TradingPositionEvent).filter(
+            TradingPositionEvent.position_id == position.id
+        ).order_by(TradingPositionEvent.event_date.desc()).first()
+        
+        event_date = latest_event.event_date if latest_event else position.opened_at
+        if not event_date:
+            return
+        
+        account_value = self.account_value_service.get_account_value_at_date(
+            self.user_id,
+            event_date
+        )
+        
+        if not account_value or account_value <= 0:
             return
         
         # Calculate current risk: (avg_entry_price - current_stop_loss) × current_shares / current_account_value
         if position.current_stop_loss and position.avg_entry_price and position.current_shares > 0:
             risk_per_share = position.avg_entry_price - position.current_stop_loss
             total_risk = risk_per_share * position.current_shares
-            risk_percent = (total_risk / user.current_account_balance) * 100
+            risk_percent = (total_risk / account_value) * 100
             
             position.current_risk_percent = round(risk_percent, 2)
             logger.info(f"Updated current risk for {position.ticker}: {risk_percent:.2f}%")

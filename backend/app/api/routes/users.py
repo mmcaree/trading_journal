@@ -20,7 +20,7 @@ from app.services.user_service import (
     update_user_profile, change_password, update_notification_settings,
     export_user_data, delete_user_account
 )
-from app.services.data_service import clear_all_user_data
+from app.services.data_service import clear_all_user_data, clear_trade_history
 from app.services.two_factor_service import two_factor_service
 from app.utils.exceptions import (
     NotFoundException,
@@ -173,6 +173,26 @@ def clear_all_data(
         print(f"Clear data error: {str(e)}")
         print(traceback.format_exc())
         raise InternalServerException(f"Failed to clear user data: {str(e)}")
+
+@router.delete("/me/trade-history")
+def clear_trade_history_endpoint(
+    current_user: User = Depends(get_current_active_user),
+    db: Session = Depends(get_db)
+):
+    """Clear only trade history (positions and events) while keeping user settings and deposits/withdrawals"""
+    try:
+        clear_trade_history(db, current_user.id)
+        
+        # Invalidate account value cache since positions changed
+        account_value_service = AccountValueService(db)
+        account_value_service.invalidate_cache(current_user.id)
+        
+        return {"message": "Trade history cleared successfully. User settings and deposits/withdrawals preserved."}
+    except Exception as e:
+        import traceback
+        print(f"Clear trade history error: {str(e)}")
+        print(traceback.format_exc())
+        raise InternalServerException(f"Failed to clear trade history: {str(e)}")
 
 @router.get("/account-balance")
 def get_account_balance(
@@ -414,3 +434,45 @@ def update_starting_balance(
         "starting_balance": starting_balance,
         "starting_date": current_user.starting_balance_date.isoformat()
     }
+
+from typing import List
+from pydantic import BaseModel
+
+class AccountValueRequest(BaseModel):
+    dates: List[str]  # ISO date strings
+
+class AccountValueAtDate(BaseModel):
+    date: str
+    account_value: float
+
+@router.post("/me/account-values", response_model=List[AccountValueAtDate])
+def get_account_values_at_dates(
+    request: AccountValueRequest,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    """Get account values at multiple dates for frontend risk calculations"""
+    from app.services.account_value_service import AccountValueService
+    
+    account_value_service = AccountValueService(db)
+    results = []
+    
+    for date_str in request.dates:
+        try:
+            target_date = datetime.fromisoformat(date_str.replace('Z', '+00:00'))
+            account_value = account_value_service.get_account_value_at_date(
+                current_user.id,
+                target_date
+            )
+            results.append({
+                "date": date_str,
+                "account_value": account_value
+            })
+        except Exception as e:
+            logger.error(f"Error calculating account value for {date_str}: {e}")
+            results.append({
+                "date": date_str,
+                "account_value": current_user.initial_account_balance or 10000.0
+            })
+    
+    return results

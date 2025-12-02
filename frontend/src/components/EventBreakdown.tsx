@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import {
   Box,
   Paper,
@@ -29,6 +29,7 @@ import {
 } from '@mui/icons-material';
 import { Position, PositionEvent, fetchPendingOrders, PendingOrder, updatePendingOrder } from '../services/positionsService';
 import { useCurrency } from '../context/CurrencyContext';
+import api from '../services/apiConfig';
 
 interface EventBreakdownProps {
   position: Position;
@@ -81,6 +82,33 @@ const EventBreakdown: React.FC<EventBreakdownProps> = ({
   const [editingSubLots, setEditingSubLots] = useState<SubLotEditingState>({});
   const [pendingOrders, setPendingOrders] = useState<PendingOrder[]>([]);
   const [loadingPendingOrders, setLoadingPendingOrders] = useState(false);
+  const [eventAccountValues, setEventAccountValues] = useState<Map<string, number>>(new Map());
+
+  // Fetch account values for all event dates
+  useEffect(() => {
+    const fetchAccountValues = async () => {
+      const dates = events.map(e => e.event_date);
+      if (dates.length === 0) return;
+
+      try {
+        const response = await api.post('/api/users/me/account-values', {
+          dates: dates
+        });
+        
+        const valueMap = new Map<string, number>();
+        response.data.forEach((item: { date: string; account_value: number }) => {
+          valueMap.set(item.date, item.account_value);
+        });
+        setEventAccountValues(valueMap);
+      } catch (error) {
+        console.error('Failed to fetch account values:', error);
+      }
+    };
+
+    if (events.length > 0) {
+      fetchAccountValues();
+    }
+  }, [events]);
 
   // Fetch pending orders for imported positions
   useEffect(() => {
@@ -133,17 +161,16 @@ const EventBreakdown: React.FC<EventBreakdownProps> = ({
     if (!stopLoss && event.source === 'import' && pendingOrders.length > 0) {
       stopLoss = findStopLossForImportedEvent(event);
     }
-
-    // Calculate original risk using the ORIGINAL stop loss from first buy event (never changes)
-    const originalStopLoss = getOriginalStopLoss();
-    const originalRisk = originalStopLoss && event.event_type === 'buy'
-      ? Math.abs((event.price || 0) - originalStopLoss) * Math.abs(event.shares || 0)
+    // Calculate original risk using THIS event's stop loss (not the first buy's stop loss)
+    // Each buy event should show the risk taken at THAT specific entry
+    const originalRisk = stopLoss && event.event_type === 'buy'
+      ? Math.abs((event.price || 0) - stopLoss) * Math.abs(event.shares || 0)
       : 0;
     
-    // Calculate risk percentage based on account balance at time of entry (snapshot)
-    const snapshotAccountValue = position.account_value_at_entry || accountBalance || 0;
-    const originalRiskPercent = originalRisk > 0 && snapshotAccountValue > 0
-      ? (originalRisk / snapshotAccountValue) * 100 
+    // Get account value at this specific event's date (dynamically calculated)
+    const eventAccountValue = eventAccountValues.get(event.event_date) || accountBalance || 0;
+    const originalRiskPercent = originalRisk > 0 && eventAccountValue > 0
+      ? (originalRisk / eventAccountValue) * 100 
       : 0;
 
     // Calculate current risk (if we have current price)
@@ -331,8 +358,6 @@ const EventBreakdown: React.FC<EventBreakdownProps> = ({
 
   // For imported positions, use pending sell orders to determine sub-lots
   const calculateImportedSubLots = (): SubLot[] => {
-    console.log('🔍 calculateImportedSubLots called with pending orders:', pendingOrders);
-    
     // Use ALL sell orders (pending, cancelled, filled) to understand the complete picture
     const allSellOrders = pendingOrders.filter(order => 
       order.side.toLowerCase() === 'sell'
@@ -342,9 +367,6 @@ const EventBreakdown: React.FC<EventBreakdownProps> = ({
     const currentPendingSellOrders = allSellOrders.filter(order => 
       order.status.toLowerCase() === 'pending'
     );
-    
-    console.log('🎯 All sell orders:', allSellOrders);
-    console.log('🎯 Current pending sell orders:', currentPendingSellOrders);
     
     // Calculate current shares and average entry price
     const currentShares = events.reduce((total, event) => {
@@ -358,10 +380,7 @@ const EventBreakdown: React.FC<EventBreakdownProps> = ({
     const totalBuyShares = buyEvents.reduce((sum, event) => sum + event.shares, 0);
     const avgEntryPrice = totalBuyShares > 0 ? totalBuyValue / totalBuyShares : 0;
     
-    console.log(`📊 Position summary: ${currentShares} shares, avg entry: $${avgEntryPrice.toFixed(2)}`);
-    
     if (currentPendingSellOrders.length === 0) {
-      console.log('⚠️ No current pending sell orders found - creating single sub-lot');
       // No current pending orders - create single sub-lot with all shares
       // But still try to find the most recent stop loss from historical orders
       const snapshotAccountValue = position.account_value_at_entry || accountBalance || 0;
@@ -547,7 +566,11 @@ const EventBreakdown: React.FC<EventBreakdownProps> = ({
     return finalSubLots;
   };
 
-  const subLots = calculateSubLots();
+  // Memoize sub-lot calculation to prevent re-renders
+  const subLots = useMemo(() => {
+    return calculateSubLots();
+  }, [events, pendingOrders, position.account_value_at_entry, accountBalance]);
+  
   const hasImportEvents = events.some(event => event.source === 'import');
   
   // Debug logging for database sync issues
