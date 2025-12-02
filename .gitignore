@@ -176,3 +176,9 @@ backend/run_production_migration.py
 backend/migrations/run_production_migration.py
 PREFETCH_CODE_REVIEW.md
 PREFETCH_FIXES_REQUIRED.md
+scripts/add_account_transactions_test_issue.py
+scripts/add_dynamic_account_value_issue.py
+scripts/add_dynamic_account_value_phase1.py
+scripts/add_dynamic_account_value_phase2.py
+scripts/add_dynamic_account_value_phase3.py
+scripts/add_risk_calculation_fix_issue.py
