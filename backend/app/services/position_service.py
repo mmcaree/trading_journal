@@ -35,7 +35,6 @@ class PositionService:
         strategy: Optional[str] = None,
         setup_type: Optional[str] = None,
         timeframe: Optional[str] = None,
-        account_value_at_entry: Optional[float] = None,
         **kwargs
     ) -> TradingPosition:
         """Create a new position"""
@@ -45,7 +44,6 @@ class PositionService:
             strategy=strategy,
             setup_type=setup_type,
             timeframe=timeframe,
-            account_value_at_entry=account_value_at_entry,
             opened_at=utc_now(),
             **kwargs
         )

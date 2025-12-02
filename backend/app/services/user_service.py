@@ -217,7 +217,6 @@ def export_user_data(db: Session, user_id: int) -> dict:
             "original_risk_percent": float(position.original_risk_percent) if position.original_risk_percent else None,
             "current_risk_percent": float(position.current_risk_percent) if position.current_risk_percent else None,
             "original_shares": position.original_shares,
-            "account_value_at_entry": float(position.account_value_at_entry) if position.account_value_at_entry else None,
             "opened_at": position.opened_at.isoformat() if position.opened_at else None,
             "closed_at": position.closed_at.isoformat() if position.closed_at else None,
             "market_conditions": position.market_conditions,
