@@ -274,8 +274,10 @@ class User(Base):
     timezone = Column(String, default='America/New_York')  # User's local timezone for email scheduling
     
     # Trading settings
+    default_account_size = Column(Float, default=10000.0)
     current_account_balance = Column(Float, nullable=True)  # Current account balance (updated with P&L)
     initial_account_balance = Column(Float, nullable=True)  # Starting balance for P&L tracking
+    starting_balance_date = Column(DateTime, nullable=True)
     
     # Admin system - simple role-based access
     role = Column(String, default='STUDENT')  # 'STUDENT' or 'INSTRUCTOR'

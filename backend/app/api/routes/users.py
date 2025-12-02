@@ -28,6 +28,11 @@ from app.utils.exceptions import (
     ValidationException
 )
 
+from app.services.account_value_service import AccountValueService
+from typing import Optional
+from datetime import datetime
+from app.utils.datetime_utils import utc_now
+
 router = APIRouter()
 
 # Configure Cloudinary
@@ -329,3 +334,78 @@ def delete_profile_picture(
     except Exception:
         db.rollback()
         raise InternalServerException("Failed to delete profile picture")
+
+
+# ADD NEW ENDPOINTS (don't remove old ones yet)
+
+@router.get("/me/account-value")
+def get_account_value(
+    at_date: Optional[datetime] = None,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    """Get account value at specific date (or current)"""
+    account_value_service = AccountValueService(db)
+    
+    target_date = at_date or utc_now()
+    value = account_value_service.get_account_value_at_date(
+        user_id=current_user.id,
+        target_date=target_date
+    )
+    
+    return {
+        "account_value": value,
+        "as_of_date": target_date.isoformat()
+    }
+
+
+@router.get("/me/account-value/breakdown")
+def get_account_value_breakdown(
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    """Get detailed breakdown of how account value is calculated"""
+    account_value_service = AccountValueService(db)
+    return account_value_service.get_account_value_breakdown(current_user.id)
+
+
+@router.get("/me/equity-curve")
+def get_equity_curve(
+    start_date: Optional[datetime] = None,
+    end_date: Optional[datetime] = None,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    """Get historical equity curve data for charting"""
+    account_value_service = AccountValueService(db)
+    return {
+        "equity_curve": account_value_service.get_equity_curve(
+            user_id=current_user.id,
+            start_date=start_date,
+            end_date=end_date
+        )
+    }
+
+
+@router.put("/me/starting-balance")
+def update_starting_balance(
+    starting_balance: float,
+    starting_date: Optional[datetime] = None,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    """Update user's starting balance"""
+    if starting_balance < 0:
+        raise HTTPException(400, "Starting balance must be positive")
+    
+    current_user.starting_balance = starting_balance
+    current_user.starting_balance_date = starting_date or utc_now()
+    
+    db.commit()
+    db.refresh(current_user)
+    
+    return {
+        "success": True,
+        "starting_balance": starting_balance,
+        "starting_date": current_user.starting_balance_date.isoformat()
+    }
