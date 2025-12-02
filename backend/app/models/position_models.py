@@ -75,7 +75,6 @@ class TradingPosition(Base):
     original_risk_percent = Column(Float, nullable=True)  # Risk % when position opened
     current_risk_percent = Column(Float, nullable=True)   # Current risk % based on current stop
     original_shares = Column(Integer, nullable=True)      # Shares when position first opened
-    account_value_at_entry = Column(Float, nullable=True) # Account value when position opened
     
     # Position lifecycle
     opened_at = Column(DateTime, nullable=False)

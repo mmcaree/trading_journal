@@ -332,9 +332,6 @@ class IndividualPositionTracker:
             logger.warning(f"No account balance found for user {self.user_id}")
             return
         
-        # Store account value at entry
-        position.account_value_at_entry = user.current_account_balance
-        
         # Calculate original risk: (entry_price - stop_loss) × original_shares / account_value
         if event.stop_loss and position.avg_entry_price and position.original_shares:
             risk_per_share = position.avg_entry_price - event.stop_loss

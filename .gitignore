@@ -185,3 +185,6 @@ backend/migrations/run_starting_balance_date_prod.py
 backend/migrations/add_starting_balance_date_postgres.sql
 backend/migrations/run_account_value_at_entry_prod.py
 backend/scripts/backfill_account_value_at_entry_prod.py
+MERGE_CHECKLIST.md
+MIGRATION_NOTE.md
+PHASE_2.2_2.3_STATUS.md
