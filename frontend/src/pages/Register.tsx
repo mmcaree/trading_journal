@@ -15,6 +15,9 @@ import {
   Stepper,
   Step,
   StepLabel,
+  Checkbox,
+  FormControlLabel,
+  Link as MuiLink,
 } from '@mui/material';
 import {
   PersonAddOutlined as PersonAddOutlinedIcon,
@@ -35,6 +38,7 @@ const Register: React.FC = () => {
   const [activeStep, setActiveStep] = useState(0);
   const [showPassword, setShowPassword] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [agreedToPrivacy, setAgreedToPrivacy] = useState(false);
 
   const formik = useFormik({
     initialValues: {
@@ -231,19 +235,42 @@ const Register: React.FC = () => {
             )}
 
             {activeStep === 2 && (
-              <Box sx={{ my: 3, textAlign: 'center' }}>
-                <Typography variant="h6" gutterBottom>
+              <Box sx={{ my: 3 }}>
+                <Typography variant="h6" gutterBottom textAlign="center">
                   Registration Summary
                 </Typography>
-                <Typography variant="body1" gutterBottom>
+                <Typography variant="body1" gutterBottom textAlign="center">
                   Username: {formik.values.username}
                 </Typography>
-                <Typography variant="body1" gutterBottom>
+                <Typography variant="body1" gutterBottom textAlign="center">
                   Email: {formik.values.email}
                 </Typography>
-                <Typography variant="body2" color="text.secondary" sx={{ mt: 2 }}>
-                  By clicking "Complete Registration" you agree to our Terms of Service and Privacy Policy.
-                </Typography>
+                
+                <Box sx={{ mt: 3, p: 2, border: 1, borderColor: 'divider', borderRadius: 2 }}>
+                  <FormControlLabel
+                    control={
+                      <Checkbox
+                        checked={agreedToPrivacy}
+                        onChange={(e) => setAgreedToPrivacy(e.target.checked)}
+                        color="primary"
+                      />
+                    }
+                    label={
+                      <Typography variant="body2">
+                        I agree to the{' '}
+                        <MuiLink
+                          component={Link}
+                          to="/privacy-policy"
+                          target="_blank"
+                          rel="noopener"
+                          sx={{ fontWeight: 600 }}
+                        >
+                          Privacy Policy
+                        </MuiLink>
+                      </Typography>
+                    }
+                  />
+                </Box>
               </Box>
             )}
 
@@ -261,6 +288,7 @@ const Register: React.FC = () => {
                 type="submit"
                 variant="contained"
                 color="primary"
+                disabled={activeStep === steps.length - 1 && !agreedToPrivacy}
                 endIcon={activeStep < steps.length - 1 ? <ArrowForwardIcon /> : undefined}
               >
                 {activeStep === steps.length - 1 ? 'Complete Registration' : 'Next'}
