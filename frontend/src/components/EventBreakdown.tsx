@@ -90,6 +90,15 @@ const EventBreakdown: React.FC<EventBreakdownProps> = ({
       const dates = events.map(e => e.event_date);
       if (dates.length === 0) return;
 
+      // DEBUG: Log first few events to see stop_loss data
+      console.log('📊 First 3 events with stop_loss data:', events.slice(0, 3).map(e => ({
+        type: e.event_type,
+        shares: e.shares,
+        price: e.price,
+        stop_loss: e.stop_loss,
+        source: e.source
+      })));
+
       try {
         const response = await api.post('/api/users/me/account-values', {
           dates: dates
