@@ -1,5 +1,6 @@
 from datetime import datetime
 from typing import Optional, List, Dict, Any
+import time
 from sqlalchemy.orm import Session
 from sqlalchemy import func, or_
 
@@ -13,10 +14,44 @@ class AccountValueService:
     Calculate account value dynamically at any point in time.
     
     Formula: Starting Balance + Realized P&L + Deposits - Withdrawals
+    
+    Implements service-layer caching for performance with cache invalidation
+    when user updates account settings or transactions.
     """
+    
+    # Class-level cache shared across instances (in-memory, per worker process)
+    _cache: Dict[tuple, float] = {}
+    _cache_timestamps: Dict[tuple, float] = {}
+    _cache_ttl: int = 300  # 5 minutes
     
     def __init__(self, db: Session):
         self.db = db
+    
+    def invalidate_cache(self, user_id: int):
+        """
+        Clear cached account values for a user.
+        
+        Call this when user updates:
+        - initial_account_balance
+        - starting_balance_date
+        - Adds/edits/deletes AccountTransaction
+        - Corrects realized P&L
+        
+        Args:
+            user_id: User ID to clear cache for
+        """
+        keys_to_remove = [k for k in self._cache if k[0] == user_id]
+        for key in keys_to_remove:
+            if key in self._cache:
+                del self._cache[key]
+            if key in self._cache_timestamps:
+                del self._cache_timestamps[key]
+    
+    @classmethod
+    def clear_all_cache(cls):
+        """Clear entire cache (useful for testing or maintenance)"""
+        cls._cache.clear()
+        cls._cache_timestamps.clear()
     
     def get_account_value_at_date(
         self,
@@ -24,7 +59,41 @@ class AccountValueService:
         target_date: datetime
     ) -> float:
         """
-        Calculate account value at specific date.
+        Calculate account value at specific date with caching.
+        
+        Args:
+            user_id: User ID
+            target_date: Calculate value as of this date
+            
+        Returns:
+            Account value in dollars
+        """
+        # Create cache key (user_id, date only - ignore time for better cache hits)
+        cache_key = (user_id, target_date.date())
+        
+        # Check cache
+        if cache_key in self._cache:
+            cache_age = time.time() - self._cache_timestamps.get(cache_key, 0)
+            if cache_age < self._cache_ttl:
+                # Cache hit - return cached value
+                return self._cache[cache_key]
+        
+        # Cache miss or expired - calculate fresh value
+        account_value = self._calculate_account_value(user_id, target_date)
+        
+        # Store in cache
+        self._cache[cache_key] = account_value
+        self._cache_timestamps[cache_key] = time.time()
+        
+        return account_value
+    
+    def _calculate_account_value(
+        self,
+        user_id: int,
+        target_date: datetime
+    ) -> float:
+        """
+        Internal method to calculate account value (no caching).
         
         Args:
             user_id: User ID
@@ -37,8 +106,8 @@ class AccountValueService:
         if not user:
             raise ValueError(f"User {user_id} not found")
         
-        # Get starting balance (fallback to default_account_size for compatibility)
-        starting_balance = user.initial_account_balance or user.default_account_size or 10000.0
+        # Get starting balance (fallback to 10000.0 if not set)
+        starting_balance = user.initial_account_balance or 10000.0
         
         # Sum realized P&L from closed positions up to target_date
         realized_pnl = self.db.query(

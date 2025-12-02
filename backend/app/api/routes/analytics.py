@@ -7,7 +7,7 @@ from app.models.schemas import PerformanceMetrics, SetupPerformance
 from app.services.analytics_service import get_performance_metrics, get_setup_performance
 from app.models import User
 from app.utils.exceptions import NotFoundException, AppException
-from app.services.analytics_service import get_advanced_performance_metrics
+from app.services.analytics_service import get_advanced_performance_metrics, get_account_growth_metrics
 
 router = APIRouter(tags=["analytics"])
 
@@ -84,6 +84,15 @@ def read_advanced_analytics_debug(
     if not user:
         raise NotFoundException("No users found")
     return get_advanced_performance_metrics(db=db, user_id=user.id, start_date=start_date, end_date=end_date)
+
+
+@router.get("/account-growth-metrics")
+def read_account_growth_metrics(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Get comprehensive account growth metrics (Phase 2.2)"""
+    return get_account_growth_metrics(db=db, user_id=current_user.id)
 
 
 # Legacy endpoints — permanently removed

@@ -97,6 +97,11 @@ def create_account_transaction(
     db.commit()
     db.refresh(db_transaction)
     
+    # Invalidate cached account values since transaction added
+    from app.services.account_value_service import AccountValueService
+    account_value_service = AccountValueService(db)
+    account_value_service.invalidate_cache(current_user.id)
+    
     return db_transaction
 
 
@@ -166,6 +171,11 @@ def update_account_transaction(
     db.commit()
     db.refresh(transaction)
     
+    # Invalidate cached account values since transaction updated
+    from app.services.account_value_service import AccountValueService
+    account_value_service = AccountValueService(db)
+    account_value_service.invalidate_cache(current_user.id)
+    
     return transaction
 
 
@@ -195,6 +205,11 @@ def delete_account_transaction(
     
     db.delete(transaction)
     db.commit()
+    
+    # Invalidate cached account values since transaction deleted
+    from app.services.account_value_service import AccountValueService
+    account_value_service = AccountValueService(db)
+    account_value_service.invalidate_cache(current_user.id)
     
     return None
 

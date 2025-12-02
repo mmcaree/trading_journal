@@ -181,8 +181,7 @@ def get_account_balance(
 ):
     return {
         "current_account_balance": current_user.current_account_balance,
-        "initial_account_balance": current_user.initial_account_balance,
-        "default_account_size": current_user.default_account_size
+        "initial_account_balance": current_user.initial_account_balance
     }
 
 @router.put("/account-balance")
@@ -395,7 +394,7 @@ def update_starting_balance(
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db)
 ):
-    """Update user's starting balance"""
+    """Update user's starting balance and invalidate account value cache"""
     if starting_balance < 0:
         raise HTTPException(status_code=400, detail="Starting balance must be positive")
     
@@ -404,6 +403,11 @@ def update_starting_balance(
     
     db.commit()
     db.refresh(current_user)
+    
+    # Invalidate cached account values since starting balance changed
+    from app.services.account_value_service import AccountValueService
+    account_value_service = AccountValueService(db)
+    account_value_service.invalidate_cache(current_user.id)
     
     return {
         "success": True,

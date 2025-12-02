@@ -28,6 +28,7 @@ from app.services.import_service import (
     IndividualPositionTracker,
     ImportValidationError,
 )
+from app.services.account_value_service import AccountValueService
 from app.utils.datetime_utils import utc_now
 
 logger = logging.getLogger(__name__)
@@ -38,6 +39,7 @@ class UniversalImportService:
     
     def __init__(self, db: Session):
         self.db = db
+        self.account_value_service = AccountValueService(db)
         self.validation_errors: List[ImportValidationError] = []
         self.warnings: List[str] = []
         self.base_import_service = IndividualPositionImportService(db)
@@ -141,7 +143,7 @@ class UniversalImportService:
             events = self._detect_stop_losses_universal(events)
             
             # Process events using individual position tracking
-            tracker = IndividualPositionTracker(self.db, user_id)
+            tracker = IndividualPositionTracker(self.db, user_id, self.account_value_service)
             
             imported_count = 0
             

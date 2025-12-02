@@ -10,8 +10,9 @@ from sqlalchemy import func, and_
 from collections import defaultdict
 import statistics
 
-from app.models.position_models import TradingPosition, TradingPositionEvent, PositionStatus, EventType
+from app.models.position_models import TradingPosition, TradingPositionEvent, PositionStatus, EventType, AccountTransaction, User
 from app.models.schemas import PerformanceMetrics, SetupPerformance
+from app.services.account_value_service import AccountValueService
 
 
 def get_performance_metrics( 
@@ -569,4 +570,88 @@ def get_advanced_performance_metrics(
         "total_withdrawals": round(total_withdrawals, 2),
         "net_cash_flow": round(net_cash_flow, 2),
         "annualized_return_percent": round(annualized_return * 100, 2)
+    }
+
+
+# === Phase 2.2: Dynamic Account Value Integration ===
+
+def calculate_trading_growth_rate(db: Session, user_id: int) -> float:
+    """
+    Calculate growth from trading only (exclude deposits/withdrawals).
+    Uses AccountValueService for dynamic calculations.
+    """
+    account_value_service = AccountValueService(db)
+    user = db.query(User).filter(User.id == user_id).first()
+    
+    if not user:
+        return 0.0
+    
+    # Get current account value dynamically
+    current_value = account_value_service.get_current_account_value(user_id)
+    
+    # Get starting balance
+    starting_balance = user.initial_account_balance or 10000.0
+    
+    # Get net cash flow
+    deposits = db.query(
+        func.coalesce(func.sum(AccountTransaction.amount), 0.0)
+    ).filter(
+        AccountTransaction.user_id == user_id,
+        AccountTransaction.transaction_type == 'DEPOSIT'
+    ).scalar()
+    
+    withdrawals = db.query(
+        func.coalesce(func.sum(AccountTransaction.amount), 0.0)
+    ).filter(
+        AccountTransaction.user_id == user_id,
+        AccountTransaction.transaction_type == 'WITHDRAWAL'
+    ).scalar()
+    
+    net_cash_flow = deposits - withdrawals
+    
+    # Adjusted account value = current value - net deposits/withdrawals
+    adjusted_value = current_value - net_cash_flow
+    
+    # Trading growth = (adjusted_value - starting) / starting
+    if starting_balance > 0:
+        trading_growth = ((adjusted_value - starting_balance) / starting_balance) * 100
+    else:
+        trading_growth = 0.0
+    
+    return trading_growth
+
+
+def get_account_growth_metrics(db: Session, user_id: int) -> Dict[str, Any]:
+    """
+    Get comprehensive account growth metrics using dynamic calculations.
+    Separates trading growth from total growth (which includes deposits/withdrawals).
+    """
+    account_value_service = AccountValueService(db)
+    
+    # Get detailed breakdown
+    breakdown = account_value_service.get_account_value_breakdown(user_id)
+    
+    # Calculate trading growth
+    trading_growth = calculate_trading_growth_rate(db, user_id)
+    
+    # Calculate total growth
+    starting_balance = breakdown['starting_balance']
+    current_value = breakdown['current_value']
+    
+    total_growth_percent = 0.0
+    if starting_balance > 0:
+        total_growth_percent = ((current_value - starting_balance) / starting_balance) * 100
+    
+    return {
+        'current_value': round(current_value, 2),
+        'starting_balance': round(starting_balance, 2),
+        'realized_pnl': round(breakdown['realized_pnl'], 2),
+        'net_deposits': round(breakdown['net_cash_flow'], 2),
+        'total_deposits': round(breakdown['total_deposits'], 2),
+        'total_withdrawals': round(breakdown['total_withdrawals'], 2),
+        'trading_growth_percent': round(trading_growth, 2),
+        'total_growth_percent': round(total_growth_percent, 2),
+        'pnl_from_trading': round(breakdown['realized_pnl'], 2),
+        'pnl_from_deposits': round(breakdown['net_cash_flow'], 2),
+        'calculation': breakdown['calculation']
     }

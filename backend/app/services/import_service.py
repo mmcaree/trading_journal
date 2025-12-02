@@ -27,6 +27,7 @@ from app.models.position_models import (
 from app.models import User
 from app.utils.datetime_utils import utc_now
 from app.services.broker_profiles import WEBULL_USA_PROFILE
+from app.services.account_value_service import AccountValueService
 
 logger = logging.getLogger(__name__)
 
@@ -41,9 +42,10 @@ class ImportValidationError(Exception):
 class IndividualPositionTracker:
     """Tracks individual position lifecycles during import"""
     
-    def __init__(self, db: Session, user_id: int):
+    def __init__(self, db: Session, user_id: int, account_value_service=None):
         self.db = db
         self.user_id = user_id
+        self.account_value_service = account_value_service
         self.symbol_positions: Dict[str, List[TradingPosition]] = {}
         self.position_counter = 0
     
@@ -92,6 +94,9 @@ class IndividualPositionTracker:
     def _create_new_position(self, symbol: str, event_data: Dict[str, Any]) -> TradingPosition:
         """Create a new position"""
         self.position_counter += 1
+        
+        # Note: account_value_at_entry is calculated dynamically via AccountValueService
+        # No need to store static value - always compute fresh for accuracy
         
         position = TradingPosition(
             user_id=self.user_id,
@@ -367,6 +372,7 @@ class IndividualPositionImportService:
     
     def __init__(self, db: Session):
         self.db = db
+        self.account_value_service = AccountValueService(db)
         self.validation_errors: List[ImportValidationError] = []
         self.warnings: List[str] = []
     
@@ -397,7 +403,7 @@ class IndividualPositionImportService:
             enhanced_events, pending_orders_data = self._detect_stop_losses(events)
             
             # Process events using individual position tracking
-            tracker = IndividualPositionTracker(self.db, user_id)
+            tracker = IndividualPositionTracker(self.db, user_id, self.account_value_service)
             
             imported_count = 0
             position_count = 0
