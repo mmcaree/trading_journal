@@ -488,3 +488,64 @@ class AccountTransactionResponse(AccountTransactionBase):
 
     class Config:
         from_attributes = True
+
+
+# Account Value Service Schemas
+class AccountValueResponse(BaseModel):
+    """Response for account value at a specific date"""
+    account_value: float
+    as_of_date: str
+
+    class Config:
+        from_attributes = True
+
+
+class AccountValueBreakdown(BaseModel):
+    """Detailed breakdown of account value calculation"""
+    starting_balance: float
+    realized_pnl: float
+    total_deposits: float
+    total_withdrawals: float
+    net_cash_flow: float
+    current_value: float
+    calculation: str
+
+    class Config:
+        from_attributes = True
+
+
+class EquityCurvePoint(BaseModel):
+    """Single point on the equity curve"""
+    date: str
+    value: float
+    event_type: Optional[str] = None
+
+    class Config:
+        from_attributes = True
+
+
+class EquityCurveResponse(BaseModel):
+    """Response containing equity curve data"""
+    equity_curve: List[EquityCurvePoint]
+
+    class Config:
+        from_attributes = True
+
+
+class StartingBalanceUpdate(BaseModel):
+    """Request to update user's starting balance"""
+    starting_balance: float
+    starting_date: Optional[datetime] = None
+
+    class Config:
+        from_attributes = True
+
+
+class StartingBalanceResponse(BaseModel):
+    """Response after updating starting balance"""
+    success: bool
+    starting_balance: float
+    starting_date: str
+
+    class Config:
+        from_attributes = True

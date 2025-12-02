@@ -84,6 +84,9 @@ class AccountValueService:
         from app.utils.datetime_utils import utc_now
         
         user = self.db.query(User).filter(User.id == user_id).first()
+        if not user:
+            raise ValueError(f"User {user_id} not found")
+        
         target_date = utc_now()
         
         starting_balance = user.initial_account_balance or user.default_account_size or 10000.0
@@ -139,6 +142,8 @@ class AccountValueService:
         from datetime import timedelta
         
         user = self.db.query(User).filter(User.id == user_id).first()
+        if not user:
+            raise ValueError(f"User {user_id} not found")
         
         # Default to last 90 days
         end_date = end_date or utc_now()

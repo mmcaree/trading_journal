@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, UploadFile, File
+from fastapi import APIRouter, Depends, UploadFile, File, HTTPException
 from sqlalchemy.orm import Session
 import os
 import uuid
@@ -13,7 +13,8 @@ from app.db.session import get_db
 from app.models import User
 from app.models.schemas import (
     UserResponse, UserUpdate, ChangePasswordRequest, 
-    NotificationSettings, TwoFactorSetup, TwoFactorVerification
+    NotificationSettings, TwoFactorSetup, TwoFactorVerification,
+    AccountValueResponse, AccountValueBreakdown, EquityCurveResponse, StartingBalanceResponse
 )
 from app.services.user_service import (
     update_user_profile, change_password, update_notification_settings,
@@ -338,7 +339,7 @@ def delete_profile_picture(
 
 # ADD NEW ENDPOINTS (don't remove old ones yet)
 
-@router.get("/me/account-value")
+@router.get("/me/account-value", response_model=AccountValueResponse)
 def get_account_value(
     at_date: Optional[datetime] = None,
     current_user: User = Depends(get_current_user),
@@ -359,7 +360,7 @@ def get_account_value(
     }
 
 
-@router.get("/me/account-value/breakdown")
+@router.get("/me/account-value/breakdown", response_model=AccountValueBreakdown)
 def get_account_value_breakdown(
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db)
@@ -369,7 +370,7 @@ def get_account_value_breakdown(
     return account_value_service.get_account_value_breakdown(current_user.id)
 
 
-@router.get("/me/equity-curve")
+@router.get("/me/equity-curve", response_model=EquityCurveResponse)
 def get_equity_curve(
     start_date: Optional[datetime] = None,
     end_date: Optional[datetime] = None,
@@ -387,7 +388,7 @@ def get_equity_curve(
     }
 
 
-@router.put("/me/starting-balance")
+@router.put("/me/starting-balance", response_model=StartingBalanceResponse)
 def update_starting_balance(
     starting_balance: float,
     starting_date: Optional[datetime] = None,
@@ -396,9 +397,9 @@ def update_starting_balance(
 ):
     """Update user's starting balance"""
     if starting_balance < 0:
-        raise HTTPException(400, "Starting balance must be positive")
+        raise HTTPException(status_code=400, detail="Starting balance must be positive")
     
-    current_user.starting_balance = starting_balance
+    current_user.initial_account_balance = starting_balance
     current_user.starting_balance_date = starting_date or utc_now()
     
     db.commit()
