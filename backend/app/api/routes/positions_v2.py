@@ -120,7 +120,6 @@ class PositionResponse(BaseModel):
     original_risk_percent: Optional[float]  # Original risk % when opened
     current_risk_percent: Optional[float]   # Current risk % based on current stop
     original_shares: Optional[int]          # Shares when position opened
-    account_value_at_entry: Optional[float] # Account value when opened
     events: Optional[List['EventResponse']] = None  # Optional events for analytics
     tags: List[TagResponse] = []
 
@@ -233,8 +232,7 @@ def create_position(
             strategy=position_data.strategy,
             setup_type=position_data.setup_type,
             timeframe=position_data.timeframe,
-            notes=position_data.notes,
-            account_value_at_entry=position_data.account_balance_at_entry
+            notes=position_data.notes
         )
         
         # Add initial event
@@ -280,8 +278,7 @@ def create_position(
             return_percent=None,  # New position, no return yet
             original_risk_percent=position.original_risk_percent,
             current_risk_percent=position.current_risk_percent,
-            original_shares=position.original_shares,
-            account_value_at_entry=position.account_value_at_entry
+            original_shares=position.original_shares
         )
         
     except ValueError as e:
@@ -385,7 +382,6 @@ def get_positions(
             "original_risk_percent": position.original_risk_percent,
             "current_risk_percent": position.current_risk_percent,
             "original_shares": position.original_shares,
-            "account_value_at_entry": position.account_value_at_entry,
             "events": events_list,
             "tags": tags_list
         })
@@ -488,7 +484,6 @@ def get_positions_paginated(
             "original_risk_percent": position.original_risk_percent,
             "current_risk_percent": position.current_risk_percent,
             "original_shares": position.original_shares,
-            "account_value_at_entry": position.account_value_at_entry,
             "events": None,  # Never include events in paginated list view
             "tags": tags_list
         })
@@ -553,8 +548,7 @@ def get_position_details(
         return_percent=return_percent,
         original_risk_percent=position.original_risk_percent,
         current_risk_percent=position.current_risk_percent,
-        original_shares=position.original_shares,
-        account_value_at_entry=position.account_value_at_entry
+        original_shares=position.original_shares
     )
     
     events_response = []
@@ -639,8 +633,7 @@ def update_position(
             return_percent=return_percent,
             original_risk_percent=updated_position.original_risk_percent,
             current_risk_percent=updated_position.current_risk_percent,
-            original_shares=updated_position.original_shares,
-            account_value_at_entry=updated_position.account_value_at_entry
+            original_shares=updated_position.original_shares
         )
         
     except ValueError as e:
