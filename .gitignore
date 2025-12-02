@@ -181,3 +181,5 @@ scripts/add_dynamic_account_value_phase1.py
 scripts/add_dynamic_account_value_phase2.py
 scripts/add_dynamic_account_value_phase3.py
 scripts/add_risk_calculation_fix_issue.py
+backend/migrations/run_starting_balance_date_prod.py
+backend/migrations/add_starting_balance_date_postgres.sql
