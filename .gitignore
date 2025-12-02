@@ -81,7 +81,7 @@ logs/
 
 # One-time migration and test scripts
 debug_*.py
-test_*.py
+#test_*.py
 check_*.py
 migrate_*.py
 reset_*.py
@@ -161,13 +161,12 @@ backend/static/uploads/
 scripts/create_additional_issues.py
 backend/tests/requirements-test.txt
 backend/tests/README.md
-backend/tests/conftest.py
+#backend/tests/conftest.py
 backend/pyproject.toml
 backend/pyproject.toml
 .gitignore
 backend/tests/README.md
 backend/tests/requirements-test.txt
-backend/tests/conftest.py
 test_data.zip
 N1_QUERY_AND_INDEXING_SUMMARY.md
 PERFORMANCE_ANALYSIS.md
@@ -176,3 +175,9 @@ backend/run_production_migration.py
 backend/migrations/run_production_migration.py
 PREFETCH_CODE_REVIEW.md
 PREFETCH_FIXES_REQUIRED.md
+scripts/add_account_transactions_test_issue.py
+scripts/add_dynamic_account_value_issue.py
+scripts/add_dynamic_account_value_phase1.py
+scripts/add_dynamic_account_value_phase2.py
+scripts/add_dynamic_account_value_phase3.py
+scripts/add_risk_calculation_fix_issue.py
