@@ -181,8 +181,7 @@ def get_account_balance(
 ):
     return {
         "current_account_balance": current_user.current_account_balance,
-        "initial_account_balance": current_user.initial_account_balance,
-        "default_account_size": current_user.default_account_size
+        "initial_account_balance": current_user.initial_account_balance
     }
 
 @router.put("/account-balance")
