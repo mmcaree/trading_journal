@@ -135,7 +135,7 @@ const PrivacyPolicy: React.FC = () => {
             If you have questions about this privacy policy or how we handle your data, please contact us at:
           </Typography>
           <Typography paragraph>
-            <strong>Email:</strong> privacy@yourtradejournal.com
+            <strong>Email:</strong> memcaree@gmail.com
           </Typography>
 
           <Box sx={{ mt: 4, pt: 3, borderTop: 1, borderColor: 'divider' }}>
