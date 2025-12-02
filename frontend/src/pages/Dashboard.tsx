@@ -1,4 +1,6 @@
 import React, { useState, useEffect } from 'react';
+import { Dialog, DialogTitle, DialogContent, DialogActions, Divider } from '@mui/material';
+import { EquityCurveChart } from '../components/EquityCurveChart';
 import {
   Box,
   Grid,
@@ -38,6 +40,7 @@ import { accountService } from '../services/accountService';
 import { useCurrency } from '../context/CurrencyContext';
 import { Position } from '../services/positionsService';
 import { CustomTooltip } from '../components/CustomChartComponents';
+import api from '../services/apiConfig';
 
 const COLORS = ['#1da0f0', '#00C49F', '#FFBB28', '#FF8042', '#8884D8'];
 
@@ -62,6 +65,10 @@ const Dashboard: React.FC = () => {
   const [metrics, setMetrics] = useState<DashboardMetrics | null>(null);
   const [positions, setPositions] = useState<Position[]>([]);
   const [positionsWithEvents, setPositionsWithEvents] = useState<Position[]>([]);
+  const [accountValue, setAccountValue] = useState<number>(0);
+  const [accountBreakdown, setAccountBreakdown] = useState<any>(null);
+  const [showBreakdownDialog, setShowBreakdownDialog] = useState(false);
+
   const { formatCurrency } = useCurrency();
   const location = useLocation();
 
@@ -75,6 +82,25 @@ const Dashboard: React.FC = () => {
       loadDashboardData();
     }
   }, [location.pathname]);
+
+  useEffect(() => {
+    fetchDynamicAccountValue();
+  }, []);
+  
+  
+  const fetchDynamicAccountValue = async () => {
+    try {
+      const [valueResponse, breakdownResponse] = await Promise.all([
+        api.get('/api/users/me/account-value'),
+        api.get('/api/users/me/account-value/breakdown')
+      ]);
+      
+      setAccountValue(valueResponse.data.account_value);
+      setAccountBreakdown(breakdownResponse.data);
+    } catch (error) {
+      console.error('Failed to fetch dynamic account value:', error);
+    }
+  };
 
   // Refresh data when user returns to the page/tab
   useEffect(() => {
@@ -253,22 +279,64 @@ const Dashboard: React.FC = () => {
                 <Typography variant="h6">Account Balance</Typography>
               </Box>
               <Typography variant="h3" color="primary">
-                {formatCurrency(metrics.accountBalance)}
+                {formatCurrency(accountValue)}
               </Typography>
-              <Box display="flex" alignItems="center" mt={1}>
-                {metrics.accountGrowth >= 0 ? (
-                  <TrendingUpIcon color="success" fontSize="small" />
-                ) : (
-                  <TrendingDownIcon color="error" fontSize="small" />
-                )}
-                <Typography 
-                  variant="body2" 
-                  color={metrics.accountGrowth >= 0 ? 'success.main' : 'error.main'}
-                  sx={{ ml: 0.5 }}
-                >
-                  {metrics.accountGrowth.toFixed(2)}% Total Growth
-                </Typography>
-              </Box>
+              {accountBreakdown && (
+                <>
+                  <Box display="flex" alignItems="center" mt={1}>
+                    {accountBreakdown?.total_growth >= 0 ? (
+                      <TrendingUpIcon color="success" fontSize="small" />
+                    ) : (
+                      <TrendingDownIcon color="error" fontSize="small" />
+                    )}
+                    <Typography 
+                      variant="body2" 
+                      color={accountBreakdown ? ((accountBreakdown.total_growth ?? 0) >= 0 ? 'success.main' : 'error.main') : 'text.secondary'}
+                      sx={{ ml: 0.5 }}
+                    >
+                      {accountBreakdown 
+                        ? `${(accountBreakdown.total_growth_percent ?? 0).toFixed(2)}% Total Growth`
+                        : '0.00% Total Growth'
+                      }
+                    </Typography>
+                  </Box>
+                  <Button 
+                    size="small" 
+                    onClick={() => setShowBreakdownDialog(true)}
+                    sx={{ mt: 1 }}
+                  >
+                    View Breakdown
+                  </Button>
+                </>
+              )}
+            </CardContent>
+          </Card>
+        </Grid>
+
+        <Grid item xs={12} md={4}>
+          <Card>
+            <CardContent>
+              <Typography color="textSecondary" gutterBottom>
+                Trading Performance
+              </Typography>
+              {accountBreakdown ? (
+                <>
+                  <Typography
+                    variant="h4"
+                    color={accountBreakdown ? ((accountBreakdown.trading_growth ?? 0) >= 0 ? 'success.main' : 'error.main') : 'text.secondary'}
+                  >
+                    {accountBreakdown 
+                      ? `${(accountBreakdown.trading_growth_percent ?? 0).toFixed(2)}%`
+                      : 'N/A'
+                    }
+                  </Typography>
+                  <Typography variant="body2" color="textSecondary">
+                    {formatCurrency(accountBreakdown?.realized_pnl)} P&L (Excludes deposits/withdrawals)
+                  </Typography>
+                </>
+              ) : (
+                <Typography variant="h4">N/A</Typography>
+              )}
             </CardContent>
           </Card>
         </Grid>
@@ -430,6 +498,10 @@ const Dashboard: React.FC = () => {
           </Card>
         </Grid>
 
+        <Grid item xs={12}>
+          <EquityCurveChart height={400} />
+        </Grid>
+
         {/* Recent Positions */}
         <Grid item xs={12}>
           <Card>
@@ -493,6 +565,139 @@ const Dashboard: React.FC = () => {
         </Grid>
 
       </Grid>
+
+      <Dialog 
+        open={showBreakdownDialog} 
+        onClose={() => setShowBreakdownDialog(false)}
+        maxWidth="sm"
+        fullWidth
+      >
+        <DialogTitle>Account Value Breakdown</DialogTitle>
+        <DialogContent>
+          {accountBreakdown && (
+            <Grid container spacing={2} sx={{ mt: 1 }}>
+              <Grid item xs={12}>
+                <Paper sx={{ p: 2, bgcolor: 'primary.light' }}>
+                  <Typography variant="body2" color="primary.contrastText">
+                    Current Account Value
+                  </Typography>
+                  <Typography variant="h4" color="primary.contrastText">
+                    {formatCurrency(accountValue)}
+                  </Typography>
+                </Paper>
+              </Grid>
+              
+              <Grid item xs={12}>
+                <Divider sx={{ my: 1 }}>
+                  <Chip label="Components" size="small" />
+                </Divider>
+              </Grid>
+              
+              <Grid item xs={6}>
+                <Box>
+                  <Typography variant="caption" color="text.secondary">
+                    Starting Balance
+                  </Typography>
+                  <Typography variant="h6">
+                    {formatCurrency(accountBreakdown?.starting_balance)}
+                  </Typography>
+                </Box>
+              </Grid>
+              
+              <Grid item xs={6}>
+                <Box>
+                  <Typography variant="caption" color="text.secondary">
+                    Trading P&L
+                  </Typography>
+                  <Typography 
+                    variant="h6"
+                    color={accountBreakdown?.realized_pnl >= 0 ? 'success.main' : 'error.main'}
+                  >
+                    {accountBreakdown?.realized_pnl >= 0 ? '+' : ''}
+                    {formatCurrency(accountBreakdown?.realized_pnl)}
+                  </Typography>
+                </Box>
+              </Grid>
+              
+              <Grid item xs={6}>
+                <Box>
+                  <Typography variant="caption" color="text.secondary">
+                    Total Deposits
+                  </Typography>
+                  <Typography variant="h6" color="success.main">
+                    +{formatCurrency(accountBreakdown?.total_deposits)}
+                  </Typography>
+                </Box>
+              </Grid>
+              
+              <Grid item xs={6}>
+                <Box>
+                  <Typography variant="caption" color="text.secondary">
+                    Total Withdrawals
+                  </Typography>
+                  <Typography variant="h6" color="error.main">
+                    -{formatCurrency(accountBreakdown?.total_withdrawals)}
+                  </Typography>
+                </Box>
+              </Grid>
+              
+              <Grid item xs={12}>
+                <Divider sx={{ my: 1 }}>
+                  <Chip label="Growth Metrics" size="small" />
+                </Divider>
+              </Grid>
+              
+              <Grid item xs={6}>
+                <Box>
+                  <Typography variant="caption" color="text.secondary">
+                    Total Growth
+                  </Typography>
+                  <Typography 
+                    variant="h6"
+                    color={((accountBreakdown?.total_growth ?? 0) >= 0) ? 'success.main' : 'error.main'}
+                  >
+                    {((accountBreakdown?.total_growth ?? 0) >= 0) ? '+' : ''}
+                    {(accountBreakdown?.total_growth_percent ?? 0).toFixed(2)}%
+                  </Typography>
+                  <Typography variant="caption" color="text.secondary">
+                    Includes deposits/withdrawals
+                  </Typography>
+                </Box>
+              </Grid>
+              
+              <Grid item xs={6}>
+                <Box>
+                  <Typography variant="caption" color="text.secondary">
+                    Trading Growth
+                  </Typography>
+                  <Typography 
+                    variant="h6"
+                    color={((accountBreakdown?.trading_growth ?? 0) >= 0) ? 'success.main' : 'error.main'}
+                  >
+                    {((accountBreakdown?.trading_growth ?? 0) >= 0) ? '+' : ''}
+                    {(accountBreakdown?.trading_growth_percent ?? 0).toFixed(2)}%
+                  </Typography>
+                  <Typography variant="caption" color="text.secondary">
+                    Pure trading performance
+                  </Typography>
+                </Box>
+              </Grid>
+              
+              <Grid item xs={12}>
+                <Alert severity="info" sx={{ mt: 2 }}>
+                  <Typography variant="body2">
+                    <strong>Trading Growth</strong> excludes deposits and withdrawals to show 
+                    your actual trading skill, matching professional broker standards.
+                  </Typography>
+                </Alert>
+              </Grid>
+            </Grid>
+          )}
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => setShowBreakdownDialog(false)}>Close</Button>
+        </DialogActions>
+      </Dialog>
     </Box>
   );
 };

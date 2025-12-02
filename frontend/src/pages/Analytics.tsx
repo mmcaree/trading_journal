@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { calculateWinRate } from '../utils/calculations';
+import { EquityCurveChart } from '../components/EquityCurveChart';
 import {
   Box,
   Typography,
@@ -96,6 +97,8 @@ const Analytics: React.FC = () => {
   const [positions, setPositions] = useState<(Position & { events?: PositionEvent[] })[]>([]);
   const [accountBalance, setAccountBalance] = useState(0);
   const [selectedTimeScale, setSelectedTimeScale] = useState<TimeScale>('ALL');
+  const [growthMetrics, setGrowthMetrics] = useState<any>(null);
+
   const { formatCurrency } = useCurrency();
   
   const [advancedData, setAdvancedData] = useState<any>(null);
@@ -103,6 +106,24 @@ const Analytics: React.FC = () => {
   useEffect(() => {
     loadAnalyticsData();
   }, []);
+
+
+  useEffect(() => {
+    loadGrowthMetrics();
+  }, [selectedTimeScale]); // Reload when time scale changes
+
+  const loadGrowthMetrics = async () => {
+    try {
+      const params = selectedTimeScale !== 'ALL' ? {
+        start_date: getTimeScaleDate(selectedTimeScale).toISOString()
+      } : {};
+      
+      const response = await api.get('/api/analytics/account-growth-metrics', { params });
+      setGrowthMetrics(response.data);
+    } catch (error) {
+      console.error('Failed to load growth metrics:', error);
+    }
+  };
 
   const loadAnalyticsData = async () => {
     setLoading(true);
@@ -820,6 +841,116 @@ const Analytics: React.FC = () => {
             </Card>
           </Grid>
 
+          <Grid item xs={12}>
+            <Paper sx={{ p: 3, bgcolor: 'background.default' }}>
+              <Typography variant="h6" gutterBottom sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+                💰 Account Growth Analysis
+              </Typography>
+              {growthMetrics ? (
+                <Grid container spacing={2}>
+                  <Grid item xs={12} md={3}>
+                    <Card>
+                      <CardContent>
+                        <Typography color="text.secondary" gutterBottom>
+                          Current Account Value
+                        </Typography>
+                        <Typography variant="h4">
+                          {formatCurrency(growthMetrics.current_account_value)}
+                        </Typography>
+                        <Typography variant="body2" color="text.secondary">
+                          As of {new Date().toLocaleDateString()}
+                        </Typography>
+                      </CardContent>
+                    </Card>
+                  </Grid>
+                  
+                  <Grid item xs={12} md={3}>
+                    <Card sx={{ bgcolor: 'success.light' }}>
+                      <CardContent>
+                        <Typography color="success.contrastText" gutterBottom>
+                          Trading Growth
+                        </Typography>
+                        <Typography 
+                          variant="h4" 
+                          color="success.contrastText"
+                        >
+                          {growthMetrics.trading_growth_percent.toFixed(2)}%
+                        </Typography>
+                        <Typography variant="body2" color="success.contrastText">
+                          {formatCurrency(growthMetrics.realized_pnl)} P&L
+                        </Typography>
+                        <Typography variant="caption" color="success.contrastText" sx={{ mt: 1, display: 'block' }}>
+                          Excludes deposits/withdrawals
+                        </Typography>
+                      </CardContent>
+                    </Card>
+                  </Grid>
+                  
+                  <Grid item xs={12} md={3}>
+                    <Card>
+                      <CardContent>
+                        <Typography color="text.secondary" gutterBottom>
+                          Total Growth
+                        </Typography>
+                        <Typography 
+                          variant="h4"
+                          color={growthMetrics.total_growth >= 0 ? 'success.main' : 'error.main'}
+                        >
+                          {growthMetrics.total_growth_percent.toFixed(2)}%
+                        </Typography>
+                        <Typography variant="body2" color="text.secondary">
+                          {formatCurrency(growthMetrics.total_growth)}
+                        </Typography>
+                        <Typography variant="caption" color="text.secondary" sx={{ mt: 1, display: 'block' }}>
+                          Includes deposits/withdrawals
+                        </Typography>
+                      </CardContent>
+                    </Card>
+                  </Grid>
+                  
+                  <Grid item xs={12} md={3}>
+                    <Card>
+                      <CardContent>
+                        <Typography color="text.secondary" gutterBottom>
+                          Net Cash Flow
+                        </Typography>
+                        <Typography 
+                          variant="h4"
+                          color={growthMetrics.net_deposits >= 0 ? 'success.main' : 'error.main'}
+                        >
+                          {growthMetrics.net_deposits >= 0 ? '+' : ''}
+                          {formatCurrency(growthMetrics.net_deposits)}
+                        </Typography>
+                        <Typography variant="body2" color="text.secondary">
+                          Deposits - Withdrawals
+                        </Typography>
+                      </CardContent>
+                    </Card>
+                  </Grid>
+                  
+                  {/* Detailed Breakdown */}
+                  <Grid item xs={12}>
+                    <Alert severity="info">
+                      <Typography variant="body2">
+                        <strong>Trading Growth ({growthMetrics.trading_growth_percent.toFixed(2)}%)</strong> shows your actual trading performance, 
+                        excluding deposits and withdrawals. This is how professional traders and brokers calculate returns 
+                        and is the true measure of your trading skill.
+                      </Typography>
+                    </Alert>
+                  </Grid>
+                </Grid>
+              ) : (
+                <Box display="flex" justifyContent="center" p={3}>
+                  <CircularProgress />
+                </Box>
+              )}
+            </Paper>
+          </Grid>
+
+          <Grid item xs={12}>
+            <EquityCurveChart height={400} />
+          </Grid>
+
           {/* Quick Charts Row */}
           <Grid item xs={12} md={6}>
             <Paper sx={{ p: 3 }}>
@@ -1486,6 +1617,13 @@ const Analytics: React.FC = () => {
               </TableContainer>
             </Paper>
           </Grid>
+
+          <Grid item xs={12}>
+            <Typography variant="h6" gutterBottom sx={{ mt: 2 }}>
+              Full Account History
+            </Typography>
+            <EquityCurveChart height={400} />
+          </Grid>
         </Grid>
       )}
 
@@ -1726,6 +1864,12 @@ const Analytics: React.FC = () => {
                 </Table>
               </TableContainer>
             </Paper>
+          </Grid>
+          <Grid item xs={12}>
+            <Typography variant="h6" gutterBottom>
+              Account Growth Over Time
+            </Typography>
+            <EquityCurveChart height={350} />
           </Grid>
         </Grid>
       )}

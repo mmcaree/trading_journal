@@ -239,34 +239,6 @@ const Settings: React.FC = () => {
     }
   };
 
-  // Account balance handlers
-  const handleAccountBalanceUpdate = async () => {
-    const newBalance = parseFloat(tempAccountBalance);
-    
-    if (isNaN(newBalance) || newBalance <= 0) {
-      setAlert({ type: 'error', message: 'Please enter a valid account balance greater than 0' });
-      return;
-    }
-
-    setLoading(true);
-    
-    try {
-      accountService.updateCurrentBalance(newBalance);
-      const updatedSettings = accountService.getAccountSettings();
-      setAccountSettings(updatedSettings);
-      
-      setAlert({ type: 'success', message: 'Account balance updated successfully!' });
-    } catch (error: any) {
-      setAlert({ type: 'error', message: error.message });
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  const resetToStartingBalance = () => {
-    setTempAccountBalance(accountSettings.starting_balance.toString());
-  };
-
   // Starting balance handlers
   const handleStartingBalanceUpdate = async () => {
     const newStartingBalance = parseFloat(tempStartingBalance);
@@ -945,133 +917,176 @@ const Settings: React.FC = () => {
               Account Management
             </Typography>
             <Divider sx={{ mb: 3 }} />
-
             <Grid container spacing={3}>
-              {/* Current Account Balance */}
+              
+              {/* SECTION 1: Current Account Value (READ-ONLY/CALCULATED) - REPLACES manual input */}
               <Grid item xs={12} md={6}>
                 <Box sx={{ display: 'flex', alignItems: 'center', mb: 2 }}>
                   <AccountBalance sx={{ mr: 1, color: 'primary.main' }} />
-                  <Typography variant="h6">Current Account Balance</Typography>
+                  <Typography variant="h6">Current Account Value (Calculated)</Typography>
                 </Box>
                 
-                <Typography variant="h4" color="primary" gutterBottom>
-                  {formatCurrency(accountSettings.current_balance)}
-                </Typography>
-                
-                <Box sx={{ display: 'flex', alignItems: 'center', mb: 3 }}>
-                  <Typography variant="body2" color="text.secondary" sx={{ mr: 1 }}>
-                    Starting Balance: {formatCurrency(accountSettings.starting_balance)}
+                {/* Display current value */}
+                <Paper sx={{ p: 3, bgcolor: 'primary.light', mb: 2 }}>
+                  <Typography variant="h3" color="primary.contrastText" gutterBottom>
+                    {formatCurrency(accountGrowth.currentBalance)}
                   </Typography>
-                  <Chip 
-                    icon={<TrendingUp />}
-                    label={`${accountGrowth.growth >= 0 ? '+' : ''}${formatCurrency(accountGrowth.growth)} (${accountGrowth.growthPercent >= 0 ? '+' : ''}${accountGrowth.growthPercent.toFixed(1)}%)`}
-                    color={accountGrowth.growth >= 0 ? 'success' : 'error'}
-                    size="small"
-                  />
-                </Box>
+                  <Box display="flex" alignItems="center" gap={1}>
+                    <Chip
+                      icon={<TrendingUp />}
+                      label={`${accountGrowth.growth >= 0 ? '+' : ''}${formatCurrency(accountGrowth.growth)} (${accountGrowth.growthPercent >= 0 ? '+' : ''}${accountGrowth.growthPercent.toFixed(1)}%)`}
+                      color={accountGrowth.growth >= 0 ? 'success' : 'error'}
+                      size="small"
+                      sx={{ color: 'white' }}
+                    />
+                  </Box>
+                </Paper>
 
-                <TextField
-                  fullWidth
-                  label="Update Account Balance"
-                  value={tempAccountBalance}
-                  onChange={(e) => setTempAccountBalance(e.target.value)}
-                  type="number"
-                  InputProps={{
-                    startAdornment: <InputAdornment position="start">$</InputAdornment>,
-                  }}
-                  helperText="Enter your current account balance to help with position sizing calculations"
-                  sx={{ mb: 2 }}
-                />
-                
-                <Box sx={{ display: 'flex', gap: 2, flexWrap: 'wrap' }}>
-                  <Button 
-                    variant="contained" 
-                    color="primary" 
-                    onClick={handleAccountBalanceUpdate}
-                    disabled={loading}
-                    startIcon={<Save />}
-                  >
-                    {loading ? 'Updating...' : 'Update Balance'}
-                  </Button>
-                  <Button 
-                    variant="outlined" 
-                    onClick={resetToStartingBalance}
-                    disabled={loading}
-                  >
-                    Reset to Starting
-                  </Button>
-                </Box>
+                {/* Breakdown Display */}
+                <Alert severity="info" icon={false} sx={{ mb: 2 }}>
+                  <Typography variant="subtitle2" gutterBottom>
+                    <strong>How is this calculated?</strong>
+                  </Typography>
+                  <Box sx={{ pl: 2 }}>
+                    <Typography variant="body2" sx={{ mb: 0.5 }}>
+                      • Starting Balance: {formatCurrency(accountGrowth.startingBalance)}
+                    </Typography>
+                    <Typography 
+                      variant="body2" 
+                      sx={{ 
+                        mb: 0.5,
+                        color: accountGrowth.rawGrowth >= 0 ? 'success.main' : 'error.main'
+                      }}
+                    >
+                      • Trading P&L: {accountGrowth.rawGrowth >= 0 ? '+' : ''}{formatCurrency(accountGrowth.rawGrowth)} 
+                      ({accountGrowth.rawGrowthPercent >= 0 ? '+' : ''}{accountGrowth.rawGrowthPercent.toFixed(1)}%)
+                    </Typography>
+                    <Typography variant="body2" sx={{ mb: 0.5, color: 'success.main' }}>
+                      • Deposits: +{formatCurrency(accountGrowth.totalDeposits)}
+                    </Typography>
+                    <Typography variant="body2" sx={{ mb: 0.5, color: 'error.main' }}>
+                      • Withdrawals: -{formatCurrency(accountGrowth.totalWithdrawals)}
+                    </Typography>
+                    <Divider sx={{ my: 1 }} />
+                    <Typography variant="body2" fontWeight="bold">
+                      = {formatCurrency(accountGrowth.currentBalance)}
+                    </Typography>
+                  </Box>
+                </Alert>
+
+                <Alert severity="success">
+                  <Typography variant="body2">
+                    <strong>✓ Automatic Calculation</strong>
+                    <br />
+                    Your account value updates automatically as you:
+                    <br />
+                    • Close positions (P&L applied)
+                    <br />
+                    • Add deposits/withdrawals
+                    <br />
+                    <br />
+                    No manual updates needed!
+                  </Typography>
+                </Alert>
               </Grid>
 
-              {/* Starting Balance Configuration */}
-              <Grid item xs={12}>
-                <Divider sx={{ my: 2 }} />
+              {/* SECTION 2: Starting Balance Configuration - REPLACES manual balance input */}
+              <Grid item xs={12} md={6}>
                 <Box sx={{ display: 'flex', alignItems: 'center', mb: 2 }}>
                   <TrendingUp sx={{ mr: 1, color: 'warning.main' }} />
                   <Typography variant="h6">Starting Balance Configuration</Typography>
                 </Box>
                 
-                <Grid container spacing={3} alignItems="center">
-                  <Grid item xs={12} md={5}>
-                    <TextField
-                      fullWidth
-                      label="Set Starting Balance"
-                      value={tempStartingBalance}
-                      onChange={(e) => setTempStartingBalance(e.target.value)}
-                      type="number"
-                      InputProps={{
-                        startAdornment: <InputAdornment position="start">$</InputAdornment>,
-                      }}
-                      helperText="Set your account's starting balance for accurate growth calculations"
-                      sx={{ mb: 2 }}
-                    />
-                  </Grid>
-                  <Grid item xs={12} md={3}>
-                    <TextField
-                      fullWidth
-                      label="Starting Date"
-                      value={startingBalanceDate}
-                      onChange={(e) => setStartingBalanceDate(e.target.value)}
-                      type="date"
-                      InputLabelProps={{
-                        shrink: true,
-                      }}
-                      helperText="Date when you started with this balance"
-                      sx={{ mb: 2 }}
-                    />
-                  </Grid>
-                  <Grid item xs={12} md={4}>
-                    <Button 
-                      variant="contained" 
-                      color="warning"
-                      onClick={handleStartingBalanceUpdate}
-                      disabled={loading}
-                      startIcon={<Save />}
-                      fullWidth
-                    >
-                      {loading ? 'Updating...' : 'Update Starting Balance'}
-                    </Button>
-                  </Grid>
-                </Grid>
-                
-                <Alert severity="warning" sx={{ mt: 2 }}>
+                <Alert severity="warning" sx={{ mb: 3 }}>
                   <Typography variant="body2">
-                    <strong>Important:</strong> Changing your starting balance will affect all growth calculations and percentages. 
-                    This should represent your initial account value when you started tracking trades.
+                    <strong>⚠️ Important:</strong> Set your starting balance to the account value 
+                    when you began tracking trades in this system. This enables accurate growth calculations.
                   </Typography>
                 </Alert>
+
+                {/* Starting Balance Input */}
+                <TextField
+                  fullWidth
+                  label="Starting Balance"
+                  value={tempStartingBalance}
+                  onChange={(e) => setTempStartingBalance(e.target.value)}
+                  type="number"
+                  InputProps={{
+                    startAdornment: <InputAdornment position="start">$</InputAdornment>,
+                  }}
+                  helperText="Your account balance when you started using this system"
+                  sx={{ mb: 2 }}
+                />
+
+                {/* Starting Date Input */}
+                <TextField
+                  fullWidth
+                  label="Starting Date"
+                  value={startingBalanceDate}
+                  onChange={(e) => setStartingBalanceDate(e.target.value)}
+                  type="date"
+                  InputLabelProps={{
+                    shrink: true,
+                  }}
+                  helperText="When did you start with this balance? (Optional)"
+                  sx={{ mb: 2 }}
+                />
+
+                {/* Update Button */}
+                <Button
+                  variant="contained"
+                  color="warning"
+                  onClick={handleStartingBalanceUpdate}
+                  disabled={loading}
+                  startIcon={<Save />}
+                  fullWidth
+                  sx={{ mb: 2 }}
+                >
+                  {loading ? 'Updating...' : 'Update Starting Balance'}
+                </Button>
+
+                {/* Info about what happens */}
+                <Alert severity="info">
+                  <Typography variant="body2">
+                    <strong>What happens when you update?</strong>
+                    <br />
+                    • All growth percentages will be recalculated
+                    <br />
+                    • Historical data remains unchanged
+                    <br />
+                    • Current account value stays the same
+                    <br />
+                    • Only affects percentage calculations
+                  </Typography>
+                </Alert>
+
+                {/* Show current starting balance info */}
+                <Box sx={{ mt: 2, p: 2, bgcolor: 'background.default', borderRadius: 1 }}>
+                  <Typography variant="subtitle2" gutterBottom>
+                    Current Configuration:
+                  </Typography>
+                  <Typography variant="body2" color="text.secondary">
+                    Starting Balance: {formatCurrency(accountSettings.starting_balance)}
+                  </Typography>
+                  {startingBalanceDate && (
+                    <Typography variant="body2" color="text.secondary">
+                      Starting Date: {new Date(startingBalanceDate).toLocaleDateString()}
+                    </Typography>
+                  )}
+                </Box>
               </Grid>
 
-              {/* Account Stats */}
-              <Grid item xs={12} md={6}>
+              {/* Account Statistics - Keep existing but update labels */}
+              <Grid item xs={12}>
+                <Divider sx={{ my: 2 }} />
                 <Box sx={{ display: 'flex', alignItems: 'center', mb: 2 }}>
                   <TrendingUp sx={{ mr: 1, color: 'success.main' }} />
-                  <Typography variant="h6">Account Statistics</Typography>
+                  <Typography variant="h6">Performance Summary</Typography>
                 </Box>
-                
+              
                 <Grid container spacing={2}>
-                  <Grid item xs={6}>
-                    <Paper sx={{ p: 2, textAlign: 'center', backgroundColor: 'background.default' }}>
+                  <Grid item xs={12} sm={6} md={3}>
+                    <Paper sx={{ p: 2, textAlign: 'center', bgcolor: 'background.default' }}>
                       <Typography variant="body2" color="text.secondary">
                         Starting Balance
                       </Typography>
@@ -1080,48 +1095,65 @@ const Settings: React.FC = () => {
                       </Typography>
                     </Paper>
                   </Grid>
-                  <Grid item xs={6}>
-                    <Paper sx={{ p: 2, textAlign: 'center', backgroundColor: 'background.default' }}>
+                  
+                  <Grid item xs={12} sm={6} md={3}>
+                    <Paper sx={{ p: 2, textAlign: 'center', bgcolor: 'background.default' }}>
                       <Typography variant="body2" color="text.secondary">
-                        Last Updated
+                        Current Value
                       </Typography>
                       <Typography variant="h6">
-                        {new Date(accountSettings.last_updated).toLocaleDateString()}
+                        {formatCurrency(accountGrowth.currentBalance)}
                       </Typography>
                     </Paper>
                   </Grid>
-                  <Grid item xs={12}>
-                    <Paper sx={{ p: 2, textAlign: 'center', backgroundColor: 'background.default' }}>
+                  
+                  <Grid item xs={12} sm={6} md={3}>
+                    <Paper sx={{ p: 2, textAlign: 'center', bgcolor: 'background.default' }}>
                       <Typography variant="body2" color="text.secondary">
-                        Trading Performance (Excludes Deposits/Withdrawals)
+                        Trading Growth
                       </Typography>
-                      <Typography 
-                        variant="h6" 
-                        color={accountGrowth.growth >= 0 ? 'success.main' : 'error.main'}
+                      <Typography
+                        variant="h6"
+                        color={accountGrowth.rawGrowth >= 0 ? 'success.main' : 'error.main'}
                       >
-                        {`${accountGrowth.growth >= 0 ? '+' : ''}${formatCurrency(accountGrowth.growth)} (${accountGrowth.growthPercent >= 0 ? '+' : ''}${accountGrowth.growthPercent.toFixed(1)}%)`}
+                        {`${accountGrowth.rawGrowth >= 0 ? '+' : ''}${formatCurrency(accountGrowth.rawGrowth)}`}
                       </Typography>
-                      {accountGrowth.netCashFlow !== 0 && (
-                        <Typography variant="caption" color="text.secondary" display="block" sx={{ mt: 0.5 }}>
-                          Net deposits/withdrawals: {accountGrowth.netCashFlow >= 0 ? '+' : ''}{formatCurrency(accountGrowth.netCashFlow)}
-                        </Typography>
-                      )}
+                      <Typography variant="caption" color="text.secondary">
+                        {`${accountGrowth.rawGrowthPercent >= 0 ? '+' : ''}${accountGrowth.rawGrowthPercent.toFixed(1)}%`}
+                      </Typography>
+                    </Paper>
+                  </Grid>
+                  
+                  <Grid item xs={12} sm={6} md={3}>
+                    <Paper sx={{ p: 2, textAlign: 'center', bgcolor: 'background.default' }}>
+                      <Typography variant="body2" color="text.secondary">
+                        Net Cash Flow
+                      </Typography>
+                      <Typography variant="h6">
+                        {accountGrowth.netCashFlow >= 0 ? '+' : ''}{formatCurrency(accountGrowth.netCashFlow)}
+                      </Typography>
+                      <Typography variant="caption" color="text.secondary">
+                        Deposits - Withdrawals
+                      </Typography>
                     </Paper>
                   </Grid>
                 </Grid>
-                
+              
                 <Alert severity="info" sx={{ mt: 2 }}>
                   <Typography variant="body2">
-                    <strong>Why track account size?</strong>
+                    <strong>📊 Understanding Your Metrics:</strong>
                     <br />
-                    Your account balance helps calculate proper position sizes and risk percentages. 
-                    The Trading Performance metric excludes deposits/withdrawals to show your actual trading results.
+                    <strong>Trading Growth:</strong> Your actual trading performance excluding deposits/withdrawals. 
+                    This is the true measure of your trading skill.
+                    <br />
+                    <strong>Total Growth:</strong> Overall account growth including all cash flows.
                   </Typography>
                 </Alert>
               </Grid>
             </Grid>
           </Paper>
         </Grid>
+
 
         {/* Account Transactions (Deposits & Withdrawals) */}
         <Grid item xs={12}>
