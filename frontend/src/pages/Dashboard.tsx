@@ -1,4 +1,6 @@
 import React, { useState, useEffect } from 'react';
+import { Dialog, DialogTitle, DialogContent, DialogActions, Divider } from '@mui/material';
+import { EquityCurveChart } from '../components/EquityCurveChart';
 import {
   Box,
   Grid,
@@ -38,6 +40,7 @@ import { accountService } from '../services/accountService';
 import { useCurrency } from '../context/CurrencyContext';
 import { Position } from '../services/positionsService';
 import { CustomTooltip } from '../components/CustomChartComponents';
+import api from '../services/apiConfig';
 
 const COLORS = ['#1da0f0', '#00C49F', '#FFBB28', '#FF8042', '#8884D8'];
 
@@ -53,7 +56,6 @@ interface DashboardMetrics {
   worstPerformer: { ticker: string; pnl: number } | null;
   accountBalance: number;
   accountGrowth: number;
-  eventBasedRealizedPnL: number;
 }
 
 const Dashboard: React.FC = () => {
@@ -62,42 +64,43 @@ const Dashboard: React.FC = () => {
   const [metrics, setMetrics] = useState<DashboardMetrics | null>(null);
   const [positions, setPositions] = useState<Position[]>([]);
   const [positionsWithEvents, setPositionsWithEvents] = useState<Position[]>([]);
+  const [accountValue, setAccountValue] = useState<number>(0);
+  const [accountBreakdown, setAccountBreakdown] = useState<any>(null);
+  const [showBreakdownDialog, setShowBreakdownDialog] = useState(false);
+
   const { formatCurrency } = useCurrency();
   const location = useLocation();
 
   useEffect(() => {
     loadDashboardData();
+    fetchDynamicAccountValue();
   }, []);
 
   // Refresh data when navigating to dashboard
   useEffect(() => {
     if (location.pathname === '/') {
       loadDashboardData();
+      fetchDynamicAccountValue();
     }
   }, [location.pathname]);
+  
+  
+  const fetchDynamicAccountValue = async () => {
+    try {
+      const [valueResponse, growthMetricsResponse] = await Promise.all([
+        api.get('/api/users/me/account-value'),
+        api.get('/api/analytics/account-growth-metrics')
+      ]);
+      
+      setAccountValue(valueResponse.data.account_value);
+      setAccountBreakdown(growthMetricsResponse.data);
+    } catch (error) {
+      console.error('Failed to fetch dynamic account value:', error);
+    }
+  };
 
-  // Refresh data when user returns to the page/tab
-  useEffect(() => {
-    const handleVisibilityChange = () => {
-      if (!document.hidden) {
-        // Page became visible, refresh data
-        loadDashboardData();
-      }
-    };
-
-    const handleFocus = () => {
-      // Page gained focus, refresh data
-      loadDashboardData();
-    };
-
-    document.addEventListener('visibilitychange', handleVisibilityChange);
-    window.addEventListener('focus', handleFocus);
-
-    return () => {
-      document.removeEventListener('visibilitychange', handleVisibilityChange);
-      window.removeEventListener('focus', handleFocus);
-    };
-  }, []);
+  // Note: Removed auto-refresh on visibility/focus to prevent infinite API loops
+  // Data refreshes on mount and navigation which is sufficient
 
   const loadDashboardData = async () => {
     setLoading(true);
@@ -108,14 +111,9 @@ const Dashboard: React.FC = () => {
       const allPositions = await getAllPositions({ limit: 100000 });
       setPositions(allPositions);
 
-      // Load positions with events for event-based P&L calculation
+      // Load positions with events for display
       const allPositionsWithEvents = await getAllPositionsWithEvents({ limit: 100000 });
       setPositionsWithEvents(allPositionsWithEvents);
-
-      // Calculate event-based realized P&L (sum of all sell events)
-      const eventBasedRealizedPnL = allPositionsWithEvents
-        .flatMap(position => position.events?.filter(event => event.event_type === 'sell') || [])
-        .reduce((sum, event) => sum + (event.realized_pnl || 0), 0);
 
       // Calculate metrics
       const openPositions = allPositions.filter(p => p.status === 'open');
@@ -163,8 +161,7 @@ const Dashboard: React.FC = () => {
         bestPerformer,
         worstPerformer,
         accountBalance,
-        accountGrowth,
-        eventBasedRealizedPnL
+        accountGrowth
       });
       
     } catch (err) {
@@ -253,22 +250,61 @@ const Dashboard: React.FC = () => {
                 <Typography variant="h6">Account Balance</Typography>
               </Box>
               <Typography variant="h3" color="primary">
-                {formatCurrency(metrics.accountBalance)}
+                {formatCurrency(accountValue)}
               </Typography>
-              <Box display="flex" alignItems="center" mt={1}>
-                {metrics.accountGrowth >= 0 ? (
-                  <TrendingUpIcon color="success" fontSize="small" />
-                ) : (
-                  <TrendingDownIcon color="error" fontSize="small" />
-                )}
-                <Typography 
-                  variant="body2" 
-                  color={metrics.accountGrowth >= 0 ? 'success.main' : 'error.main'}
-                  sx={{ ml: 0.5 }}
-                >
-                  {metrics.accountGrowth.toFixed(2)}% Total Growth
-                </Typography>
-              </Box>
+              {accountBreakdown && (
+                <>
+                  <Box display="flex" alignItems="center" mt={1}>
+                    {(accountBreakdown?.total_growth_percent ?? 0) >= 0 ? (
+                      <TrendingUpIcon color="success" fontSize="small" />
+                    ) : (
+                      <TrendingDownIcon color="error" fontSize="small" />
+                    )}
+                    <Typography 
+                      variant="body2" 
+                      color={(accountBreakdown.total_growth_percent ?? 0) >= 0 ? 'success.main' : 'error.main'}
+                      sx={{ ml: 0.5 }}
+                    >
+                      {accountBreakdown 
+                        ? `${(accountBreakdown.total_growth_percent ?? 0).toFixed(2)}% Total Growth`
+                        : '0.00% Total Growth'
+                      }
+                    </Typography>
+                  </Box>
+                  <Button 
+                    size="small" 
+                    onClick={() => setShowBreakdownDialog(true)}
+                    sx={{ mt: 1 }}
+                  >
+                    View Breakdown
+                  </Button>
+                </>
+              )}
+            </CardContent>
+          </Card>
+        </Grid>
+
+        <Grid item xs={12} md={4}>
+          <Card>
+            <CardContent>
+              <Typography color="textSecondary" gutterBottom>
+                Trading Performance
+              </Typography>
+              {accountBreakdown ? (
+                <>
+                  <Typography
+                    variant="h4"
+                    color={(accountBreakdown.trading_growth_percent ?? 0) >= 0 ? 'success.main' : 'error.main'}
+                  >
+                    {(accountBreakdown.trading_growth_percent ?? 0).toFixed(2)}%
+                  </Typography>
+                  <Typography variant="body2" color="textSecondary">
+                    {formatCurrency(accountBreakdown.realized_pnl ?? 0)} P&L (Excludes deposits/withdrawals)
+                  </Typography>
+                </>
+              ) : (
+                <Typography variant="h4">Loading...</Typography>
+              )}
             </CardContent>
           </Card>
         </Grid>
@@ -316,12 +352,12 @@ const Dashboard: React.FC = () => {
               </Typography>
               <Typography 
                 variant="h3" 
-                color={metrics.eventBasedRealizedPnL >= 0 ? 'success.main' : 'error.main'}
+                color={(accountBreakdown?.realized_pnl ?? 0) >= 0 ? 'success.main' : 'error.main'}
               >
-                {formatCurrency(metrics.eventBasedRealizedPnL)}
+                {formatCurrency(accountBreakdown?.realized_pnl ?? 0)}
               </Typography>
               <Typography variant="body2" color="textSecondary">
-                All realized sell events
+                FIFO cost basis
               </Typography>
             </CardContent>
           </Card>
@@ -374,7 +410,12 @@ const Dashboard: React.FC = () => {
           </Card>
         </Grid>
 
-        {/* Performance Highlights */}
+        {/* Equity Curve - Full Width */}
+        <Grid item xs={12}>
+          <EquityCurveChart height={400} />
+        </Grid>
+
+        {/* Performance Highlights - Moved after Equity Curve for better spacing */}
         <Grid item xs={12} md={6}>
           <Card>
             <CardContent>
@@ -493,6 +534,139 @@ const Dashboard: React.FC = () => {
         </Grid>
 
       </Grid>
+
+      <Dialog 
+        open={showBreakdownDialog} 
+        onClose={() => setShowBreakdownDialog(false)}
+        maxWidth="sm"
+        fullWidth
+      >
+        <DialogTitle>Account Value Breakdown</DialogTitle>
+        <DialogContent>
+          {accountBreakdown && (
+            <Grid container spacing={2} sx={{ mt: 1 }}>
+              <Grid item xs={12}>
+                <Paper sx={{ p: 2, bgcolor: 'primary.light' }}>
+                  <Typography variant="body2" color="primary.contrastText">
+                    Current Account Value
+                  </Typography>
+                  <Typography variant="h4" color="primary.contrastText">
+                    {formatCurrency(accountValue)}
+                  </Typography>
+                </Paper>
+              </Grid>
+              
+              <Grid item xs={12}>
+                <Divider sx={{ my: 1 }}>
+                  <Chip label="Components" size="small" />
+                </Divider>
+              </Grid>
+              
+              <Grid item xs={6}>
+                <Box>
+                  <Typography variant="caption" color="text.secondary">
+                    Starting Balance
+                  </Typography>
+                  <Typography variant="h6">
+                    {formatCurrency(accountBreakdown?.starting_balance)}
+                  </Typography>
+                </Box>
+              </Grid>
+              
+              <Grid item xs={6}>
+                <Box>
+                  <Typography variant="caption" color="text.secondary">
+                    Trading P&L
+                  </Typography>
+                  <Typography 
+                    variant="h6"
+                    color={accountBreakdown?.realized_pnl >= 0 ? 'success.main' : 'error.main'}
+                  >
+                    {accountBreakdown?.realized_pnl >= 0 ? '+' : ''}
+                    {formatCurrency(accountBreakdown?.realized_pnl)}
+                  </Typography>
+                </Box>
+              </Grid>
+              
+              <Grid item xs={6}>
+                <Box>
+                  <Typography variant="caption" color="text.secondary">
+                    Total Deposits
+                  </Typography>
+                  <Typography variant="h6" color="success.main">
+                    +{formatCurrency(accountBreakdown?.total_deposits)}
+                  </Typography>
+                </Box>
+              </Grid>
+              
+              <Grid item xs={6}>
+                <Box>
+                  <Typography variant="caption" color="text.secondary">
+                    Total Withdrawals
+                  </Typography>
+                  <Typography variant="h6" color="error.main">
+                    -{formatCurrency(accountBreakdown?.total_withdrawals)}
+                  </Typography>
+                </Box>
+              </Grid>
+              
+              <Grid item xs={12}>
+                <Divider sx={{ my: 1 }}>
+                  <Chip label="Growth Metrics" size="small" />
+                </Divider>
+              </Grid>
+              
+              <Grid item xs={6}>
+                <Box>
+                  <Typography variant="caption" color="text.secondary">
+                    Total Growth
+                  </Typography>
+                  <Typography 
+                    variant="h6"
+                    color={((accountBreakdown?.total_growth_percent ?? 0) >= 0) ? 'success.main' : 'error.main'}
+                  >
+                    {((accountBreakdown?.total_growth_percent ?? 0) >= 0) ? '+' : ''}
+                    {(accountBreakdown?.total_growth_percent ?? 0).toFixed(2)}%
+                  </Typography>
+                  <Typography variant="caption" color="text.secondary">
+                    Includes deposits/withdrawals
+                  </Typography>
+                </Box>
+              </Grid>
+              
+              <Grid item xs={6}>
+                <Box>
+                  <Typography variant="caption" color="text.secondary">
+                    Trading Growth
+                  </Typography>
+                  <Typography 
+                    variant="h6"
+                    color={((accountBreakdown?.trading_growth_percent ?? 0) >= 0) ? 'success.main' : 'error.main'}
+                  >
+                    {((accountBreakdown?.trading_growth_percent ?? 0) >= 0) ? '+' : ''}
+                    {(accountBreakdown?.trading_growth_percent ?? 0).toFixed(2)}%
+                  </Typography>
+                  <Typography variant="caption" color="text.secondary">
+                    Pure trading performance
+                  </Typography>
+                </Box>
+              </Grid>
+              
+              <Grid item xs={12}>
+                <Alert severity="info" sx={{ mt: 2 }}>
+                  <Typography variant="body2">
+                    <strong>Trading Growth</strong> excludes deposits and withdrawals to show 
+                    your actual trading skill, matching professional broker standards.
+                  </Typography>
+                </Alert>
+              </Grid>
+            </Grid>
+          )}
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => setShowBreakdownDialog(false)}>Close</Button>
+        </DialogActions>
+      </Dialog>
     </Box>
   );
 };

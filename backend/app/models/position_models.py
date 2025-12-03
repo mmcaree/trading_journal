@@ -272,10 +272,15 @@ class User(Base):
     # User preferences
     timezone = Column(String, default='America/New_York')  # User's local timezone for email scheduling
     
-    # Trading settings
-    current_account_balance = Column(Float, nullable=True)  # Current account balance (updated with P&L)
-    initial_account_balance = Column(Float, nullable=True)  # Starting balance for P&L tracking
-    starting_balance_date = Column(DateTime, nullable=True)
+    # Trading settings (Phase 2.2/2.3 - Dynamic Account Values)
+    # DEPRECATED FOR WRITES: current_account_balance should NOT be updated manually.
+    # Use AccountValueService.get_current_account_value() for reads.
+    # This field is kept for backward compatibility only.
+    current_account_balance = Column(Float, nullable=True)  # DEPRECATED: Use AccountValueService instead
+    
+    # These fields ARE actively used:
+    initial_account_balance = Column(Float, nullable=True)  # Starting balance set by user ("when I started")
+    starting_balance_date = Column(DateTime, nullable=True)  # When user started with initial_account_balance
     
     # Admin system - simple role-based access
     role = Column(String, default='STUDENT')  # 'STUDENT' or 'INSTRUCTOR'

@@ -214,9 +214,12 @@ class AccountValueService:
         if not user:
             raise ValueError(f"User {user_id} not found")
         
-        # Default to last 90 days
+        # Default to user's starting balance date if no start_date provided (for "ALL" view)
+        # Otherwise default to last 90 days
         end_date = end_date or utc_now()
-        start_date = start_date or (end_date - timedelta(days=90))
+        if start_date is None:
+            # Use user's starting_balance_date if set, otherwise default to 90 days
+            start_date = user.starting_balance_date or (end_date - timedelta(days=90))
         
         # Get all significant events (position closes, deposits, withdrawals)
         events = []
