@@ -57,7 +57,17 @@ export const EquityCurveChart: React.FC<EquityCurveProps> = ({
   const { formatCurrency } = useCurrency();
 
   useEffect(() => {
-    fetchEquityCurve();
+    let isCancelled = false;
+    
+    const fetchData = async () => {
+      await fetchEquityCurve();
+    };
+    
+    fetchData();
+    
+    return () => {
+      isCancelled = true;
+    };
   }, [startDate, endDate, selectedRange]);
 
   const getDateRangeForSelection = (range: TimeRange) => {
@@ -97,10 +107,12 @@ export const EquityCurveChart: React.FC<EquityCurveProps> = ({
       
       const effectiveStartDate = startDate || getDateRangeForSelection(selectedRange);
       if (effectiveStartDate) {
-        params.append('start_date', effectiveStartDate);
+        // Append time to date string for backend datetime parsing
+        params.append('start_date', effectiveStartDate + 'T00:00:00Z');
       }
       if (endDate) {
-        params.append('end_date', endDate);
+        // Append time to date string for backend datetime parsing
+        params.append('end_date', endDate + 'T23:59:59Z');
       }
       
       const response = await api.get(`/api/users/me/equity-curve?${params}`);
@@ -112,7 +124,15 @@ export const EquityCurveChart: React.FC<EquityCurveProps> = ({
       }
     } catch (err: any) {
       console.error('Error fetching equity curve:', err);
-      setError(err.response?.data?.detail || 'Failed to load equity curve data');
+      const errorMessage = err.response?.data?.detail || 'Failed to load equity curve data';
+      // Handle if detail is an array of validation errors
+      if (Array.isArray(errorMessage)) {
+        setError(errorMessage.map((e: any) => e.msg || JSON.stringify(e)).join(', '));
+      } else if (typeof errorMessage === 'string') {
+        setError(errorMessage);
+      } else {
+        setError('Failed to load equity curve data');
+      }
     } finally {
       setLoading(false);
     }
@@ -357,27 +377,16 @@ export const EquityCurveChart: React.FC<EquityCurveProps> = ({
                   <circle
                     cx={cx}
                     cy={cy}
-                    r={hasEvent ? 5 : 2}
+                    r={hasEvent ? 4 : 2}
                     fill={getPointColor(payload.event_type)}
                     stroke="white"
                     strokeWidth={hasEvent ? 2 : 0}
                   />
                 );
               }}
-              activeDot={{ r: 6 }}
+              activeDot={{ r: 7 }}
             />
-            {stats && (
-              <ReferenceLine
-                y={stats.firstValue}
-                stroke={CHART_COLORS.grid}
-                strokeDasharray="3 3"
-                label={{
-                  value: 'Starting Value',
-                  position: 'right',
-                  fill: CHART_COLORS.text
-                }}
-              />
-            )}
+
           </LineChart>
         </ResponsiveContainer>
       </Box>

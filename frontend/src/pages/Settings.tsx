@@ -149,7 +149,7 @@ const Settings: React.FC = () => {
     setAccountSettings(settings);
     setTempAccountBalance(settings.current_balance.toString());
     setTempStartingBalance(settings.starting_balance.toString());
-    loadAccountGrowth();
+    loadAccountGrowthFromAPI();
     loadUserStartingBalanceDate();
   }, []);
 
@@ -157,9 +157,9 @@ const Settings: React.FC = () => {
     try {
       const response = await api.get('/api/users/me');
       if (response.data.starting_balance_date) {
-        // Convert ISO date to YYYY-MM-DD format for input
-        const date = new Date(response.data.starting_balance_date);
-        setStartingBalanceDate(date.toISOString().split('T')[0]);
+        // Parse as UTC to avoid timezone offset issues
+        const dateStr = response.data.starting_balance_date.split('T')[0];
+        setStartingBalanceDate(dateStr);
       }
     } catch (error) {
       console.error('Failed to load starting balance date:', error);
@@ -171,10 +171,23 @@ const Settings: React.FC = () => {
     loadTransactions();
   }, []);
 
-  const loadAccountGrowth = async () => {
+  const loadAccountGrowthFromAPI = async () => {
     try {
-      const growth = await accountService.getAccountGrowth();
-      setAccountGrowth(growth);
+      // Fetch from API instead of localStorage
+      const response = await api.get('/api/analytics/account-growth-metrics');
+      const data = response.data;
+      
+      setAccountGrowth({
+        growth: data.trading_growth_percent >= 0 ? data.realized_pnl : data.realized_pnl,
+        growthPercent: data.total_growth_percent,
+        startingBalance: data.starting_balance,
+        currentBalance: data.current_value,
+        totalDeposits: data.total_deposits,
+        totalWithdrawals: data.total_withdrawals,
+        netCashFlow: data.net_deposits,
+        rawGrowth: data.realized_pnl,
+        rawGrowthPercent: data.trading_growth_percent
+      });
     } catch (error) {
       console.error('Failed to load account growth:', error);
     }
@@ -257,7 +270,8 @@ const Settings: React.FC = () => {
       };
       
       if (startingBalanceDate) {
-        params.starting_date = new Date(startingBalanceDate).toISOString();
+        // Append time to ensure it's treated as start of day in UTC
+        params.starting_date = startingBalanceDate + 'T00:00:00Z';
       }
       
       const response = await api.put('/api/users/me/starting-balance', null, { params });
@@ -424,7 +438,7 @@ const Settings: React.FC = () => {
       ]);
       setTransactions(txnData);
       setTransactionSummary(summary);
-      await loadAccountGrowth(); // Reload growth when transactions change
+      await loadAccountGrowthFromAPI(); // Reload growth when transactions change
     } catch (error: any) {
       console.error('Failed to load transactions:', error);
     }

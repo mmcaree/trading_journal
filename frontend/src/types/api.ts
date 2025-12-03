@@ -57,10 +57,10 @@ export interface User {
   // 2FA status
   two_factor_enabled?: boolean;
   
-  // Trading settings
-  default_account_size?: number;
-  current_account_balance?: number;
-  initial_account_balance?: number;
+  // Trading settings (Phase 2.2/2.3)
+  current_account_balance?: number;  // DEPRECATED: Use AccountValueService for reads, do not write directly
+  initial_account_balance?: number;  // Starting balance set by user (the "when I started" balance)
+  starting_balance_date?: string;    // When the user started with initial_account_balance
   
   // Admin system
   role?: 'STUDENT' | 'INSTRUCTOR';
@@ -89,7 +89,7 @@ export interface UserUpdateData {
   bio?: string;
   email?: string;
   timezone?: string;
-  default_account_size?: number;
+  // Note: Account balance updates go through /api/users/me/starting-balance endpoint
 }
 
 export interface ChangePasswordData {
