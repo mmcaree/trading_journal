@@ -35,21 +35,29 @@ class PositionService:
         strategy: Optional[str] = None,
         setup_type: Optional[str] = None,
         timeframe: Optional[str] = None,
+        opened_at: Optional[datetime] = None,
+        original_shares: Optional[int] = None,
+        avg_entry_price: Optional[float] = None,
         **kwargs
     ) -> TradingPosition:
         """Create a new position"""
+        opened_at = opened_at or utc_now()
         position = TradingPosition(
             user_id=user_id,
             ticker=ticker.upper(),
             strategy=strategy,
             setup_type=setup_type,
             timeframe=timeframe,
-            opened_at=utc_now(),
+            opened_at=opened_at,
+            original_shares=original_shares,
+            avg_entry_price=avg_entry_price,
             **kwargs
         )
         
         self.db.add(position)
         self.db.flush()  # Get the ID
+        if original_shares and avg_entry_price:
+            self._set_original_risk(position, original_shares, avg_entry_price)
         return position
     
     def get_or_create_position(
@@ -100,7 +108,8 @@ class PositionService:
         position = self.db.query(TradingPosition).get(position_id)
         if not position:
             raise ValueError(f"Position {position_id} not found")
-        
+
+        was_first_buy = position.current_shares == 0
         # Create buy event
         event = TradingPositionEvent(
             position_id=position_id,
@@ -125,8 +134,35 @@ class PositionService:
         # Update event with after state
         position = self.db.query(TradingPosition).get(position_id)
         event.position_shares_after = position.current_shares
+
+        if was_first_buy and position.current_shares > 0:
+            self._set_original_risk(position, position.current_shares, price)
         
         return event
+    
+
+    def _set_original_risk(self, position: TradingPosition, shares: int, price: float):
+        """Calculate and store original risk % using account value at entry time"""
+        try:
+            account_value_at_entry = self.account_value_service.get_account_value_at_date(
+                user_id=position.user_id,
+                target_date=position.opened_at
+            )
+        except:
+            account_value_at_entry = 10000.0
+        
+        position_value = shares * price
+        if account_value_at_entry > 0:
+            original_risk_percent = (position_value / account_value_at_entry) * 100
+            position.original_risk_percent = round(original_risk_percent, 3)
+            position.account_value_at_entry = account_value_at_entry
+            position.original_shares = shares
+            position.avg_entry_price = price
+        else:
+            position.original_risk_percent = 0.0
+            position.account_value_at_entry = account_value_at_entry
+        
+        self.db.commit()
     
     def sell_shares(
         self,
