@@ -325,6 +325,43 @@ def get_advanced_performance_metrics(
 
     positions = query.order_by(TradingPosition.closed_at.asc()).all()
 
+    risk_query = db.query(
+        func.avg(TradingPosition.original_risk_percent).label('avg_risk')
+    ).filter(
+        TradingPosition.user_id == user_id,
+        TradingPosition.original_risk_percent.isnot(None),
+        TradingPosition.original_risk_percent > 0
+    )
+    if start_date:
+        try:
+            s = datetime.fromisoformat(start_date.replace('Z', '+00:00'))
+            risk_query = risk_query.filter(TradingPosition.opened_at >= s)
+        except ValueError:
+            pass
+    if end_date:
+        try:
+            e = datetime.fromisoformat(end_date.replace('Z', '+00:00'))
+            risk_query = risk_query.filter(TradingPosition.opened_at <= e)
+        except ValueError:
+            pass
+
+    avg_original_risk = risk_query.scalar()
+    avg_original_risk = round(float(avg_original_risk), 3) if avg_original_risk else None
+
+    # Optional: change vs previous period (super cool)
+    prev_avg = None
+    if avg_original_risk and start_date:
+        try:
+            prev_start = s - (datetime.fromisoformat(end_date.replace('Z', '+00:00')) - s if end_date else 
+                             datetime.now() - s)  # same length before
+            prev_query = risk_query.filter(TradingPosition.opened_at < s)
+            prev_avg = prev_query.scalar()
+            prev_avg = round(float(prev_avg), 3) if prev_avg else avg_original_risk
+        except:
+            pass
+
+    avg_original_risk_change = round(avg_original_risk - prev_avg, 3) if avg_original_risk and prev_avg else None
+
     if not positions:
         return {
             "total_trades": 0,
@@ -569,7 +606,9 @@ def get_advanced_performance_metrics(
         "total_deposits": round(total_deposits, 2),
         "total_withdrawals": round(total_withdrawals, 2),
         "net_cash_flow": round(net_cash_flow, 2),
-        "annualized_return_percent": round(annualized_return * 100, 2)
+        "annualized_return_percent": round(annualized_return * 100, 2),
+        "avg_original_risk": avg_original_risk,
+        "avg_original_risk_change": avg_original_risk_change,
     }
 
 

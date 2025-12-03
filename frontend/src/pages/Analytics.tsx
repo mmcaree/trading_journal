@@ -1357,6 +1357,51 @@ const Analytics: React.FC = () => {
             </Card>
           </Grid>
 
+          <Grid item xs={12} md={3}>
+            <Card sx={{ height: '100%' }}>
+              <CardContent>
+                <Tooltip title="Average % of account risked when you opened each position. Calculated using original_risk_percent. Lower = better discipline. This is the #1 metric professional traders track.">
+                  <Typography color="text.secondary" gutterBottom sx={{ cursor: 'help' }}>
+                    Avg Original Risk per Position
+                  </Typography>
+                </Tooltip>
+                <Typography
+                  variant="h5"
+                  sx={{
+                    fontWeight: 'bold',
+                    color: advancedData?.avg_original_risk && advancedData.avg_original_risk <= 3
+                      ? 'success.main'
+                      : advancedData?.avg_original_risk && advancedData.avg_original_risk <= 5
+                      ? 'warning.main'
+                      : 'error.main'
+                  }}
+                >
+                  {advancedData?.avg_original_risk != null
+                    ? `${advancedData.avg_original_risk.toFixed(2)}%`
+                    : '—'
+                  }
+                </Typography>
+                {advancedData?.avg_original_risk_change != null && (
+                  <Typography
+                    variant="body2"
+                    sx={{
+                      mt: 1,
+                      color: advancedData.avg_original_risk_change < 0 ? 'success.main' : 'error.main',
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: 0.5
+                    }}
+                  >
+                    {advancedData.avg_original_risk_change < 0 ? 'Down' : 'Up'} {Math.abs(advancedData.avg_original_risk_change).toFixed(2)}%
+                    <span style={{ color: 'text.secondary', fontSize: '0.8rem' }}>
+                      vs previous {selectedTimeScale === 'ALL' ? 'year' : selectedTimeScale}
+                    </span>
+                  </Typography>
+                )}
+              </CardContent>
+            </Card>
+          </Grid>
+
           {/* Advanced Risk Metrics */}
           <Grid item xs={12} md={6}>
             <Paper sx={{ p: 3 }}>

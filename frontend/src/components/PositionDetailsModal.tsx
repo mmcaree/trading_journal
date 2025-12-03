@@ -933,21 +933,57 @@ const loading = loadingDetails || loadingAnalytics;
                 <Typography variant="h6" gutterBottom>
                   ⚡ Risk Analysis
                 </Typography>
-                <Grid container spacing={2}>
+
+                {position.original_risk_percent != null ? (
+                  <Box sx={{ mb: 3 }}>
+                    <Typography variant="subtitle2" color="text.secondary">
+                      Original Risk at Entry
+                    </Typography>
+                    <Typography variant="h5" sx={{ fontWeight: 'bold', color: 'primary.main' }}>
+                      {position.original_risk_percent.toFixed(2)}%
+                    </Typography>
+                    <Typography variant="caption" color="text.secondary">
+                      Based on account value of{' '}
+                      <strong>{formatCurrency(position.account_value_at_entry || 0)}</strong>
+                      {' '}on {new Date(position.opened_at).toLocaleDateString()}
+                    </Typography>
+
+                    {position.status === 'open' && position.current_shares > 0 && (
+                      <Box sx={{ mt: 2, p: 2, bgcolor: 'background.default', borderRadius: 1 }}>
+                        <Typography variant="caption" color="text.secondary">
+                          Current position value:{' '}
+                          {formatCurrency((position.current_shares || 0) * (position.avg_entry_price || 0))}
+                        </Typography>
+                        <br />
+                        <Typography variant="caption" color="text.secondary">
+                          Current risk (today):{' '}
+                          <strong>
+                            {((position.current_shares || 0) * (position.avg_entry_price || 0) / accountBalance * 100).toFixed(2)}%
+                          </strong>{' '}
+                          of current ${formatCurrency(accountBalance)} account
+                        </Typography>
+                      </Box>
+                    )}
+                  </Box>
+                ) : (
+                  <Alert severity="info" sx={{ mb: 2 }}>
+                    Original risk not recorded (position opened before risk tracking was enabled)
+                  </Alert>
+                )}
+
+                <Grid container spacing={2} sx={{ mt: 1 }}>
                   <Grid item xs={12}>
                     <Alert severity={position.current_stop_loss ? 'success' : 'warning'}>
-                      {position.current_stop_loss 
-                        ? `Stop Loss: ${formatCurrency(position.current_stop_loss)}`
-                        : 'No Stop Loss Set'
-                      }
+                      {position.current_stop_loss
+                        ? `Active Stop Loss: ${formatCurrency(position.current_stop_loss)}`
+                        : 'No Active Stop Loss'}
                     </Alert>
                   </Grid>
                   <Grid item xs={12}>
                     <Alert severity={position.current_take_profit ? 'info' : 'info'}>
-                      {position.current_take_profit 
-                        ? `Take Profit: ${formatCurrency(position.current_take_profit)}`
-                        : 'No Take Profit Set'
-                      }
+                      {position.current_take_profit
+                        ? `Take Profit Target: ${formatCurrency(position.current_take_profit)}`
+                        : 'No Take Profit Set'}
                     </Alert>
                   </Grid>
                 </Grid>

@@ -78,6 +78,7 @@ class TradingPosition(Base):
     
     # Position lifecycle
     opened_at = Column(DateTime, nullable=False)
+    account_value_at_entry = Column(Float, nullable=True)
     closed_at = Column(DateTime, nullable=True)
     
     # Metadata
