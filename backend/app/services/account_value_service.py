@@ -218,8 +218,25 @@ class AccountValueService:
         # Otherwise default to last 90 days
         end_date = end_date or utc_now()
         if start_date is None:
-            # Use user's starting_balance_date if set, otherwise default to 90 days
-            start_date = user.starting_balance_date or (end_date - timedelta(days=90))
+            # Use user's starting_balance_date if set
+            if user.starting_balance_date:
+                start_date = user.starting_balance_date
+            else:
+                # If no starting_balance_date, find the earliest position or transaction date
+                earliest_position = self.db.query(func.min(TradingPosition.opened_at)).filter(
+                    TradingPosition.user_id == user_id
+                ).scalar()
+                
+                earliest_transaction = self.db.query(func.min(AccountTransaction.transaction_date)).filter(
+                    AccountTransaction.user_id == user_id
+                ).scalar()
+                
+                # Use the earliest date we can find, or default to 90 days
+                earliest_dates = [d for d in [earliest_position, earliest_transaction] if d is not None]
+                if earliest_dates:
+                    start_date = min(earliest_dates)
+                else:
+                    start_date = end_date - timedelta(days=360)
         
         # Get all significant events (position closes, deposits, withdrawals)
         events = []
