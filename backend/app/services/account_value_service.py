@@ -224,10 +224,12 @@ class AccountValueService:
         # Get all significant events (position closes, deposits, withdrawals)
         events = []
         
-        # Closed positions
+        # Closed positions - get ALL positions closed after start_date
+        # (positions before start_date are already in the starting balance)
         closed_positions = self.db.query(TradingPosition).filter(
             TradingPosition.user_id == user_id,
-            TradingPosition.closed_at.between(start_date, end_date),
+            TradingPosition.closed_at >= start_date,
+            TradingPosition.closed_at <= end_date,
             TradingPosition.status == PositionStatus.CLOSED
         ).all()
         
@@ -238,10 +240,11 @@ class AccountValueService:
                 'value': pos.total_realized_pnl
             })
         
-        # Account transactions
+        # Account transactions - get ALL transactions after start_date
         transactions = self.db.query(AccountTransaction).filter(
             AccountTransaction.user_id == user_id,
-            AccountTransaction.transaction_date.between(start_date, end_date)
+            AccountTransaction.transaction_date >= start_date,
+            AccountTransaction.transaction_date <= end_date
         ).all()
         
         for txn in transactions:
