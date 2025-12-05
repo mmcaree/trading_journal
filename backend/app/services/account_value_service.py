@@ -158,7 +158,7 @@ class AccountValueService:
         
         target_date = utc_now()
         
-        starting_balance = user.initial_account_balance or user.default_account_size or 10000.0
+        starting_balance = user.initial_account_balance or 10000.0
         
         realized_pnl = self.db.query(
             func.coalesce(func.sum(TradingPosition.total_realized_pnl), 0.0)
