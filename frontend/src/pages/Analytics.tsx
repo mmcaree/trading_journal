@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { calculateWinRate } from '../utils/calculations';
+import { EquityCurveChart } from '../components/EquityCurveChart';
 import {
   Box,
   Typography,
@@ -96,6 +97,8 @@ const Analytics: React.FC = () => {
   const [positions, setPositions] = useState<(Position & { events?: PositionEvent[] })[]>([]);
   const [accountBalance, setAccountBalance] = useState(0);
   const [selectedTimeScale, setSelectedTimeScale] = useState<TimeScale>('ALL');
+  const [growthMetrics, setGrowthMetrics] = useState<any>(null);
+
   const { formatCurrency } = useCurrency();
   
   const [advancedData, setAdvancedData] = useState<any>(null);
@@ -104,17 +107,40 @@ const Analytics: React.FC = () => {
     loadAnalyticsData();
   }, []);
 
+
+  useEffect(() => {
+    loadGrowthMetrics();
+  }, [selectedTimeScale]); // Reload when time scale changes
+
+  const loadGrowthMetrics = async () => {
+    try {
+      const params = selectedTimeScale !== 'ALL' ? {
+        start_date: getTimeScaleDate(selectedTimeScale).toISOString()
+      } : {};
+      
+      const response = await api.get('/api/analytics/account-growth-metrics', { params });
+      setGrowthMetrics(response.data);
+    } catch (error) {
+      console.error('Failed to load growth metrics:', error);
+    }
+  };
+
   const loadAnalyticsData = async () => {
     setLoading(true);
     setError(null);
     try {
-      const [positionsData, balance] = await Promise.all([
-        getAllPositionsWithEvents({ limit: 100000 }),  // Get all positions with events for Time Analysis
-        accountService.getCurrentBalance()
-      ]);
-      
+      // Get positions and account value from API
+      const positionsData = await getAllPositionsWithEvents({ limit: 100000 });
       setPositions(positionsData || []);
-      setAccountBalance(balance);
+      
+      // Get account value from API instead of localStorage
+      try {
+        const accountValueResponse = await api.get('/api/users/me/account-value');
+        setAccountBalance(accountValueResponse.data.account_value);
+      } catch (error) {
+        console.error('Failed to fetch account value, using fallback:', error);
+        setAccountBalance(accountService.getCurrentBalance());
+      }
     } catch (err) {
       console.error('Error loading analytics data:', err);
       setError('Failed to load analytics data');
@@ -160,17 +186,17 @@ const Analytics: React.FC = () => {
     });
   }, [positions, selectedTimeScale]);
 
-  // Helper function to calculate event-based realized P&L (includes partial exits from open positions)
-  const getEventBasedRealizedPnL = useMemo(() => {
+  // Helper function to get realized P&L from backend (FIFO-based calculation)
+  const getTotalRealizedPnL = useMemo(() => {
+    // Use backend calculation if available (more accurate - uses FIFO)
+    if (growthMetrics?.realized_pnl !== undefined) {
+      return growthMetrics.realized_pnl;
+    }
+    // Fallback to summing position total_realized_pnl (also FIFO-based)
     return filteredPositions
-      .flatMap(position => {
-        if (!position.events || position.events.length === 0) return [];
-        return position.events
-          .filter(event => event.event_type === 'sell' && event.realized_pnl != null)
-          .map(event => event.realized_pnl || 0);
-      })
-      .reduce((total, pnl) => total + pnl, 0);
-  }, [filteredPositions]);
+      .filter(position => position.status === 'closed')
+      .reduce((total, position) => total + (position.total_realized_pnl || 0), 0);
+  }, [filteredPositions, growthMetrics]);
 
   // Time Analysis calculations
   const timeAnalysisData = useMemo(() => {
@@ -766,12 +792,12 @@ const Analytics: React.FC = () => {
                 </Typography>
                 <Typography 
                   variant="h4" 
-                  color={getEventBasedRealizedPnL >= 0 ? 'success.main' : 'error.main'}
+                  color={getTotalRealizedPnL >= 0 ? 'success.main' : 'error.main'}
                 >
-                  ${getEventBasedRealizedPnL.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                  ${getTotalRealizedPnL.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                 </Typography>
                 <Typography variant="body2" color="text.secondary">
-                  {selectedTimeScale === 'ALL' ? 'All realized P&L (incl. partial exits)' : `From sell events in ${selectedTimeScale} period`}
+                  {selectedTimeScale === 'ALL' ? 'FIFO cost basis (closed positions)' : `From closed positions in ${selectedTimeScale} period`}
                 </Typography>
               </CardContent>
             </Card>
@@ -818,6 +844,125 @@ const Analytics: React.FC = () => {
                 </Typography>
               </CardContent>
             </Card>
+          </Grid>
+
+          <Grid item xs={12}>
+            <Paper sx={{ p: 3, bgcolor: 'background.default' }}>
+              <Typography variant="h6" gutterBottom sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+                💰 Account Growth Analysis
+              </Typography>
+              {growthMetrics ? (
+                <Grid container spacing={2}>
+                  <Grid item xs={12} md={3}>
+                    <Card>
+                      <CardContent>
+                        <Typography color="text.secondary" gutterBottom>
+                          Current Account Value
+                        </Typography>
+                        <Typography variant="h4">
+                          {formatCurrency(growthMetrics.current_value || 0)}
+                        </Typography>
+                        <Typography variant="body2" color="text.secondary">
+                          As of {new Date().toLocaleDateString()}
+                        </Typography>
+                      </CardContent>
+                    </Card>
+                  </Grid>
+                  
+                  <Grid item xs={12} md={3}>
+                    <Card sx={{ bgcolor: 'success.light' }}>
+                      <CardContent>
+                        <Typography color="success.contrastText" gutterBottom>
+                          Trading Growth
+                        </Typography>
+                        <Typography 
+                          variant="h4" 
+                          color="success.contrastText"
+                        >
+                          {(growthMetrics.trading_growth_percent || 0).toFixed(2)}%
+                        </Typography>
+                        <Typography variant="body2" color="success.contrastText">
+                          {formatCurrency(growthMetrics.realized_pnl || 0)} P&L
+                        </Typography>
+                        <Typography variant="caption" color="success.contrastText" sx={{ mt: 1, display: 'block' }}>
+                          Excludes deposits/withdrawals
+                        </Typography>
+                      </CardContent>
+                    </Card>
+                  </Grid>
+                  
+                  <Grid item xs={12} md={3}>
+                    <Card>
+                      <CardContent>
+                        <Typography color="text.secondary" gutterBottom>
+                          Total Growth
+                        </Typography>
+                        <Typography 
+                          variant="h4"
+                          color={(growthMetrics.total_growth_percent || 0) >= 0 ? 'success.main' : 'error.main'}
+                        >
+                          {(growthMetrics.total_growth_percent || 0).toFixed(2)}%
+                        </Typography>
+                        <Typography variant="body2" color="text.secondary">
+                          {formatCurrency((growthMetrics.current_value || 0) - (growthMetrics.starting_balance || 0))}
+                        </Typography>
+                        <Typography variant="caption" color="text.secondary" sx={{ mt: 1, display: 'block' }}>
+                          Includes deposits/withdrawals
+                        </Typography>
+                      </CardContent>
+                    </Card>
+                  </Grid>
+                  
+                  <Grid item xs={12} md={3}>
+                    <Card>
+                      <CardContent>
+                        <Typography color="text.secondary" gutterBottom>
+                          Net Cash Flow
+                        </Typography>
+                        <Typography 
+                          variant="h4"
+                          color={(growthMetrics.net_deposits || 0) >= 0 ? 'success.main' : 'error.main'}
+                        >
+                          {(growthMetrics.net_deposits || 0) >= 0 ? '+' : ''}
+                          {formatCurrency(growthMetrics.net_deposits || 0)}
+                        </Typography>
+                        <Typography variant="body2" color="text.secondary">
+                          Deposits - Withdrawals
+                        </Typography>
+                      </CardContent>
+                    </Card>
+                  </Grid>
+                  
+                  {/* Detailed Breakdown */}
+                  <Grid item xs={12}>
+                    <Alert severity="info">
+                      <Typography variant="body2">
+                        <strong>Trading Growth ({(growthMetrics.trading_growth_percent || 0).toFixed(2)}%)</strong> shows your actual trading performance, 
+                        excluding deposits and withdrawals. This is how professional traders and brokers calculate returns 
+                        and is the true measure of your trading skill.
+                      </Typography>
+                    </Alert>
+                  </Grid>
+                  <Grid item xs={12}>
+                    <Alert severity="info">
+                      <Typography variant="body2">
+                        Current Account Value will inevitablely differ from your broker's statement due to timing of deposits/withdrawals, 
+                        unrealized P&L on open positions, and fees. We aim to be within a couple percent of what your broker reports.
+                        Always refer to your broker for official balances.
+                      </Typography>
+                    </Alert>
+                  </Grid>
+                </Grid>
+              ) : (
+                <Box display="flex" justifyContent="center" p={3}>
+                  <CircularProgress />
+                </Box>
+              )}
+            </Paper>
+          </Grid>
+
+          <Grid item xs={12}>
+            <EquityCurveChart height={400} />
           </Grid>
 
           {/* Quick Charts Row */}
@@ -1486,6 +1631,13 @@ const Analytics: React.FC = () => {
               </TableContainer>
             </Paper>
           </Grid>
+
+          <Grid item xs={12}>
+            <Typography variant="h6" gutterBottom sx={{ mt: 2 }}>
+              Full Account History
+            </Typography>
+            <EquityCurveChart height={400} />
+          </Grid>
         </Grid>
       )}
 
@@ -1726,6 +1878,12 @@ const Analytics: React.FC = () => {
                 </Table>
               </TableContainer>
             </Paper>
+          </Grid>
+          <Grid item xs={12}>
+            <Typography variant="h6" gutterBottom>
+              Account Growth Over Time
+            </Typography>
+            <EquityCurveChart height={350} />
           </Grid>
         </Grid>
       )}

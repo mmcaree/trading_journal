@@ -578,7 +578,14 @@ def get_advanced_performance_metrics(
 def calculate_trading_growth_rate(db: Session, user_id: int) -> float:
     """
     Calculate growth from trading only (exclude deposits/withdrawals).
-    Uses AccountValueService for dynamic calculations.
+    
+    Formula: (Realized P&L / Total Capital Invested) × 100
+    
+    Total Capital Invested = Starting Balance + All Deposits
+    This shows the % return on all the money you put into the account.
+    
+    Example: Start with $500, deposit $37,500 more, make $17,500 profit
+    Trading Growth = (17,500 / (500 + 37,500)) × 100 = 46.05%
     """
     account_value_service = AccountValueService(db)
     user = db.query(User).filter(User.id == user_id).first()
@@ -586,35 +593,31 @@ def calculate_trading_growth_rate(db: Session, user_id: int) -> float:
     if not user:
         return 0.0
     
-    # Get current account value dynamically
-    current_value = account_value_service.get_current_account_value(user_id)
-    
     # Get starting balance
     starting_balance = user.initial_account_balance or 10000.0
     
-    # Get net cash flow
-    deposits = db.query(
+    # Get all deposits
+    total_deposits = db.query(
         func.coalesce(func.sum(AccountTransaction.amount), 0.0)
     ).filter(
         AccountTransaction.user_id == user_id,
         AccountTransaction.transaction_type == 'DEPOSIT'
     ).scalar()
     
-    withdrawals = db.query(
-        func.coalesce(func.sum(AccountTransaction.amount), 0.0)
+    # Get realized P&L (trading profits/losses)
+    realized_pnl = db.query(
+        func.coalesce(func.sum(TradingPosition.total_realized_pnl), 0.0)
     ).filter(
-        AccountTransaction.user_id == user_id,
-        AccountTransaction.transaction_type == 'WITHDRAWAL'
+        TradingPosition.user_id == user_id,
+        TradingPosition.status == PositionStatus.CLOSED
     ).scalar()
     
-    net_cash_flow = deposits - withdrawals
+    # Total capital invested = starting balance + all deposits
+    total_capital_invested = starting_balance + total_deposits
     
-    # Adjusted account value = current value - net deposits/withdrawals
-    adjusted_value = current_value - net_cash_flow
-    
-    # Trading growth = (adjusted_value - starting) / starting
-    if starting_balance > 0:
-        trading_growth = ((adjusted_value - starting_balance) / starting_balance) * 100
+    # Trading growth % = (P&L / Total Capital Invested) × 100
+    if total_capital_invested > 0:
+        trading_growth = (realized_pnl / total_capital_invested) * 100
     else:
         trading_growth = 0.0
     
