@@ -729,7 +729,12 @@ const EventBreakdown: React.FC<EventBreakdownProps> = ({
     );
 
     if (matchingOrders.length === 0) {
-      throw new Error('No matching pending orders found for this sub-lot');
+      console.warn('No matching pending orders found for this sub-lot. Updating position stop loss directly.');
+      // Update the position's current_stop_loss instead
+      await updatePosition(position.id, {
+        current_stop_loss: newStopLoss || undefined
+      });
+      return;
     }
 
     // Update each matching order
