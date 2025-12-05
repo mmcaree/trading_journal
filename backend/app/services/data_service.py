@@ -24,6 +24,9 @@ def clear_trade_history(db: Session, user_id: int) -> None:
                 )
             )
             
+            # Delete imported pending orders first (has FK to positions)
+            db.query(ImportedPendingOrder).filter(ImportedPendingOrder.position_id.in_(position_ids)).delete(synchronize_session=False)
+            
             # Delete dependent data for these positions
             db.query(InstructorNote).filter(InstructorNote.position_id.in_(position_ids)).delete(synchronize_session=False)
             db.query(TradingPositionJournalEntry).filter(TradingPositionJournalEntry.position_id.in_(position_ids)).delete(synchronize_session=False)
@@ -32,9 +35,6 @@ def clear_trade_history(db: Session, user_id: int) -> None:
         
         # Delete trading positions (current system)
         db.query(TradingPosition).filter(TradingPosition.user_id == user_id).delete(synchronize_session=False)
-        
-        # Delete imported pending orders
-        db.query(ImportedPendingOrder).filter(ImportedPendingOrder.user_id == user_id).delete(synchronize_session=False)
         
         # NOTE: We do NOT delete:
         # - PositionTag (user's custom tags)
