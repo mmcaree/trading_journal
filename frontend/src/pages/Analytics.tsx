@@ -758,6 +758,7 @@ const Analytics: React.FC = () => {
           <Tab label="🧠 Psychology" />
           <Tab label="📈 Strategies" />
           <Tab label="🏆 Top Performers" />
+          <Tab label="📅 Calendar" />
         </Tabs>
       </Paper>
 
@@ -2362,8 +2363,256 @@ const Analytics: React.FC = () => {
           </Grid>
         </Grid>
       )}
+      {tabValue === 8 && (
+        <Grid container spacing={3}>
+          <Grid item xs={12}>
+            <Paper sx={{ p: 3 }}>
+              <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 3 }}>
+                <Typography variant="h5">
+                  P&L Calendar
+                </Typography>
+                <Box sx={{ display: 'flex', gap: 2, alignItems: 'center' }}>
+                  <Button
+                    variant={selectedTimeScale === 'ALL' ? 'contained' : 'outlined'}
+                    onClick={() => setSelectedTimeScale('ALL')}
+                    size="small"
+                  >
+                    Year View
+                  </Button>
+                  <Button
+                    variant={selectedTimeScale !== 'ALL' ? 'contained' : 'outlined'}
+                    onClick={() => setSelectedTimeScale('1M')}
+                    size="small"
+                  >
+                    Month View
+                  </Button>
+                </Box>
+              </Box>
+
+              <PnLCalendar
+                positions={filteredPositions}
+                timeScale={selectedTimeScale}
+                formatCurrency={formatCurrency}
+              />
+            </Paper>
+          </Grid>
+        </Grid>
+      )}
     </Box>
   );
 };
 
+const PnLCalendar: React.FC<{
+  positions: (Position & { events?: PositionEvent[] })[];
+  timeScale: TimeScale;
+  formatCurrency: (value: number) => string;
+}> = ({ positions, timeScale, formatCurrency }) => {
+  const today = new Date();
+  const [selectedYear, setSelectedYear] = useState(today.getFullYear());
+
+  const dailyPnL = useMemo(() => {
+    const map = new Map<string, { pnl: number; trades: number }>();
+
+    positions.forEach(pos => {
+      pos.events?.forEach(event => {
+        if (event.event_type === 'sell' && event.realized_pnl != null) {
+          const dateKey = new Date(event.event_date).toISOString().split('T')[0];
+          const existing = map.get(dateKey) || { pnl: 0, trades: 0 };
+          map.set(dateKey, {
+            pnl: existing.pnl + (event.realized_pnl || 0),
+            trades: existing.trades + 1
+          });
+        }
+      });
+    });
+
+    return map;
+  }, [positions]);
+
+  const getPnLForDate = (date: Date) => {
+    const key = date.toISOString().split('T')[0];
+    return dailyPnL.get(key) || { pnl: 0, trades: 0 };
+  };
+
+  if (timeScale !== 'ALL') {
+    const currentMonth = new Date(selectedYear, today.getMonth(), 1);
+    const month = currentMonth.getMonth();
+    const year = currentMonth.getFullYear();
+
+    const startOfMonth = new Date(year, month, 1);
+    const endOfMonth = new Date(year, month + 1, 0);
+    const startDayOfWeek = startOfMonth.getDay();
+
+    const daysInMonth = endOfMonth.getDate();
+    const weeks: (Date | null)[][] = [];
+    let currentWeek: (Date | null)[] = Array(startDayOfWeek).fill(null);
+
+    for (let day = 1; day <= daysInMonth; day++) {
+      currentWeek.push(new Date(year, month, day));
+      if (currentWeek.length === 7) {
+        weeks.push(currentWeek);
+        currentWeek = [];
+      }
+    }
+    if (currentWeek.length > 0) {
+      while (currentWeek.length < 7) currentWeek.push(null);
+      weeks.push(currentWeek);
+    }
+
+    const totalMonthPnL = Array.from(dailyPnL.entries())
+      .filter(([date]) => {
+        const d = new Date(date);
+        return d.getMonth() === month && d.getFullYear() === year;
+      })
+      .reduce((sum, [_, data]) => sum + data.pnl, 0);
+
+    return (
+      <Box>
+        <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 3 }}>
+          <Button onClick={() => setSelectedYear(prev => prev - 1)}>← Prev Year</Button>
+          <Typography variant="h6">
+            {currentMonth.toLocaleDateString('en-US', { month: 'long', year: 'numeric' })}
+            <Typography component="span" sx={{ ml: 2, fontWeight: 'bold', color: totalMonthPnL >= 0 ? 'success.main' : 'error.main' }}>
+              {formatCurrency(totalMonthPnL)}
+            </Typography>
+          </Typography>
+          <Button onClick={() => setSelectedYear(prev => prev + 1)}>Next Year →</Button>
+        </Box>
+
+        <TableContainer>
+          <Table size="small">
+            <TableHead>
+              <TableRow>
+                {['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'].map(d => (
+                  <TableCell key={d} align="center" sx={{ fontWeight: 'bold' }}>{d}</TableCell>
+                ))}
+              </TableRow>
+            </TableHead>
+            <TableBody>
+              {weeks.map((week, i) => (
+                <TableRow key={i}>
+                  {week.map((date, j) => {
+                    if (!date) return <TableCell key={j} />;
+                    const { pnl, trades } = getPnLForDate(date);
+                    const isToday = date.toDateString() === today.toDateString();
+                    const intensity = pnl === 0 ? 0 : Math.min(Math.abs(pnl) / 1000, 1);
+
+                    return (
+                      <TableCell key={j} align="center" sx={{
+                        height: 90,
+                        border: isToday ? '2px solid' : '1px solid',
+                        borderColor: isToday ? 'primary.main' : 'divider',
+                        bgcolor: pnl > 0 ? `rgba(46, 125, 50, ${0.2 + intensity * 0.7})`
+                          : pnl < 0 ? `rgba(211, 47, 47, ${0.2 + intensity * 0.7})`
+                          : 'background.paper',
+                        '&:hover': { bgcolor: pnl > 0 ? 'success.light' : 'error.light' }
+                      }}>
+                        <Tooltip title={trades > 0 ? `${trades} trade${trades > 1 ? 's' : ''} • ${formatCurrency(pnl)}` : 'No activity'}>
+                          <Box>
+                            <Typography variant="caption" sx={{ fontSize: '0.75rem' }}>{date.getDate()}</Typography>
+                            {trades > 0 && (
+                              <Typography variant="body2" sx={{
+                                fontWeight: 'bold',
+                                color: pnl >= 0 ? 'success.main' : 'error.main',
+                                mt: 0.5
+                              }}>
+                                {formatCurrency(pnl)}
+                              </Typography>
+                            )}
+                          </Box>
+                        </Tooltip>
+                      </TableCell>
+                    );
+                  })}
+                </TableRow>
+              ))}
+            </TableBody>
+          </Table>
+        </TableContainer>
+      </Box>
+    );
+  }
+
+  return (
+    <Box>
+      <Box sx={{ display: 'flex', justifyContent: 'center', alignItems: 'center', mb: 3, gap: 2 }}>
+        <Button onClick={() => setSelectedYear(y => y - 1)}>← {selectedYear - 1}</Button>
+        <Typography variant="h5">{selectedYear} Overview</Typography>
+        <Button onClick={() => setSelectedYear(y => y + 1)}>{selectedYear + 1} →</Button>
+      </Box>
+
+      <Grid container spacing={3}>
+        {[0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11].map(m => {
+          const monthDate = new Date(selectedYear, m, 1);
+          const monthName = monthDate.toLocaleDateString('en-US', { month: 'long' });
+          const daysInMonth = new Date(selectedYear, m + 1, 0).getDate();
+          const startDay = monthDate.getDay();
+
+          const monthPnL = Array.from(dailyPnL.entries())
+            .filter(([d]) => new Date(d).getMonth() === m && new Date(d).getFullYear() === selectedYear)
+            .reduce((sum, [_, v]) => sum + v.pnl, 0);
+
+          return (
+            <Grid item xs={12} sm={6} md={4} key={m}>
+              <Paper sx={{ p: 2 }}>
+                <Typography variant="subtitle1" align="center" gutterBottom>
+                  {monthName} {selectedYear}
+                  <Typography component="span" sx={{ ml: 1, fontWeight: 'bold', color: monthPnL >= 0 ? 'success.main' : 'error.main' }}>
+                    {formatCurrency(monthPnL)}
+                  </Typography>
+                </Typography>
+                <Table size="small">
+                  <TableHead>
+                    <TableRow>
+                      {['S', 'M', 'T', 'W', 'T', 'F', 'S'].map((d, i) => (
+                        <TableCell key={i} align="center" sx={{ p: 0.5, fontSize: '0.7rem' }}>{d}</TableCell>
+                      ))}
+                    </TableRow>
+                  </TableHead>
+                  <TableBody>
+                    {Array(Math.ceil((daysInMonth + startDay) / 7)).fill(null).map((_, weekIdx) => {
+                      const weekStart = weekIdx * 7;
+                      return (
+                        <TableRow key={weekIdx}>
+                          {Array(7).fill(null).map((_, dayIdx) => {
+                            const dayNum = weekStart + dayIdx - startDay + 1;
+                            if (dayNum < 1 || dayNum > daysInMonth) return <TableCell key={dayIdx} sx={{ p: 0.5 }} />;
+                            const date = new Date(selectedYear, m, dayNum);
+                            const { pnl } = getPnLForDate(date);
+                            const intensity = pnl === 0 ? 0 : Math.min(Math.abs(pnl) / 800, 1);
+
+                            return (
+                              <TableCell
+                                key={dayIdx}
+                                align="center"
+                                sx={{
+                                  p: 0.5,
+                                  bgcolor: pnl > 0 ? `rgba(46, 125, 50, ${0.2 + intensity * 0.6})`
+                                    : pnl < 0 ? `rgba(211, 47, 47, ${0.2 + intensity * 0.6})`
+                                    : undefined,
+                                  fontSize: '0.8rem'
+                                }}
+                              >
+                                {dayNum}
+                                {pnl !== 0 && (
+                                  <Box sx={{ fontSize: '0.65rem', fontWeight: 'bold', color: pnl >= 0 ? 'success.main' : 'error.main' }}>
+                                    {pnl > 0 ? '+' : ''}{formatCurrency(pnl)}
+                                  </Box>
+                                )}
+                              </TableCell>
+                            );
+                          })}
+                        </TableRow>
+                      );
+                    })}
+                  </TableBody>
+                </Table>
+              </Paper>
+            </Grid>
+          );
+        })}
+      </Grid>
+    </Box>
+  );
+};
 export default Analytics;
