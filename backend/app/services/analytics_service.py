@@ -5,7 +5,7 @@ Replaces analytics_service.py with TradingPosition + TradingPositionEvent based 
 from sqlalchemy.orm import Session
 from typing import List, Optional, Dict, Any, Tuple
 import numpy as np
-from datetime import datetime
+from datetime import datetime, date
 from sqlalchemy import func, and_
 from collections import defaultdict
 import statistics
@@ -697,3 +697,180 @@ def get_account_growth_metrics(db: Session, user_id: int) -> Dict[str, Any]:
         'pnl_from_deposits': round(breakdown['net_cash_flow'], 2),
         'calculation': breakdown['calculation']
     }
+
+def get_pnl_calendar_data(
+    db: Session,
+    user_id: int,
+    year: Optional[int] = None,
+    month: Optional[int] = None,
+    start_date: Optional[str] = None,
+    end_date: Optional[str] = None
+) -> Dict[str, Any]:
+    from sqlalchemy import func, extract
+    
+    query = db.query(
+        func.date(TradingPositionEvent.event_date).label('event_date'),
+        func.sum(TradingPositionEvent.realized_pnl).label('net_pnl'),
+        func.count(TradingPositionEvent.id).label('trades_count')
+    ).join(
+        TradingPosition,
+        TradingPositionEvent.position_id == TradingPosition.id
+    ).filter(
+        TradingPosition.user_id == user_id,
+        TradingPositionEvent.event_type == EventType.SELL,
+        TradingPositionEvent.realized_pnl.isnot(None)
+    )
+    
+    if year:
+        query = query.filter(extract('year', TradingPositionEvent.event_date) == year)
+    if month:
+        query = query.filter(extract('month', TradingPositionEvent.event_date) == month)
+    if start_date:
+        try:
+            start_dt = datetime.fromisoformat(start_date.replace('Z', '+00:00'))
+            query = query.filter(TradingPositionEvent.event_date >= start_dt)
+        except ValueError:
+            pass
+    if end_date:
+        try:
+            end_dt = datetime.fromisoformat(end_date.replace('Z', '+00:00'))
+            query = query.filter(TradingPositionEvent.event_date <= end_dt)
+        except ValueError:
+            pass
+    
+    query = query.group_by(func.date(TradingPositionEvent.event_date))
+    query = query.order_by(func.date(TradingPositionEvent.event_date))
+    
+    results = query.all()
+    
+    daily_pnl = []
+    winning_days = 0
+    losing_days = 0
+    best_day = None
+    worst_day = None
+    winning_day_total = 0.0
+    losing_day_total = 0.0
+    
+    for row in results:
+        event_date = row.event_date
+        net_pnl = float(row.net_pnl or 0)
+        trades_count = row.trades_count
+        
+        if isinstance(event_date, str):
+            date_obj = datetime.strptime(event_date, '%Y-%m-%d').date()
+        else:
+            date_obj = event_date
+        
+        events_on_day = db.query(
+            TradingPositionEvent.id,
+            TradingPositionEvent.position_id
+        ).join(
+            TradingPosition,
+            TradingPositionEvent.position_id == TradingPosition.id
+        ).filter(
+            TradingPosition.user_id == user_id,
+            func.date(TradingPositionEvent.event_date) == date_obj,
+            TradingPositionEvent.event_type == EventType.SELL,
+            TradingPositionEvent.realized_pnl.isnot(None)
+        ).all()
+        
+        event_ids = [e.id for e in events_on_day]
+        position_ids = list(set([e.position_id for e in events_on_day]))
+        
+        tickers_query = db.query(TradingPosition.ticker).filter(
+            TradingPosition.id.in_(position_ids)
+        ).distinct()
+        tickers = [t[0] for t in tickers_query.all()]
+        
+        daily_entry = {
+            "date": date_obj.isoformat(),
+            "net_pnl": round(net_pnl, 2),
+            "trades_count": trades_count,
+            "event_ids": event_ids,
+            "position_ids": position_ids,
+            "tickers": tickers
+        }
+        daily_pnl.append(daily_entry)
+        
+        if net_pnl > 0:
+            winning_days += 1
+            winning_day_total += net_pnl
+            if best_day is None or net_pnl > best_day['pnl']:
+                best_day = {"date": date_obj.isoformat(), "pnl": round(net_pnl, 2)}
+        elif net_pnl < 0:
+            losing_days += 1
+            losing_day_total += abs(net_pnl)
+            if worst_day is None or net_pnl < worst_day['pnl']:
+                worst_day = {"date": date_obj.isoformat(), "pnl": round(net_pnl, 2)}
+    
+    total_pnl = sum(day['net_pnl'] for day in daily_pnl)
+    trading_days = len(daily_pnl)
+    win_rate = (winning_days / trading_days * 100) if trading_days > 0 else 0
+    avg_winning_day = (winning_day_total / winning_days) if winning_days > 0 else 0
+    avg_losing_day = -(losing_day_total / losing_days) if losing_days > 0 else 0
+    
+    summary = {
+        "total_pnl": round(total_pnl, 2),
+        "trading_days": trading_days,
+        "winning_days": winning_days,
+        "losing_days": losing_days,
+        "win_rate": round(win_rate, 2),
+        "best_day": best_day,
+        "worst_day": worst_day,
+        "avg_winning_day": round(avg_winning_day, 2),
+        "avg_losing_day": round(avg_losing_day, 2)
+    }
+    
+    return {
+        "daily_pnl": daily_pnl,
+        "summary": summary
+    }
+
+
+def get_day_event_details(
+    db: Session,
+    user_id: int,
+    event_date: str,
+    event_ids: Optional[List[int]] = None
+) -> List[Dict[str, Any]]:
+    from sqlalchemy.orm import joinedload
+    
+    try:
+        target_date = datetime.fromisoformat(event_date).date()
+    except ValueError:
+        return []
+    
+    query = db.query(TradingPositionEvent).options(
+        joinedload(TradingPositionEvent.position)
+    ).join(
+        TradingPosition,
+        TradingPositionEvent.position_id == TradingPosition.id
+    ).filter(
+        TradingPosition.user_id == user_id,
+        func.date(TradingPositionEvent.event_date) == target_date,
+        TradingPositionEvent.event_type == EventType.SELL,
+        TradingPositionEvent.realized_pnl.isnot(None)
+    )
+    
+    if event_ids:
+        query = query.filter(TradingPositionEvent.id.in_(event_ids))
+    
+    events = query.order_by(TradingPositionEvent.event_date).all()
+    
+    event_details = []
+    for event in events:
+        event_details.append({
+            "event_id": event.id,
+            "position_id": event.position_id,
+            "ticker": event.position.ticker,
+            "event_type": event.event_type.value,
+            "event_date": event.event_date.isoformat(),
+            "shares": abs(event.shares),
+            "price": round(event.price, 2),
+            "realized_pnl": round(event.realized_pnl or 0, 2),
+            "notes": event.notes,
+            "strategy": event.position.strategy,
+            "setup_type": event.position.setup_type
+        })
+    
+    return event_details
