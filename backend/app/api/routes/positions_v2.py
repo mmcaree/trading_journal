@@ -32,11 +32,13 @@ class EventCreate(BaseModel):
     price: float
     event_date: Optional[datetime] = None
     stop_loss: Optional[float] = None
+    original_stop_loss: Optional[float] = None  # Original stop loss for risk calculation
     take_profit: Optional[float] = None
     notes: Optional[str] = None
 
 class EventUpdate(BaseModel):
     stop_loss: Optional[float] = None
+    original_stop_loss: Optional[float] = None
     take_profit: Optional[float] = None
     notes: Optional[str] = None
 
@@ -64,6 +66,8 @@ class PositionUpdate(BaseModel):
     notes: Optional[str] = None
     lessons: Optional[str] = None
     mistakes: Optional[str] = None
+    current_stop_loss: Optional[float] = None
+    current_take_profit: Optional[float] = None
 
 class JournalEntryCreate(BaseModel):
     entry_type: str  # 'note', 'lesson', 'mistake', 'analysis'
@@ -129,13 +133,14 @@ class EventResponse(BaseModel):
     event_date: datetime
     shares: int
     price: float
-    stop_loss: Optional[float]
-    take_profit: Optional[float]
-    notes: Optional[str]
+    stop_loss: Optional[float] = None
+    original_stop_loss: Optional[float] = None
+    take_profit: Optional[float] = None
+    notes: Optional[str] = None
     source: str
-    realized_pnl: Optional[float]
-    position_shares_before: Optional[int]
-    position_shares_after: Optional[int]
+    realized_pnl: Optional[float] = None
+    position_shares_before: Optional[int] = None
+    position_shares_after: Optional[int] = None
 
 class PositionSummaryResponse(BaseModel):
     position: PositionResponse
@@ -560,6 +565,7 @@ def get_position_details(
             shares=event.shares,
             price=event.price,
             stop_loss=event.stop_loss,
+            original_stop_loss=event.original_stop_loss,
             take_profit=event.take_profit,
             notes=event.notes,
             source=event.source.value,
@@ -715,6 +721,7 @@ def add_position_event(
                 price=event_data.price,
                 event_date=event_data.event_date,
                 stop_loss=event_data.stop_loss,
+                original_stop_loss=event_data.original_stop_loss,
                 take_profit=event_data.take_profit,
                 notes=event_data.notes
             )
@@ -725,6 +732,7 @@ def add_position_event(
                 price=event_data.price,
                 event_date=event_data.event_date,
                 stop_loss=event_data.stop_loss,
+                original_stop_loss=event_data.original_stop_loss,
                 take_profit=event_data.take_profit,
                 notes=event_data.notes
             )
@@ -738,6 +746,7 @@ def add_position_event(
             shares=event.shares,
             price=event.price,
             stop_loss=event.stop_loss,
+            original_stop_loss=event.original_stop_loss,
             take_profit=event.take_profit,
             notes=event.notes,
             source=event.source.value,
@@ -784,6 +793,7 @@ def get_position_events(
             shares=event.shares,
             price=event.price,
             stop_loss=event.stop_loss,
+            original_stop_loss=event.original_stop_loss,
             take_profit=event.take_profit,
             notes=event.notes,
             source=event.source.value,
@@ -858,6 +868,7 @@ def update_position_event(
         updated_event = position_service.update_event(
             event_id=event_id,
             stop_loss=event_update.stop_loss,
+            original_stop_loss=event_update.original_stop_loss,
             take_profit=event_update.take_profit,
             notes=event_update.notes
         )
@@ -869,6 +880,7 @@ def update_position_event(
             shares=updated_event.shares,
             price=updated_event.price,
             stop_loss=updated_event.stop_loss,
+            original_stop_loss=updated_event.original_stop_loss,
             take_profit=updated_event.take_profit,
             notes=updated_event.notes,
             source=updated_event.source.value,
@@ -928,6 +940,7 @@ def update_position_event_comprehensive(
             shares=updated_event.shares,
             price=updated_event.price,
             stop_loss=updated_event.stop_loss,
+            original_stop_loss=updated_event.original_stop_loss,
             take_profit=updated_event.take_profit,
             notes=updated_event.notes,
             source=updated_event.source.value,

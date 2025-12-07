@@ -88,6 +88,7 @@ class PositionService:
         price: float,
         event_date: Optional[datetime] = None,
         stop_loss: Optional[float] = None,
+        original_stop_loss: Optional[float] = None,
         take_profit: Optional[float] = None,
         notes: Optional[str] = None,
         source: EventSource = EventSource.MANUAL,
@@ -109,6 +110,7 @@ class PositionService:
             shares=shares,  # Always positive
             price=price,
             stop_loss=stop_loss,
+            original_stop_loss=original_stop_loss or stop_loss,  # Default to stop_loss if not specified
             take_profit=take_profit,
             notes=notes,
             source=source,
@@ -135,6 +137,7 @@ class PositionService:
         price: float,
         event_date: Optional[datetime] = None,
         stop_loss: Optional[float] = None,
+        original_stop_loss: Optional[float] = None,
         take_profit: Optional[float] = None,
         notes: Optional[str] = None,
         source: EventSource = EventSource.MANUAL,
@@ -162,6 +165,7 @@ class PositionService:
             shares=-shares,  # Always negative
             price=price,
             stop_loss=stop_loss,
+            original_stop_loss=original_stop_loss or stop_loss,
             take_profit=take_profit,
             notes=notes,
             source=source,
@@ -186,6 +190,7 @@ class PositionService:
         self,
         event_id: int,
         stop_loss: Optional[float] = None,
+        original_stop_loss: Optional[float] = None,
         take_profit: Optional[float] = None,
         notes: Optional[str] = None
     ) -> TradingPositionEvent:
@@ -197,6 +202,8 @@ class PositionService:
         # Update fields if provided
         if stop_loss is not None:
             event.stop_loss = stop_loss
+        if original_stop_loss is not None:
+            event.original_stop_loss = original_stop_loss
         if take_profit is not None:
             event.take_profit = take_profit
         if notes is not None:

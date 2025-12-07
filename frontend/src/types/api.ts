@@ -169,6 +169,7 @@ export interface PositionEvent {
   shares: number;
   price: number;
   stop_loss?: number;
+  original_stop_loss?: number;  // Original stop loss for risk calculation
   take_profit?: number;
   notes?: string;
   source: string;

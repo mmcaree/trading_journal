@@ -117,7 +117,8 @@ class TradingPositionEvent(Base):
     price = Column(Float, nullable=False)  # price per share
     
     # Risk management at time of event
-    stop_loss = Column(Float, nullable=True)
+    stop_loss = Column(Float, nullable=True)  # Current/active stop loss (can be updated)
+    original_stop_loss = Column(Float, nullable=True)  # Original stop loss at entry (for risk metrics)
     take_profit = Column(Float, nullable=True)
     
     # Event context

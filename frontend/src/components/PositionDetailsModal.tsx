@@ -302,15 +302,16 @@ const loading = loadingDetails || loadingAnalytics;
     try {
       const { updatePositionEvent } = await import('../services/positionsService');
       
+      // Update ORIGINAL stop loss for risk calculation (not current stop loss)
       await updatePositionEvent(eventId, {
-        stop_loss: newStopLoss
+        original_stop_loss: newStopLoss
       });
       
       await refetchDetails();
       
     } catch (err: any) {
-      console.error('Failed to update event stop loss:', err);
-      setError(err.message || 'Failed to update stop loss');
+      console.error('Failed to update event original stop loss:', err);
+      setError(err.message || 'Failed to update original stop loss');
     }
 };
 
@@ -915,6 +916,7 @@ const loading = loadingDetails || loadingAnalytics;
                 events={positionDetails?.events || []}
                 onUpdateStopLoss={handleUpdateEventStopLoss}
                 onEditEvent={handleEditEvent}
+                onRefreshPosition={refetchDetails}
                 disabled={loading}
                 accountBalance={accountBalance}
               />
