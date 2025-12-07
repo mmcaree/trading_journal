@@ -189,3 +189,4 @@ backend/migrations/run_remove_account_value.py
 PHASE_2.2_2.3_STATUS.md
 MERGE_CHECKLIST.md
 MIGRATION_NOTE.md
+backend/migrations/run_original_stop_loss_prod.py

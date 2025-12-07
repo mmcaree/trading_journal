@@ -158,7 +158,7 @@ class AccountValueService:
         
         target_date = utc_now()
         
-        starting_balance = user.initial_account_balance or user.default_account_size or 10000.0
+        starting_balance = user.initial_account_balance or 10000.0
         
         realized_pnl = self.db.query(
             func.coalesce(func.sum(TradingPosition.total_realized_pnl), 0.0)
@@ -218,16 +218,35 @@ class AccountValueService:
         # Otherwise default to last 90 days
         end_date = end_date or utc_now()
         if start_date is None:
-            # Use user's starting_balance_date if set, otherwise default to 90 days
-            start_date = user.starting_balance_date or (end_date - timedelta(days=90))
+            # Use user's starting_balance_date if set
+            if user.starting_balance_date:
+                start_date = user.starting_balance_date
+            else:
+                # If no starting_balance_date, find the earliest position or transaction date
+                earliest_position = self.db.query(func.min(TradingPosition.opened_at)).filter(
+                    TradingPosition.user_id == user_id
+                ).scalar()
+                
+                earliest_transaction = self.db.query(func.min(AccountTransaction.transaction_date)).filter(
+                    AccountTransaction.user_id == user_id
+                ).scalar()
+                
+                # Use the earliest date we can find, or default to 90 days
+                earliest_dates = [d for d in [earliest_position, earliest_transaction] if d is not None]
+                if earliest_dates:
+                    start_date = min(earliest_dates)
+                else:
+                    start_date = end_date - timedelta(days=360)
         
         # Get all significant events (position closes, deposits, withdrawals)
         events = []
         
-        # Closed positions
+        # Closed positions - get ALL positions closed after start_date
+        # (positions before start_date are already in the starting balance)
         closed_positions = self.db.query(TradingPosition).filter(
             TradingPosition.user_id == user_id,
-            TradingPosition.closed_at.between(start_date, end_date),
+            TradingPosition.closed_at >= start_date,
+            TradingPosition.closed_at <= end_date,
             TradingPosition.status == PositionStatus.CLOSED
         ).all()
         
@@ -238,10 +257,11 @@ class AccountValueService:
                 'value': pos.total_realized_pnl
             })
         
-        # Account transactions
+        # Account transactions - get ALL transactions after start_date
         transactions = self.db.query(AccountTransaction).filter(
             AccountTransaction.user_id == user_id,
-            AccountTransaction.transaction_date.between(start_date, end_date)
+            AccountTransaction.transaction_date >= start_date,
+            AccountTransaction.transaction_date <= end_date
         ).all()
         
         for txn in transactions:

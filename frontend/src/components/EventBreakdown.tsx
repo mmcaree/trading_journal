@@ -27,7 +27,7 @@ import {
   CheckCircle as CheckIcon,
   Warning as WarningIcon
 } from '@mui/icons-material';
-import { Position, PositionEvent, fetchPendingOrders, PendingOrder, updatePendingOrder } from '../services/positionsService';
+import { Position, PositionEvent, fetchPendingOrders, PendingOrder, updatePendingOrder, updatePosition, updateEventRiskManagement } from '../services/positionsService';
 import { useCurrency } from '../context/CurrencyContext';
 import api from '../services/apiConfig';
 
@@ -36,6 +36,7 @@ interface EventBreakdownProps {
   events: PositionEvent[];
   onUpdateStopLoss?: (eventId: number, newStopLoss: number | null) => void;
   onEditEvent?: (eventId: PositionEvent) => void;
+  onRefreshPosition?: () => Promise<void>;
   disabled?: boolean;
   accountBalance?: number;
 }
@@ -74,6 +75,7 @@ const EventBreakdown: React.FC<EventBreakdownProps> = ({
   events,
   onUpdateStopLoss,
   onEditEvent,
+  onRefreshPosition,
   disabled = false,
   accountBalance
 }) => {
@@ -163,17 +165,48 @@ const EventBreakdown: React.FC<EventBreakdownProps> = ({
   // Calculate risk metrics for each event
   const calculateEventRisk = (event: PositionEvent, currentPrice?: number) => {
     const eventValue = Math.abs(event.shares || 0) * (event.price || 0);
+    
+    // Stop loss for CURRENT management (Active Position Management)
     let stopLoss = event.stop_loss;
     let takeProfit = event.take_profit;
 
-    // For imported positions, if the event doesn't have a stop loss, try to find it from pending orders
-    if (!stopLoss && event.source === 'import' && pendingOrders.length > 0) {
-      stopLoss = findStopLossForImportedEvent(event);
+    // Only apply fallbacks for BUY events (sell events don't need stop losses)
+    if (event.event_type === 'buy') {
+      // For imported positions, if the event doesn't have a current stop loss, try fallbacks
+      if (!stopLoss && event.source === 'import') {
+        // First try to find from pending orders
+        if (pendingOrders.length > 0) {
+          stopLoss = findStopLossForImportedEvent(event);
+        }
+        // If still no stop loss, use position-level stop loss as fallback
+        if (!stopLoss) {
+          stopLoss = position.current_stop_loss;
+        }
+      }
     }
-    // Calculate original risk using THIS event's stop loss (not the first buy's stop loss)
+    
+    // Original stop loss for RISK CALCULATIONS (Event History - Original Risk)
+    // This should NOT be updated when managing position - only via data correction
+    let originalStopLoss = event.original_stop_loss;
+    
+    // Only apply fallbacks for BUY events (sell events don't need original stop loss)
+    if (event.event_type === 'buy' && !originalStopLoss) {
+      // Try current stop loss
+      originalStopLoss = stopLoss;
+      // If still nothing and imported, try pending orders
+      if (!originalStopLoss && event.source === 'import' && pendingOrders.length > 0) {
+        originalStopLoss = findStopLossForImportedEvent(event);
+      }
+      // Last resort: position-level stop loss
+      if (!originalStopLoss) {
+        originalStopLoss = position.current_stop_loss;
+      }
+    }
+    
+    // Calculate ORIGINAL RISK using original_stop_loss (what we risked at entry)
     // Each buy event should show the risk taken at THAT specific entry
-    const originalRisk = stopLoss && event.event_type === 'buy'
-      ? Math.abs((event.price || 0) - stopLoss) * Math.abs(event.shares || 0)
+    const originalRisk = originalStopLoss && event.event_type === 'buy'
+      ? Math.abs((event.price || 0) - originalStopLoss) * Math.abs(event.shares || 0)
       : 0;
     
     // Get account value at this specific event's date (dynamically calculated)
@@ -217,7 +250,8 @@ const EventBreakdown: React.FC<EventBreakdownProps> = ({
       currentRiskPercent,
       profitPotential,
       riskRewardRatio,
-      stopLoss, // Include the found stop loss
+      stopLoss, // Current stop loss for position management
+      originalStopLoss, // Original stop loss for risk calculations
       stopIsInProfit: event.event_type === 'buy' && currentPrice && stopLoss ? 
         ((event.shares || 0) > 0 ? stopLoss >= (event.price || 0) : stopLoss <= (event.price || 0)) : false
     };
@@ -293,10 +327,16 @@ const EventBreakdown: React.FC<EventBreakdownProps> = ({
       if (event.event_type === 'buy') {
         let stopLoss = event.stop_loss;
         
-        // For imported buy events without stop loss, try to find from pending orders
-        if (!stopLoss && event.source === 'import' && pendingOrders.length > 0) {
-          stopLoss = findStopLossForImportedEvent(event);
-          // Found stop loss from pending orders for imported event
+        // For imported buy events without stop loss, try multiple fallbacks
+        if (!stopLoss && event.source === 'import') {
+          // First try to find from pending orders
+          if (pendingOrders.length > 0) {
+            stopLoss = findStopLossForImportedEvent(event);
+          }
+          // If still no stop loss, use position-level stop loss as fallback
+          if (!stopLoss) {
+            stopLoss = position.current_stop_loss;
+          }
         }
         
         // Use original stop loss from first buy event for consistent Original Risk calculation
@@ -390,38 +430,10 @@ const EventBreakdown: React.FC<EventBreakdownProps> = ({
     const avgEntryPrice = totalBuyShares > 0 ? totalBuyValue / totalBuyShares : 0;
     
     if (currentPendingSellOrders.length === 0) {
-      // No current pending orders - create single sub-lot with all shares
-      // But still try to find the most recent stop loss from historical orders
-      const snapshotAccountValue = position.account_value_at_entry || accountBalance || 0;
-      
-      // Look for the most recent stop loss from any sell orders (including cancelled ones)
-      const mostRecentStopLoss = allSellOrders
-        .filter(order => order.stop_loss || order.price) // Either has explicit stop_loss or use price
-        .sort((a, b) => new Date(b.placed_time).getTime() - new Date(a.placed_time).getTime())[0];
-      
-      const stopLoss = mostRecentStopLoss?.stop_loss || mostRecentStopLoss?.price;
-      
-      // Use original stop loss from first buy event for consistent Original Risk calculation
-      const originalStopLoss = getOriginalStopLoss();
-      const originalRisk = originalStopLoss 
-        ? Math.abs(avgEntryPrice - originalStopLoss) * currentShares
-        : 0;
-      const originalRiskPercent = originalRisk > 0 && snapshotAccountValue > 0
-        ? (originalRisk / snapshotAccountValue) * 100 
-        : 0;
-      
-      return [{
-        buyEventId: 0,
-        buyPrice: avgEntryPrice,
-        buyDate: buyEvents[0]?.event_date || '',
-        originalShares: currentShares,
-        remainingShares: currentShares,
-        stopLoss: stopLoss,
-        originalRisk,
-        originalRiskPercent,
-        currentRisk: 0,
-        currentRiskPercent: 0
-      }];
+      // No current pending orders - use event-based calculation to preserve individual stop losses
+      // This handles cases where stop losses are stored per-event (from manual adds or imports with event-level stops)
+      console.log('📊 No pending orders - falling back to event-based sub-lot calculation');
+      return calculateMixedSubLots();
     }
     
     // Group current pending orders by stop loss price
@@ -729,7 +741,27 @@ const EventBreakdown: React.FC<EventBreakdownProps> = ({
     );
 
     if (matchingOrders.length === 0) {
-      throw new Error('No matching pending orders found for this sub-lot');
+      console.warn('No matching pending orders found for this sub-lot. Updating event stop loss directly.');
+      
+      // If we have a specific buy event, update that event's stop loss
+      if (subLot.buyEventId && subLot.buyEventId > 0) {
+        await updateEventRiskManagement(subLot.buyEventId, {
+          stop_loss: newStopLoss || undefined
+        });
+        console.log(`Updated event ${subLot.buyEventId} stop loss to ${newStopLoss}`);
+      } else {
+        // No specific event (aggregated sub-lot) - update position level
+        await updatePosition(position.id, {
+          current_stop_loss: newStopLoss || undefined
+        });
+        console.log(`Updated position ${position.id} stop loss to ${newStopLoss}`);
+      }
+      
+      // Refresh position data to show updated stop loss
+      if (onRefreshPosition) {
+        await onRefreshPosition();
+      }
+      return;
     }
 
     // Update each matching order
@@ -947,11 +979,12 @@ const EventBreakdown: React.FC<EventBreakdownProps> = ({
 
       <Alert severity="info" sx={{ mb: 2 }}>
         <Typography variant="body2">
-          <strong>Historical Events & Data Correction:</strong> View all buy/sell events for this position and correct any incorrect stop loss data. 
-          Original risk shows risk at time of entry. Current risk shows risk based on estimated current price ({formatCurrency(estimatedCurrentPrice)}). 
-          <br /><strong>For active position management:</strong> Use the "Active Position Management" section above to manage stop losses for your current holdings.
+          <strong>Historical Events & Data Correction:</strong> View all buy/sell events with original risk metrics.
+          <br /><strong>Stop Loss (Original):</strong> The stop loss at time of entry - used for Original Risk calculation. Edit to correct historical data.
+          <br /><strong>Original Risk:</strong> The risk you took at entry based on original stop loss. Does NOT change when you update current stop losses.
+          <br /><strong>For active position management:</strong> Use "Active Position Management" above to update current stop losses for your holdings.
           {hasImportEvents && (
-            <><br /><strong>Imported Position:</strong> Events imported from broker data - edit if stop loss data is incorrect.</>
+            <><br /><strong>Imported Position:</strong> Events imported from broker - edit if original stop loss data is incorrect.</>
           )}
         </Typography>
       </Alert>
@@ -973,7 +1006,11 @@ const EventBreakdown: React.FC<EventBreakdownProps> = ({
               <TableCell align="left">Shares</TableCell>
               <TableCell align="left">Price</TableCell>
               <TableCell align="left">Value</TableCell>
-              <TableCell align="left">Stop Loss</TableCell>
+              <TableCell align="left">
+                <Tooltip title="Original stop loss at entry (used for Original Risk calculation)">
+                  <span>Stop Loss (Original) ⓘ</span>
+                </Tooltip>
+              </TableCell>
               <TableCell align="left">Original Risk</TableCell>
               <TableCell align="left">Actions</TableCell>
             </TableRow>
@@ -1030,6 +1067,7 @@ const EventBreakdown: React.FC<EventBreakdownProps> = ({
                         onChange={(e) => handleStopLossChange(event.id, e.target.value)}
                         error={!!editState.error}
                         helperText={editState.error}
+                        placeholder="Original Stop Loss"
                         InputProps={{
                           startAdornment: <InputAdornment position="start">$</InputAdornment>
                         }}
@@ -1037,25 +1075,16 @@ const EventBreakdown: React.FC<EventBreakdownProps> = ({
                       />
                     ) : (
                       <Box sx={{ display: 'flex', alignItems: 'left', justifyContent: 'left' }}>
-                        {(riskMetrics?.stopLoss || event.stop_loss) ? (
+                        {(riskMetrics?.originalStopLoss || event.original_stop_loss) ? (
                           <Box sx={{ textAlign: 'left' }}>
                             <Typography variant="body2" fontWeight={500}>
-                              {formatCurrency((riskMetrics?.stopLoss || event.stop_loss) as number)}
+                              {formatCurrency((riskMetrics?.originalStopLoss || event.original_stop_loss) as number)}
                             </Typography>
-                            {riskMetrics?.stopLoss && !event.stop_loss && (
+                            {riskMetrics?.originalStopLoss && !event.original_stop_loss && (
                               <Chip 
-                                label="From Orders" 
+                                label="Fallback" 
                                 size="small" 
-                                color="info"
-                                variant="outlined"
-                                sx={{ fontSize: '0.6rem', height: 16, ml: 0.5 }}
-                              />
-                            )}
-                            {riskMetrics?.stopIsInProfit && (
-                              <Chip 
-                                label="In Profit" 
-                                size="small" 
-                                color="success"
+                                color="warning"
                                 variant="outlined"
                                 sx={{ fontSize: '0.6rem', height: 16, ml: 0.5 }}
                               />
@@ -1121,7 +1150,7 @@ const EventBreakdown: React.FC<EventBreakdownProps> = ({
                         <Tooltip title="Edit historical stop loss data">
                           <IconButton 
                             size="small" 
-                            onClick={() => handleStartEdit(event.id, event.stop_loss || undefined)}
+                            onClick={() => handleStartEdit(event.id, event.original_stop_loss || undefined)}
                             disabled={disabled}
                             color="secondary"
                           >

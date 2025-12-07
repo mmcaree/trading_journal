@@ -237,6 +237,8 @@ export async function updatePosition(positionId: number, updates: {
   notes?: string;
   lessons?: string;
   mistakes?: string;
+  current_stop_loss?: number;
+  current_take_profit?: number;
 }): Promise<Position> {
   try {
     const response = await api.put(`/api/v2/positions/${positionId}`, updates);
@@ -722,6 +724,7 @@ function calculateDaysHeld(position: Position): number {
 
 export interface EventUpdateData {
   stop_loss?: number | null;
+  original_stop_loss?: number | null;
   take_profit?: number | null;
   notes?: string;
 }
