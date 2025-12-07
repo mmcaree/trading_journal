@@ -18,7 +18,7 @@ import {
 } from '@mui/material';
 import { useYearCalendar, useMonthCalendar } from '../hooks/useCalendarData';
 import { CalendarDay } from './CalendarDay';
-import DayDetailsModal from './dayDetailsModal';
+import DayDetailsModal from './DayDetailsModal';
 
 export type TimeScale = '1M' | '3M' | '6M' | 'YTD' | '1YR' | 'ALL';
 
