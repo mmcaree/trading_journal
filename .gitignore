@@ -190,3 +190,7 @@ PHASE_2.2_2.3_STATUS.md
 MERGE_CHECKLIST.md
 MIGRATION_NOTE.md
 backend/migrations/run_original_stop_loss_prod.py
+CODE_REVIEW_RISK_CALCULATION.md
+backend/migrations/run_risk_validation_constraints_prod.py
+backend/scripts/recalculate_risk_percentages.py
+backend/migrations/add_risk_validation_constraints.sql

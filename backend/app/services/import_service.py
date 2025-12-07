@@ -132,13 +132,17 @@ class IndividualPositionTracker:
         event_type = self._map_event_type(event_data['side'])
         shares = self._calculate_event_shares(event_data)
         
+        # Extract stop loss (if provided)
+        stop_loss_value = float(event_data.get('stop_loss', 0)) or None
+        
         return TradingPositionEvent(
             position_id=position.id,
             event_type=event_type,
             event_date=event_data['filled_time'],
             shares=shares,
             price=float(event_data['avg_price']),
-            stop_loss=float(event_data.get('stop_loss', 0)) or None,
+            stop_loss=stop_loss_value,
+            original_stop_loss=stop_loss_value,  # Set original_stop_loss to same value at import
             notes=event_data.get('notes', ''),
             source=EventSource.IMPORT,
             source_id=f"import_{utc_now().isoformat()}",

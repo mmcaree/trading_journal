@@ -112,9 +112,7 @@ const Settings: React.FC = () => {
   const [accountSettings, setAccountSettings] = useState<AccountSettings>(accountService.getAccountSettings());
   const [tempAccountBalance, setTempAccountBalance] = useState<string>(accountService.getCurrentBalance().toString());
   const [tempStartingBalance, setTempStartingBalance] = useState<string>(accountService.getAccountSettings().starting_balance.toString());
-  const [startingBalanceDate, setStartingBalanceDate] = useState<string>(
-    new Date().toISOString().split('T')[0] // Default to today
-  );
+  const [startingBalanceDate, setStartingBalanceDate] = useState<string>(''); // Empty until loaded from API
 
   // Transaction state
   const [transactions, setTransactions] = useState<AccountTransaction[]>([]);
@@ -281,7 +279,10 @@ const Settings: React.FC = () => {
         const updatedSettings = accountService.getAccountSettings();
         setAccountSettings(updatedSettings);
         
-        setAlert({ type: 'success', message: 'Starting balance updated successfully!' });
+        setAlert({ 
+          type: 'success', 
+          message: 'Starting balance updated successfully! Your risk percentages are being recalculated in the background and will update shortly.' 
+        });
       }
     } catch (error: any) {
       setAlert({ type: 'error', message: error.message });
@@ -1042,7 +1043,7 @@ const Settings: React.FC = () => {
                   InputLabelProps={{
                     shrink: true,
                   }}
-                  helperText="When did you start with this balance? (Optional)"
+                  helperText="When did you start with this balance? (Optional - defaults to earliest trade if not set)"
                   sx={{ mb: 2 }}
                 />
 
@@ -1062,15 +1063,17 @@ const Settings: React.FC = () => {
                 {/* Info about what happens */}
                 <Alert severity="info">
                   <Typography variant="body2">
-                    <strong>What happens when you update?</strong>
+                    <strong>⚡ Automatic Updates</strong>
                     <br />
-                    • All growth percentages will be recalculated
+                    When you update your starting balance:
+                    <br />
+                    • All growth percentages recalculate instantly
+                    <br />
+                    • Risk percentages update automatically in the background
                     <br />
                     • Historical data remains unchanged
                     <br />
-                    • Current account value stays the same
-                    <br />
-                    • Only affects percentage calculations
+                    • No manual migration needed!
                   </Typography>
                 </Alert>
 
@@ -1084,7 +1087,7 @@ const Settings: React.FC = () => {
                   </Typography>
                   {startingBalanceDate && (
                     <Typography variant="body2" color="text.secondary">
-                      Starting Date: {new Date(startingBalanceDate).toLocaleDateString()}
+                      Starting Date: {startingBalanceDate}
                     </Typography>
                   )}
                 </Box>
