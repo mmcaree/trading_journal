@@ -164,9 +164,9 @@ export const PnLCalendar: React.FC<PnLCalendarProps> = ({
             <Grid item xs={3}>
               <Card sx={{ bgcolor: 'success.light' }}>
                 <CardContent>
-                  <Typography variant="body2" color="success.contrastText">Win Rate</Typography>
+                  <Typography variant="body2" color="success.contrastText">Daily Win Rate</Typography>
                   <Typography variant="h6" color="success.contrastText">
-                    {calendarData.summary.win_rate.toFixed(1)}%
+                    {calendarData.summary.daily_win_rate.toFixed(1)}%
                   </Typography>
                 </CardContent>
               </Card>
@@ -278,9 +278,9 @@ export const PnLCalendar: React.FC<PnLCalendarProps> = ({
               <Typography variant="h5">{calendarData.summary.trading_days}</Typography>
             </Grid>
             <Grid item xs={3}>
-              <Typography variant="body2" color="text.secondary">Win Rate</Typography>
+              <Typography variant="body2" color="text.secondary">Daily Win Rate</Typography>
               <Typography variant="h5" color="success.main">
-                {calendarData.summary.win_rate.toFixed(1)}%
+                {calendarData.summary.daily_win_rate.toFixed(1)}%
               </Typography>
             </Grid>
             <Grid item xs={3}>

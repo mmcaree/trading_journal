@@ -699,7 +699,7 @@ def get_account_growth_metrics(db: Session, user_id: int) -> Dict[str, Any]:
         'calculation': breakdown['calculation']
     }
 
-@cached(prefix='pnl_calendar', ttl=TTL_MEDIUM)
+@cached(prefix='pnl_calendar', ttl=TTL_SHORT)
 def get_pnl_calendar_data(
     db: Session,
     user_id: int,
@@ -709,7 +709,7 @@ def get_pnl_calendar_data(
     end_date: Optional[str] = None
 ) -> Dict[str, Any]:
     """
-    Get daily P&L calendar data with Redis caching (30 min TTL)
+    Get daily P&L calendar data with Redis caching (5 min TTL)
     Cache is automatically invalidated when positions are updated
     """
     from sqlalchemy import func, extract
@@ -844,7 +844,7 @@ def get_pnl_calendar_data(
     
     total_pnl = sum(day['net_pnl'] for day in daily_pnl)
     trading_days = len(daily_pnl)
-    win_rate = (winning_days / trading_days * 100) if trading_days > 0 else 0
+    daily_win_rate = (winning_days / trading_days * 100) if trading_days > 0 else 0
     avg_winning_day = (winning_day_total / winning_days) if winning_days > 0 else 0
     avg_losing_day = -(losing_day_total / losing_days) if losing_days > 0 else 0
     
@@ -853,7 +853,7 @@ def get_pnl_calendar_data(
         "trading_days": trading_days,
         "winning_days": winning_days,
         "losing_days": losing_days,
-        "win_rate": round(win_rate, 2),
+        "daily_win_rate": round(daily_win_rate, 2),  # Renamed for clarity
         "best_day": best_day,
         "worst_day": worst_day,
         "avg_winning_day": round(avg_winning_day, 2),
@@ -866,7 +866,7 @@ def get_pnl_calendar_data(
     }
 
 
-@cached(prefix='day_events', ttl=TTL_MEDIUM)
+@cached(prefix='day_events', ttl=TTL_SHORT)
 def get_day_event_details(
     db: Session,
     user_id: int,
@@ -874,7 +874,7 @@ def get_day_event_details(
     event_ids: Optional[List[int]] = None
 ) -> List[Dict[str, Any]]:
     """
-    Get event details for a specific day with Redis caching (30 min TTL)
+    Get event details for a specific day with Redis caching (5 min TTL)
     """
     from sqlalchemy.orm import joinedload
     

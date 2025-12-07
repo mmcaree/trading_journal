@@ -40,7 +40,7 @@ class CalendarSummary(BaseModel):
     trading_days: int
     winning_days: int
     losing_days: int
-    win_rate: float
+    daily_win_rate: float  # Winning days / Total trading days
     best_day: Optional[dict] = None
     worst_day: Optional[dict] = None
     avg_winning_day: float

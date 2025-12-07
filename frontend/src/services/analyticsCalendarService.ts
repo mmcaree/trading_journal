@@ -28,7 +28,7 @@ export interface CalendarSummary {
   trading_days: number;
   winning_days: number;
   losing_days: number;
-  win_rate: number;
+  daily_win_rate: number;  // Winning days / Total trading days
   best_day?: { date: string; pnl: number };
   worst_day?: { date: string; pnl: number };
   avg_winning_day: number;
