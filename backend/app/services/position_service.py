@@ -12,6 +12,7 @@ from sqlalchemy import desc, asc
 from decimal import Decimal, ROUND_HALF_UP
 
 from app.utils.datetime_utils import utc_now
+from app.utils.cache import CacheInvalidator
 
 from app.models.position_models import (
     TradingPosition, TradingPositionEvent, PositionStatus, EventType, EventSource
@@ -28,6 +29,17 @@ class PositionService:
     def __init__(self, db: Session):
         self.db = db
         self.account_value_service = AccountValueService(db)
+    
+    def _invalidate_caches(self, user_id: int):
+        """Invalidate all position-related caches after mutations"""
+        try:
+            # Invalidate calendar caches (calendar data depends on position events)
+            CacheInvalidator.invalidate_pattern('pnl_calendar:*')
+            CacheInvalidator.invalidate_pattern('day_events:*')
+            logger.debug(f"Invalidated calendar caches for user {user_id}")
+        except Exception as e:
+            # Don't fail the operation if cache invalidation fails
+            logger.warning(f"Failed to invalidate caches for user {user_id}: {e}")
     
     # === Position Creation ===
     
@@ -218,6 +230,7 @@ class PositionService:
             position.account_value_at_entry = account_value_at_entry
         
         self.db.commit()
+        self._invalidate_caches(position.user_id)
     
     def sell_shares(
         self,
@@ -523,8 +536,9 @@ class PositionService:
         # Recalculate current risk for open positions
         if position.status == PositionStatus.OPEN:
             self._recalculate_current_risk(position)
-        
+
         self.db.commit()
+        self._invalidate_caches(position.user_id)
     
     def _calculate_sell_pnl(self, position_id: int, shares_to_sell: int, sell_price: float) -> float:
         """Calculate P&L for a sell using FIFO cost basis"""

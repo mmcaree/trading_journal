@@ -41,11 +41,12 @@ import { CurrencyProvider } from './context/CurrencyContext';
 const queryClient = new QueryClient({
   defaultOptions: {
     queries: {
-      staleTime: 30000,        // 30 seconds before data considered stale
-      gcTime: 300000,       // 5 minutes in cache after component unmounts
-      refetchOnWindowFocus: false, // Don't refetch on window focus
-      refetchOnMount: false,   // Don't always refetch on mount if data exists
-      retry: 1,                // Only retry once on failure
+      staleTime: 30000, // 30 seconds - data considered fresh for this duration
+      gcTime: 5 * 60 * 1000, // 5 minutes - cache kept in memory for this long
+      refetchOnWindowFocus: true, // Refetch when user returns to tab (for fresh data)
+      refetchOnMount: false, // Don't always refetch on mount if data exists
+      refetchOnReconnect: true, // Refetch when internet reconnects
+      retry: 1, // Only retry once on failure
     },
     mutations: {
       retry: 1,

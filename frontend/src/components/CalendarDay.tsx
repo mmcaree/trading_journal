@@ -44,6 +44,7 @@ export const CalendarDay: React.FC<CalendarDayProps> = ({
         height: 90,
         border: isToday ? '2px solid' : '1px solid',
         borderColor: isToday ? 'primary.main' : 'divider',
+        borderRadius: 2, // Add rounded corners
         bgcolor: bgColor,
         cursor: hasActivity ? 'pointer' : 'default',
         '&:hover': hasActivity
@@ -63,8 +64,8 @@ export const CalendarDay: React.FC<CalendarDayProps> = ({
           <Typography
             variant="caption"
             sx={{
-              fontSize: '0.75rem',
-              fontWeight: isToday ? 'bold' : 'normal',
+              fontSize: '1.0rem',
+              fontWeight: 'bold',
               color: isToday ? 'primary.main' : 'text.primary'
             }}
           >
@@ -77,7 +78,7 @@ export const CalendarDay: React.FC<CalendarDayProps> = ({
                 variant="body2"
                 sx={{
                   fontWeight: 'bold',
-                  color: pnl >= 0 ? 'success.main' : 'error.main',
+                  color: 'text.primary', // White/dark grey for better contrast
                   mt: 0.5,
                   fontSize: '0.875rem'
                 }}
@@ -88,7 +89,7 @@ export const CalendarDay: React.FC<CalendarDayProps> = ({
               <Typography
                 variant="caption"
                 sx={{
-                  fontSize: '0.65rem',
+                  fontSize: '0.875rem',
                   color: 'text.secondary',
                   display: 'block',
                   mt: 0.25

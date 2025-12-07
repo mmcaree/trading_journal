@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { useQuery } from '@tanstack/react-query';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { 
   Box, 
   Typography, 
@@ -46,6 +46,7 @@ import { usePrefetch, POSITIONS_PAGINATED_KEY, CACHE_TTL } from '../hooks/usePre
 
 
 const Positions: React.FC = () => {
+  const queryClient = useQueryClient();
   const [selectedForComparison, setSelectedForComparison] = useState<number[]>([]);
   
   const [searchParams, setSearchParams] = useSearchParams();
@@ -208,7 +209,8 @@ const Positions: React.FC = () => {
   };
 
   const handleAddToPositionSuccess = () => {
-    refetchPositions();
+    // Invalidate positions cache for instant UI update
+    queryClient.invalidateQueries({ queryKey: ['positions-paginated'] });
   };
 
   const handleOpenSellFromPosition = (position: Position) => {
@@ -220,7 +222,10 @@ const Positions: React.FC = () => {
   };
 
   const handleSellFromPositionSuccess = () => {
-    refetchPositions();
+    // Invalidate positions cache for instant UI update
+    queryClient.invalidateQueries({ queryKey: ['positions-paginated'] });
+    // Invalidate calendar cache since P&L changed from sale
+    queryClient.invalidateQueries({ queryKey: ['pnl-calendar'] });
   };
 
   const handleOpenUpdateStopLoss = (position: Position) => {
@@ -232,7 +237,9 @@ const Positions: React.FC = () => {
   };
 
   const handleUpdateStopLossSuccess = () => {
-    refetchPositions();
+    // Invalidate positions cache to show updated stop loss and current risk %
+    queryClient.invalidateQueries({ queryKey: ['positions-paginated'] });
+    // Calendar doesn't need invalidation (stop loss doesn't affect P&L)
   };
 
   const handleOpenPositionDetails = (position: Position) => {
@@ -244,11 +251,13 @@ const Positions: React.FC = () => {
   };
 
   const handlePositionDetailsRefresh = () => {
-    refetchPositions();
+    // Invalidate positions cache for any changes from position details modal
+    queryClient.invalidateQueries({ queryKey: ['positions-paginated'] });
   };
 
   const handleCreatePositionSuccess = () => {
-    refetchPositions();
+    // Invalidate positions cache after creating new position
+    queryClient.invalidateQueries({ queryKey: ['positions-paginated'] });
   };
 
   // Comparison handlers
@@ -632,7 +641,10 @@ const Positions: React.FC = () => {
         open={importModal}
         onClose={() => setImportModal(false)}
         onImportSuccess={() => {
-          refetchPositions();
+          // Invalidate all caches after CSV import (positions and calendar affected)
+          queryClient.invalidateQueries({ queryKey: ['positions-paginated'] });
+          queryClient.invalidateQueries({ queryKey: ['pnl-calendar'] });
+          queryClient.invalidateQueries({ queryKey: ['day-events'] }); // Clear day details cache
           setImportModal(false);
         }}
       />

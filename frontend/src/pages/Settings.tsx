@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import { useQueryClient } from '@tanstack/react-query';
 import { PASSWORD_MIN_LENGTH, HELPER_TEXT } from '../utils/validationSchemas';
 import { 
   Box, 
@@ -73,6 +74,7 @@ import {
 } from '../services/transactionService';
 
 const Settings: React.FC = () => {
+  const queryClient = useQueryClient();
   const { user, setUser } = useAuth();
   const [loading, setLoading] = useState(false);
   const [alert, setAlert] = useState<{ type: 'success' | 'error', message: string } | null>(null);
@@ -278,6 +280,9 @@ const Settings: React.FC = () => {
         accountService.updateStartingBalance(newStartingBalance);
         const updatedSettings = accountService.getAccountSettings();
         setAccountSettings(updatedSettings);
+        
+        // Invalidate positions cache since starting balance affects current risk %
+        queryClient.invalidateQueries({ queryKey: ['positions-paginated'] });
         
         setAlert({ 
           type: 'success', 

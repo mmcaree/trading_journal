@@ -371,10 +371,11 @@ export const EquityCurveChart: React.FC<EquityCurveProps> = ({
               stroke={CHART_COLORS.primary}
               strokeWidth={2}
               dot={(props: any) => {
-                const { cx, cy, payload } = props;
+                const { cx, cy, payload, key } = props;
                 const hasEvent = payload.event_type;
                 return (
                   <circle
+                    key={key || `dot-${cx}-${cy}`}
                     cx={cx}
                     cy={cy}
                     r={hasEvent ? 4 : 2}

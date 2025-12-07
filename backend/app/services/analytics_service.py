@@ -13,6 +13,7 @@ import statistics
 from app.models.position_models import TradingPosition, TradingPositionEvent, PositionStatus, EventType, AccountTransaction, User
 from app.models.schemas import PerformanceMetrics, SetupPerformance
 from app.services.account_value_service import AccountValueService
+from app.utils.cache import cached, TTL_MEDIUM, TTL_SHORT
 
 
 def get_performance_metrics( 
@@ -698,6 +699,7 @@ def get_account_growth_metrics(db: Session, user_id: int) -> Dict[str, Any]:
         'calculation': breakdown['calculation']
     }
 
+@cached(prefix='pnl_calendar', ttl=TTL_MEDIUM)
 def get_pnl_calendar_data(
     db: Session,
     user_id: int,
@@ -706,6 +708,10 @@ def get_pnl_calendar_data(
     start_date: Optional[str] = None,
     end_date: Optional[str] = None
 ) -> Dict[str, Any]:
+    """
+    Get daily P&L calendar data with Redis caching (30 min TTL)
+    Cache is automatically invalidated when positions are updated
+    """
     from sqlalchemy import func, extract
     
     query = db.query(
@@ -743,6 +749,54 @@ def get_pnl_calendar_data(
     
     results = query.all()
     
+    # PERFORMANCE OPTIMIZATION: Fetch all events for the date range in ONE query
+    # This avoids N+1 queries (one per day)
+    events_query = db.query(
+        func.date(TradingPositionEvent.event_date).label('event_date'),
+        TradingPositionEvent.id.label('event_id'),
+        TradingPositionEvent.position_id,
+        TradingPosition.ticker
+    ).join(
+        TradingPosition,
+        TradingPositionEvent.position_id == TradingPosition.id
+    ).filter(
+        TradingPosition.user_id == user_id,
+        TradingPositionEvent.event_type == EventType.SELL,
+        TradingPositionEvent.realized_pnl.isnot(None)
+    )
+    
+    # Apply same date filters
+    if year:
+        events_query = events_query.filter(extract('year', TradingPositionEvent.event_date) == year)
+    if month:
+        events_query = events_query.filter(extract('month', TradingPositionEvent.event_date) == month)
+    if start_date:
+        try:
+            start_dt = datetime.fromisoformat(start_date.replace('Z', '+00:00'))
+            events_query = events_query.filter(TradingPositionEvent.event_date >= start_dt)
+        except ValueError:
+            pass
+    if end_date:
+        try:
+            end_dt = datetime.fromisoformat(end_date.replace('Z', '+00:00'))
+            events_query = events_query.filter(TradingPositionEvent.event_date <= end_dt)
+        except ValueError:
+            pass
+    
+    all_events = events_query.all()
+    
+    # Group events by date for fast lookup
+    events_by_date = {}
+    for event in all_events:
+        date_key = event.event_date if isinstance(event.event_date, date) else event.event_date
+        if date_key not in events_by_date:
+            events_by_date[date_key] = []
+        events_by_date[date_key].append({
+            'event_id': event.event_id,
+            'position_id': event.position_id,
+            'ticker': event.ticker
+        })
+    
     daily_pnl = []
     winning_days = 0
     losing_days = 0
@@ -761,26 +815,11 @@ def get_pnl_calendar_data(
         else:
             date_obj = event_date
         
-        events_on_day = db.query(
-            TradingPositionEvent.id,
-            TradingPositionEvent.position_id
-        ).join(
-            TradingPosition,
-            TradingPositionEvent.position_id == TradingPosition.id
-        ).filter(
-            TradingPosition.user_id == user_id,
-            func.date(TradingPositionEvent.event_date) == date_obj,
-            TradingPositionEvent.event_type == EventType.SELL,
-            TradingPositionEvent.realized_pnl.isnot(None)
-        ).all()
-        
-        event_ids = [e.id for e in events_on_day]
-        position_ids = list(set([e.position_id for e in events_on_day]))
-        
-        tickers_query = db.query(TradingPosition.ticker).filter(
-            TradingPosition.id.in_(position_ids)
-        ).distinct()
-        tickers = [t[0] for t in tickers_query.all()]
+        # Get events for this day from pre-fetched data (O(1) lookup)
+        day_events = events_by_date.get(date_obj, [])
+        event_ids = [e['event_id'] for e in day_events]
+        position_ids = list(set([e['position_id'] for e in day_events]))
+        tickers = list(set([e['ticker'] for e in day_events]))
         
         daily_entry = {
             "date": date_obj.isoformat(),
@@ -827,12 +866,16 @@ def get_pnl_calendar_data(
     }
 
 
+@cached(prefix='day_events', ttl=TTL_MEDIUM)
 def get_day_event_details(
     db: Session,
     user_id: int,
     event_date: str,
     event_ids: Optional[List[int]] = None
 ) -> List[Dict[str, Any]]:
+    """
+    Get event details for a specific day with Redis caching (30 min TTL)
+    """
     from sqlalchemy.orm import joinedload
     
     try:
