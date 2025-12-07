@@ -12,6 +12,7 @@ from datetime import datetime, date
 from decimal import Decimal, InvalidOperation
 from sqlalchemy.orm import Session
 from fastapi import HTTPException
+from app.services.position_service import PositionService
 
 from app.models.position_models import (
     TradingPosition, 
@@ -46,6 +47,7 @@ class IndividualPositionTracker:
         self.db = db
         self.user_id = user_id
         self.account_value_service = account_value_service
+        self.position_service = PositionService(db)
         self.symbol_positions: Dict[str, List[TradingPosition]] = {}
         self.position_counter = 0
     
@@ -130,13 +132,17 @@ class IndividualPositionTracker:
         event_type = self._map_event_type(event_data['side'])
         shares = self._calculate_event_shares(event_data)
         
+        # Extract stop loss (if provided)
+        stop_loss_value = float(event_data.get('stop_loss', 0)) or None
+        
         return TradingPositionEvent(
             position_id=position.id,
             event_type=event_type,
             event_date=event_data['filled_time'],
             shares=shares,
             price=float(event_data['avg_price']),
-            stop_loss=float(event_data.get('stop_loss', 0)) or None,
+            stop_loss=stop_loss_value,
+            original_stop_loss=stop_loss_value,  # Set original_stop_loss to same value at import
             notes=event_data.get('notes', ''),
             source=EventSource.IMPORT,
             source_id=f"import_{utc_now().isoformat()}",
@@ -166,21 +172,23 @@ class IndividualPositionTracker:
         position.updated_at = utc_now()
     
     def _process_buy_event(self, position: TradingPosition, event: TradingPositionEvent):
-        """Process buy event using FIFO logic"""
+        """Process buy event using FIFO logic + correct original risk"""
+        was_first_buy = position.current_shares == 0
+
         if position.current_shares >= 0:
             # Adding to long or creating new long
-            if position.current_shares == 0:
+            if was_first_buy:
                 position.avg_entry_price = event.price
                 position.current_shares = event.shares
                 position.total_cost = event.price * event.shares
-                
-                # Set original shares for risk calculations
-                position.original_shares = event.shares
-                
-                # Calculate original risk percentage if stop loss is provided
-                if event.stop_loss and event.stop_loss > 0:
-                    self._calculate_original_risk_percent(position, event)
-                
+                position.original_shares = event.shares  # ← Critical for backfill
+
+                # ← THIS IS THE FIX: Use shared logic from PositionService
+                self.position_service._set_original_risk(
+                    position=position,
+                    shares=event.shares,
+                    price=event.price
+                )
             else:
                 # Average cost calculation
                 total_cost = position.total_cost + (event.price * event.shares)
@@ -191,22 +199,29 @@ class IndividualPositionTracker:
             # Covering short position with buy
             cover_qty = min(abs(position.current_shares), event.shares)
             remaining_qty = event.shares - cover_qty
-            
+
             # Calculate P&L on covered shares
             pnl_per_share = position.avg_entry_price - event.price
             realized_pnl = pnl_per_share * cover_qty
             position.total_realized_pnl += realized_pnl
             event.realized_pnl = realized_pnl
-            
+
             position.current_shares += cover_qty
-            
+
             if remaining_qty > 0:
                 # Create new long position with remaining
                 position.current_shares = remaining_qty
                 position.avg_entry_price = event.price
                 position.total_cost = event.price * remaining_qty
-        
-        # Update current risk percentage whenever stop loss changes
+
+                # ← Also set original risk when flipping from short → long
+                self.position_service._set_original_risk(
+                    position=position,
+                    shares=remaining_qty,
+                    price=event.price
+                )
+
+        # Update current risk if stop loss exists
         if event.stop_loss and event.stop_loss > 0:
             self._calculate_current_risk_percent(position)
     

@@ -541,7 +541,7 @@ class StartingBalanceResponse(BaseModel):
     """Response after updating starting balance"""
     success: bool
     starting_balance: float
-    starting_date: str
+    starting_date: Optional[str] = None  # Can be None if not set
 
     class Config:
         from_attributes = True

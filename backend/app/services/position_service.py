@@ -4,6 +4,7 @@ Position Service - Core business logic for the new position-based architecture
 Handles all position operations with immutable event sourcing
 """
 
+import logging
 from typing import List, Optional, Dict, Any, Tuple
 from datetime import datetime
 from sqlalchemy.orm import Session
@@ -17,6 +18,8 @@ from app.models.position_models import (
 )
 from app.models import User
 from app.services.account_value_service import AccountValueService
+
+logger = logging.getLogger(__name__)
 
 
 class PositionService:
@@ -35,21 +38,29 @@ class PositionService:
         strategy: Optional[str] = None,
         setup_type: Optional[str] = None,
         timeframe: Optional[str] = None,
+        opened_at: Optional[datetime] = None,
+        original_shares: Optional[int] = None,
+        avg_entry_price: Optional[float] = None,
         **kwargs
     ) -> TradingPosition:
         """Create a new position"""
+        opened_at = opened_at or utc_now()
         position = TradingPosition(
             user_id=user_id,
             ticker=ticker.upper(),
             strategy=strategy,
             setup_type=setup_type,
             timeframe=timeframe,
-            opened_at=utc_now(),
+            opened_at=opened_at,
+            original_shares=original_shares,
+            avg_entry_price=avg_entry_price,
             **kwargs
         )
         
         self.db.add(position)
         self.db.flush()  # Get the ID
+        if original_shares and avg_entry_price:
+            self._set_original_risk(position, original_shares, avg_entry_price)
         return position
     
     def get_or_create_position(
@@ -101,7 +112,8 @@ class PositionService:
         position = self.db.query(TradingPosition).get(position_id)
         if not position:
             raise ValueError(f"Position {position_id} not found")
-        
+
+        was_first_buy = position.current_shares == 0
         # Create buy event
         event = TradingPositionEvent(
             position_id=position_id,
@@ -127,8 +139,85 @@ class PositionService:
         # Update event with after state
         position = self.db.query(TradingPosition).get(position_id)
         event.position_shares_after = position.current_shares
+
+        if was_first_buy and position.current_shares > 0:
+            self._set_original_risk(position, position.current_shares, price)
         
         return event
+    
+
+    def _set_original_risk(self, position: TradingPosition, shares: int, price: float):
+        """Calculate and store original risk % using stop loss distance: (entry - stop) * shares / account_value"""
+        # Get original stop loss from the first BUY event
+        first_buy_event = self.db.query(TradingPositionEvent).filter(
+            TradingPositionEvent.position_id == position.id,
+            TradingPositionEvent.event_type == EventType.BUY
+        ).order_by(TradingPositionEvent.event_date.asc()).first()
+        
+        # Can't calculate risk without a stop loss
+        if not first_buy_event or not first_buy_event.original_stop_loss:
+            logger.info(
+                f"Position {position.id} ({position.ticker}) has no original_stop_loss in first event. "
+                f"Cannot calculate original risk percentage."
+            )
+            position.original_risk_percent = None
+            position.original_shares = shares
+            position.avg_entry_price = price
+            self.db.commit()
+            return
+        
+        original_stop_loss = first_buy_event.original_stop_loss
+        
+        try:
+            account_value_at_entry = self.account_value_service.get_account_value_at_date(
+                user_id=position.user_id,
+                target_date=position.opened_at
+            )
+        except Exception as e:
+            logger.warning(
+                f"Failed to calculate account value for position {position.id} "
+                f"(user_id={position.user_id}, date={position.opened_at}): {str(e)}. "
+                f"Using user's starting balance as fallback."
+            )
+            # Get user's starting balance as fallback
+            user = self.db.query(User).get(position.user_id)
+            account_value_at_entry = user.starting_balance if user and user.starting_balance else 10000.0
+            
+            if account_value_at_entry == 10000.0:
+                logger.warning(
+                    f"User {position.user_id} has no starting balance set. "
+                    f"Using default fallback of $10,000 for position {position.id}."
+                )
+        
+        # Calculate risk using stop loss distance: (entry_price - stop_loss) * shares
+        risk_amount = abs((price - original_stop_loss) * shares)
+        
+        if account_value_at_entry > 0:
+            original_risk_percent = (risk_amount / account_value_at_entry) * 100
+            original_risk_percent = round(original_risk_percent, 3)
+            
+            # Validate risk percentage (warning if > 5% since you mentioned that's unusual)
+            if original_risk_percent > 5:
+                logger.warning(
+                    f"Position {position.id} ({position.ticker}) has risk > 5%: "
+                    f"{original_risk_percent:.2f}% (Risk: ${risk_amount:,.2f}, "
+                    f"Account value: ${account_value_at_entry:,.2f}, "
+                    f"Entry: ${price:.2f}, Stop: ${original_stop_loss:.2f})"
+                )
+            
+            position.original_risk_percent = original_risk_percent
+            position.account_value_at_entry = account_value_at_entry
+            position.original_shares = shares
+            position.avg_entry_price = price
+        else:
+            logger.error(
+                f"Invalid account value ({account_value_at_entry}) for position {position.id}. "
+                f"Cannot calculate risk percentage."
+            )
+            position.original_risk_percent = 0.0
+            position.account_value_at_entry = account_value_at_entry
+        
+        self.db.commit()
     
     def sell_shares(
         self,

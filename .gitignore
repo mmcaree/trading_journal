@@ -194,3 +194,7 @@ CODE_REVIEW_RISK_CALCULATION.md
 backend/migrations/add_risk_validation_constraints.sql
 backend/migrations/run_risk_validation_constraints_prod.py
 backend/scripts/recalculate_risk_percentages.py
+CODE_REVIEW_RISK_CALCULATION.md
+backend/migrations/run_risk_validation_constraints_prod.py
+backend/scripts/recalculate_risk_percentages.py
+backend/migrations/add_risk_validation_constraints.sql

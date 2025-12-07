@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, UploadFile, File, HTTPException
+from fastapi import APIRouter, Depends, UploadFile, File, HTTPException, BackgroundTasks
 from sqlalchemy.orm import Session
 import os
 import uuid
@@ -22,6 +22,7 @@ from app.services.user_service import (
 )
 from app.services.data_service import clear_all_user_data, clear_trade_history
 from app.services.two_factor_service import two_factor_service
+from app.services.risk_calculation_service import recalculate_user_risk_percentages
 from app.utils.exceptions import (
     NotFoundException,
     BadRequestException,
@@ -411,15 +412,23 @@ def get_equity_curve(
 def update_starting_balance(
     starting_balance: float,
     starting_date: Optional[datetime] = None,
+    background_tasks: BackgroundTasks = None,
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db)
 ):
-    """Update user's starting balance and invalidate account value cache"""
+    """
+    Update user's starting balance and invalidate account value cache.
+    Automatically triggers background recalculation of risk percentages for all positions.
+    """
     if starting_balance < 0:
         raise HTTPException(status_code=400, detail="Starting balance must be positive")
     
     current_user.initial_account_balance = starting_balance
-    current_user.starting_balance_date = starting_date or utc_now()
+    
+    # Only update starting_balance_date if explicitly provided
+    # Don't reset to today if not provided
+    if starting_date is not None:
+        current_user.starting_balance_date = starting_date
     
     db.commit()
     db.refresh(current_user)
@@ -429,10 +438,20 @@ def update_starting_balance(
     account_value_service = AccountValueService(db)
     account_value_service.invalidate_cache(current_user.id)
     
+    # Trigger background recalculation of risk percentages for all user positions
+    # This ensures stored risk % values reflect the new starting balance
+    if background_tasks:
+        background_tasks.add_task(
+            recalculate_user_risk_percentages,
+            db,
+            current_user.id
+        )
+        logger.info(f"Scheduled background risk recalculation for user {current_user.id}")
+    
     return {
         "success": True,
         "starting_balance": starting_balance,
-        "starting_date": current_user.starting_balance_date.isoformat()
+        "starting_date": current_user.starting_balance_date.isoformat() if current_user.starting_balance_date else None
     }
 
 from typing import List
