@@ -1436,7 +1436,7 @@ const Analytics: React.FC = () => {
                     </Typography>
                   </Tooltip>
                   <Typography variant="h6" color={advancedData?.expectancy > 0 ? 'success.main' : 'error.main'}>
-                    {formatCurrency(advancedData?.expectancy)}
+                    {advancedData?.expectancy.toFixed(2)}
                   </Typography>
                 </Grid>
                 <Grid item xs={6}>
