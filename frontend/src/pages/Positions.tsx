@@ -380,7 +380,7 @@ const Positions: React.FC = () => {
                 <TableCell sx={{ color: 'primary.main', fontWeight: 'bold' }}>Total Cost</TableCell>
                 <TableCell sx={{ color: 'primary.main', fontWeight: 'bold' }}>Opened</TableCell>
                 <TableCell sx={{ color: 'primary.main', fontWeight: 'bold' }}>Status</TableCell>
-                <TableCell sx={{ color: 'primary.main', fontWeight: 'bold' }}>Risk</TableCell>
+                <TableCell sx={{ color: 'primary.main', fontWeight: 'bold' }}>Open Risk</TableCell>
                 <TableCell sx={{ color: 'primary.main', fontWeight: 'bold' }}>Actions</TableCell>
               </TableRow>
             </TableHead>
@@ -453,41 +453,51 @@ const Positions: React.FC = () => {
                     />
                   </TableCell>
                   <TableCell>
-                    {position.original_risk_percent != null ? (
-                      <Tooltip
-                        title={
-                          <Box>
-                            <Typography variant="body2">
-                              Original risk when position was opened
-                            </Typography>
-                            <Typography variant="caption">
-                              {position.original_risk_percent.toFixed(2)}% of account
-                              <br />
-                              Account value: {formatCurrency(position.account_value_at_entry || 0)}
-                              <br />
-                              Date: {new Date(position.opened_at).toLocaleDateString()}
-                            </Typography>
-                          </Box>
-                        }
-                        arrow
-                      >
+                    {position.current_risk_percent != null ? (
+                      position.current_risk_percent === 0 ? (
                         <Chip
-                          label={`${position.original_risk_percent.toFixed(2)}%`}
+                          label="In Profit"
                           size="small"
-                          color={
-                            position.original_risk_percent > 5
-                              ? 'error'
-                              : position.original_risk_percent > 3
-                              ? 'warning'
-                              : 'success'
-                          }
-                          variant="outlined"
+                          color="success"
+                          variant="filled"
                           sx={{
                             fontWeight: 'bold',
-                            borderWidth: 2,
                           }}
                         />
-                      </Tooltip>
+                      ) : (
+                        <Tooltip
+                          title={
+                            <Box>
+                              <Typography variant="body2">
+                                Current risk based on all buy events
+                              </Typography>
+                              <Typography variant="caption">
+                                Sum of all stop losses across position
+                                <br />
+                                {position.current_risk_percent.toFixed(2)}% of current account
+                              </Typography>
+                            </Box>
+                          }
+                          arrow
+                        >
+                          <Chip
+                            label={`${position.current_risk_percent.toFixed(2)}%`}
+                            size="small"
+                            color={
+                              position.current_risk_percent > 5
+                                ? 'error'
+                                : position.current_risk_percent > 3
+                                ? 'warning'
+                                : 'success'
+                            }
+                            variant="outlined"
+                            sx={{
+                              fontWeight: 'bold',
+                              borderWidth: 2,
+                            }}
+                          />
+                        </Tooltip>
+                      )
                     ) : (
                       <Typography variant="caption" color="text.disabled">
                         —

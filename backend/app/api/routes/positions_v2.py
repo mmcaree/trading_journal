@@ -452,6 +452,7 @@ def get_positions_paginated(
         .all()
     
     # Build response list
+    position_service = PositionService(db)
     responses = []
     for position in positions:
         tags_list = [
@@ -465,6 +466,11 @@ def get_positions_paginated(
             # Simple calculation based on total cost vs total PnL
             if position.total_cost > 0:
                 return_percent = round((position.total_realized_pnl / position.total_cost) * 100, 2)
+        
+        # Calculate current risk dynamically for open positions
+        current_risk_percent = position.current_risk_percent
+        if position.status == PositionStatus.OPEN:
+            current_risk_percent = position_service._calculate_current_risk_for_display(position)
         
         responses.append({
             "id": position.id,
@@ -487,7 +493,7 @@ def get_positions_paginated(
             "events_count": 0,  # Not loading events for list view
             "return_percent": return_percent,
             "original_risk_percent": position.original_risk_percent,
-            "current_risk_percent": position.current_risk_percent,
+            "current_risk_percent": current_risk_percent,
             "original_shares": position.original_shares,
             "events": None,  # Never include events in paginated list view
             "tags": tags_list

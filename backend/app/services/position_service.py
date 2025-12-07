@@ -288,8 +288,13 @@ class PositionService:
         if not event:
             raise ValueError(f"Event {event_id} not found")
         
+        # Track if stop loss changed
+        stop_loss_changed = False
+        
         # Update fields if provided
         if stop_loss is not None:
+            if event.stop_loss != stop_loss:
+                stop_loss_changed = True
             event.stop_loss = stop_loss
         if original_stop_loss is not None:
             event.original_stop_loss = original_stop_loss
@@ -300,6 +305,13 @@ class PositionService:
         
         self.db.commit()
         self.db.refresh(event)
+        
+        # Recalculate current risk if stop loss was updated
+        if stop_loss_changed:
+            position = self.db.query(TradingPosition).get(event.position_id)
+            if position:
+                self._recalculate_current_risk(position)
+                logger.info(f"Recalculated current risk for position {position.id} after stop loss update")
         
         return event
     
@@ -508,6 +520,10 @@ class PositionService:
         elif position.status == PositionStatus.OPEN and position.closed_at:
             position.closed_at = None  # Re-opened
         
+        # Recalculate current risk for open positions
+        if position.status == PositionStatus.OPEN:
+            self._recalculate_current_risk(position)
+        
         self.db.commit()
     
     def _calculate_sell_pnl(self, position_id: int, shares_to_sell: int, sell_price: float) -> float:
@@ -708,19 +724,104 @@ class PositionService:
         return 10000.0
     
     def update_position_risk_metrics(self, position: TradingPosition):
-        """Update risk metrics using historical account value (calculated dynamically)"""
-        # Calculate account value at entry dynamically - never store static value
-        # This ensures accuracy when user updates starting balance or transactions
-        account_value_at_entry = self.calculate_account_value_at_entry(
+        """Calculate current risk by summing risk from all BUY events with their stop losses"""
+        # Get current account value (not entry value)
+        from datetime import datetime
+        current_account_value = self.account_value_service.get_account_value_at_date(
             position.user_id,
-            position
+            datetime.utcnow()
         )
         
-        # Calculate risk percentage if we have stop loss data
-        if position.current_stop_loss and position.avg_entry_price and account_value_at_entry > 0:
-            max_loss_per_share = abs(position.avg_entry_price - position.current_stop_loss)
-            max_loss_amount = max_loss_per_share * position.current_shares
-            position.current_risk_percent = (max_loss_amount / account_value_at_entry) * 100
+        if not current_account_value or current_account_value <= 0:
+            position.current_risk_percent = None
+            self.db.commit()
+            return position
+        
+        # Sum risk from all BUY events
+        total_risk = 0.0
+        buy_events = self.db.query(TradingPositionEvent).filter(
+            TradingPositionEvent.position_id == position.id,
+            TradingPositionEvent.event_type == EventType.BUY
+        ).all()
+        
+        for event in buy_events:
+            if event.stop_loss and event.price and event.shares:
+                # Calculate risk for this specific buy: (entry - stop) * shares
+                event_risk = (event.price - event.stop_loss) * event.shares
+                total_risk += event_risk
+        
+        # If total risk is negative or zero, all stops are in profit
+        if total_risk <= 0:
+            position.current_risk_percent = 0.0  # Will display as "In Profit" on frontend
+        else:
+            # Calculate percentage of current account value
+            position.current_risk_percent = (total_risk / current_account_value) * 100
         
         self.db.commit()
         return position
+    
+    def _recalculate_current_risk(self, position: TradingPosition):
+        """Helper to recalculate current risk without committing (called during updates)"""
+        # Get current account value (not entry value)
+        from datetime import datetime
+        current_account_value = self.account_value_service.get_account_value_at_date(
+            position.user_id,
+            datetime.utcnow()
+        )
+        
+        if not current_account_value or current_account_value <= 0:
+            position.current_risk_percent = None
+            return
+        
+        # Sum risk from all BUY events
+        total_risk = 0.0
+        buy_events = self.db.query(TradingPositionEvent).filter(
+            TradingPositionEvent.position_id == position.id,
+            TradingPositionEvent.event_type == EventType.BUY
+        ).all()
+        
+        for event in buy_events:
+            if event.stop_loss and event.price and event.shares:
+                # Calculate risk for this specific buy: (entry - stop) * shares
+                event_risk = (event.price - event.stop_loss) * event.shares
+                total_risk += event_risk
+        
+        # If total risk is negative or zero, all stops are in profit
+        if total_risk <= 0:
+            position.current_risk_percent = 0.0  # Will display as "In Profit" on frontend
+        else:
+            # Calculate percentage of current account value
+            position.current_risk_percent = (total_risk / current_account_value) * 100
+    
+    def _calculate_current_risk_for_display(self, position: TradingPosition) -> Optional[float]:
+        """Calculate current risk on-the-fly for display without modifying the position object"""
+        from datetime import datetime
+        
+        # Get current account value
+        current_account_value = self.account_value_service.get_account_value_at_date(
+            position.user_id,
+            datetime.utcnow()
+        )
+        
+        if not current_account_value or current_account_value <= 0:
+            return None
+        
+        # Sum risk from all BUY events
+        total_risk = 0.0
+        buy_events = self.db.query(TradingPositionEvent).filter(
+            TradingPositionEvent.position_id == position.id,
+            TradingPositionEvent.event_type == EventType.BUY
+        ).all()
+        
+        for event in buy_events:
+            if event.stop_loss and event.price and event.shares:
+                # Calculate risk for this specific buy: (entry - stop) * shares
+                event_risk = (event.price - event.stop_loss) * event.shares
+                total_risk += event_risk
+        
+        # If total risk is negative or zero, all stops are in profit
+        if total_risk <= 0:
+            return 0.0  # Will display as "In Profit" on frontend
+        else:
+            # Calculate percentage of current account value
+            return (total_risk / current_account_value) * 100

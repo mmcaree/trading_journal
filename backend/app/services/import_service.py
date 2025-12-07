@@ -370,36 +370,42 @@ class IndividualPositionTracker:
                        f"(${total_risk:.2f} / ${account_value:.2f})")
     
     def _calculate_current_risk_percent(self, position: TradingPosition):
-        """Calculate current risk percentage based on current position and stop loss
+        """Calculate current risk percentage by summing risk from all BUY events
         
-        Uses dynamically calculated account value at the time of the event.
+        Uses current account value (not entry value).
+        If all stops are in profit, sets risk to 0%.
         """
-        # Get dynamically calculated account value at event time
-        # Use the most recent event time or position opened_at
         from app.models import TradingPositionEvent
+        from datetime import datetime
         
-        latest_event = self.db.query(TradingPositionEvent).filter(
-            TradingPositionEvent.position_id == position.id
-        ).order_by(TradingPositionEvent.event_date.desc()).first()
-        
-        event_date = latest_event.event_date if latest_event else position.opened_at
-        if not event_date:
-            return
-        
-        account_value = self.account_value_service.get_account_value_at_date(
+        # Get current account value
+        current_account_value = self.account_value_service.get_account_value_at_date(
             self.user_id,
-            event_date
+            datetime.utcnow()
         )
         
-        if not account_value or account_value <= 0:
+        if not current_account_value or current_account_value <= 0:
             return
         
-        # Calculate current risk: (avg_entry_price - current_stop_loss) × current_shares / current_account_value
-        if position.current_stop_loss and position.avg_entry_price and position.current_shares > 0:
-            risk_per_share = position.avg_entry_price - position.current_stop_loss
-            total_risk = risk_per_share * position.current_shares
-            risk_percent = (total_risk / account_value) * 100
-            
+        # Sum risk from all BUY events
+        total_risk = 0.0
+        buy_events = self.db.query(TradingPositionEvent).filter(
+            TradingPositionEvent.position_id == position.id,
+            TradingPositionEvent.event_type == EventType.BUY
+        ).all()
+        
+        for event in buy_events:
+            if event.stop_loss and event.price and event.shares:
+                # Calculate risk for this specific buy: (entry - stop) * shares
+                event_risk = (event.price - event.stop_loss) * event.shares
+                total_risk += event_risk
+        
+        # If total risk is negative or zero, all stops are in profit
+        if total_risk <= 0:
+            position.current_risk_percent = 0.0  # Will display as "In Profit" on frontend
+        else:
+            # Calculate percentage of current account value
+            risk_percent = (total_risk / current_account_value) * 100
             position.current_risk_percent = round(risk_percent, 2)
             logger.info(f"Updated current risk for {position.ticker}: {risk_percent:.2f}%")
 
