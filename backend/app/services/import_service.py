@@ -51,8 +51,8 @@ class IndividualPositionTracker:
         self.symbol_positions: Dict[str, List[TradingPosition]] = {}
         self.position_counter = 0
     
-    def add_event(self, event_data: Dict[str, Any]) -> TradingPosition:
-        """Add event to appropriate position and return the position"""
+    def add_event(self, event_data: Dict[str, Any]) -> Optional[TradingPosition]:
+        """Add event to appropriate position and return the position. Returns None if event is skipped."""
         symbol = event_data['symbol']
         
         if symbol not in self.symbol_positions:
@@ -60,6 +60,10 @@ class IndividualPositionTracker:
         
         # Find the current open position or create new one
         current_position = self._get_current_position(symbol, event_data)
+        
+        # Skip this event if no valid position (e.g., SELL without BUY)
+        if current_position is None:
+            return None
         
         # Create the event
         event = self._create_position_event(event_data, current_position)
@@ -73,8 +77,8 @@ class IndividualPositionTracker:
         
         return current_position
     
-    def _get_current_position(self, symbol: str, event_data: Dict[str, Any]) -> TradingPosition:
-        """Get current open position or create new one"""
+    def _get_current_position(self, symbol: str, event_data: Dict[str, Any]) -> Optional[TradingPosition]:
+        """Get current open position or create new one. Returns None if SELL without position."""
         positions = self.symbol_positions[symbol]
         
         # Look for open position (not closed)
@@ -82,16 +86,16 @@ class IndividualPositionTracker:
             if position.status == PositionStatus.OPEN:
                 return position
         
-        # No open position found - create new one
-        # This happens for the first buy/short or when starting new position after closure
+        # No open position found
         side_upper = event_data['side'].upper()
         
-        if side_upper in ['BUY', 'SHORT'] or len(positions) == 0:
+        if side_upper in ['BUY', 'SHORT']:
+            # Valid opening transaction - create new position
             return self._create_new_position(symbol, event_data)
         else:
-            # Sell order but no open position - this shouldn't happen in clean data
-            logger.warning(f"Sell order for {symbol} but no open position exists (side='{event_data['side']}')")
-            return self._create_new_position(symbol, event_data)
+            # SELL without open position - invalid data, skip this transaction
+            logger.warning(f"⚠️  Skipping SELL for {symbol} - no open position (incomplete data)")
+            return None
     
     def _create_new_position(self, symbol: str, event_data: Dict[str, Any]) -> TradingPosition:
         """Create a new position"""

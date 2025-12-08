@@ -146,6 +146,7 @@ class UniversalImportService:
             tracker = IndividualPositionTracker(self.db, user_id, self.account_value_service)
             
             imported_count = 0
+            skipped_count = 0
             
             for event_data in events:
                 # Only process filled/completed orders
@@ -153,7 +154,14 @@ class UniversalImportService:
                 if status in ['FILLED', 'COMPLETED', 'EXECUTED']:
                     try:
                         position = tracker.add_event(event_data)
-                        imported_count += 1
+                        if position is not None:
+                            imported_count += 1
+                        else:
+                            # Event was skipped (e.g., SELL without BUY)
+                            skipped_count += 1
+                            self.warnings.append(
+                                f"Skipped SELL for {event_data['symbol']} on {event_data['filled_time'].date()} - no open position (incomplete data)"
+                            )
                     except Exception as e:
                         logger.error(f"Error processing event: {e}")
                         self.validation_errors.append(
@@ -181,6 +189,7 @@ class UniversalImportService:
                 'broker_detected': broker_detected,
                 'broker_display_name': broker_profile.display_name,
                 'imported_events': imported_count,
+                'skipped_events': skipped_count,
                 'total_positions': len(all_positions),
                 'open_positions': len(open_positions),
                 'warnings': self.warnings
