@@ -391,10 +391,10 @@ class UniversalImportService:
         # Sort events chronologically
         events.sort(key=lambda e: e['filled_time'])
         
-        # For brokers that don't support shorting (like Webull Australia),
-        # reorder same-timestamp BUY/SELL pairs to prevent short positions
-        if broker_profile.name in ['webull_au']:
-            events = self._reorder_wash_trades(events)
+        # For brokers that list intraday sells before buys (Robinhood, Webull AU),
+        # reorder same-day/same-symbol BUY/SELL to prevent unwanted short positions
+        if broker_profile.name in ['robinhood', 'webull_au']:
+            events = self._reorder_same_day_transactions(events)
         
         return events
     
@@ -509,6 +509,16 @@ class UniversalImportService:
             enhanced_events.extend(filled_events)
         
         return enhanced_events
+    
+    def _reorder_same_day_transactions(self, events: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+        """
+        Reorder same-day BUY/SELL pairs to prevent short positions.
+        For brokers like Robinhood that list sells before buys on the same day,
+        ensure BUY always comes before SELL to prevent unwanted short positions.
+        
+        This handles intraday trades where sells appear before buys in CSV order.
+        """
+        return self._reorder_wash_trades(events)
     
     def _reorder_wash_trades(self, events: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
         """

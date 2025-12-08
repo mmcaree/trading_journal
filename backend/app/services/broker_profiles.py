@@ -187,7 +187,9 @@ ROBINHOOD_PROFILE = BrokerProfile(
     },
     date_formats=[
         "%Y-%m-%d",            # 2024-01-15
-        "%m/%d/%Y",            # 01/15/2024
+        "%m/%d/%Y",            # 01/15/2024 or 12/5/2025
+        "%-m/%-d/%Y",          # 1/5/2025 (single digit month/day - Unix)
+        "%#m/%#d/%Y",          # 1/5/2025 (single digit month/day - Windows)
         "%b %d, %Y",           # Jan 15, 2024
     ],
     action_mappings={
@@ -199,6 +201,9 @@ ROBINHOOD_PROFILE = BrokerProfile(
         "S": "SELL",
         "BOUGHT": "BUY",
         "SOLD": "SELL",
+        # Non-stock transactions to skip
+        "ACH": "DEPOSIT",  # Will be skipped as not BUY/SELL/SHORT
+        "INT": "INTEREST", # Will be skipped as not BUY/SELL/SHORT
     },
     signature_columns=["Activity Date", "Process Date", "Trans Code"],
     default_currency="USD"

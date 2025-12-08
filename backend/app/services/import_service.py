@@ -290,11 +290,15 @@ class IndividualPositionTracker:
                     # Note: When current_shares = 0 (position closed), we preserve total_cost
                     # as it represents the total capital deployed for return calculations
             elif position.current_shares == 0:
-                # Selling with no position - create short
-                logger.info(f"Sell of {event.shares} with no position, creating short position")
+                # Selling with no position - could be short sale or data issue
+                # Check if this is likely an unintentional duplicate import
+                logger.warning(f"Sell of {event.shares} shares of {position.ticker} with no open position - this may indicate duplicate import or missing buy orders")
+                # Create short position (but this might be unintended)
                 position.current_shares = -event.shares
                 position.avg_entry_price = event.price
                 position.total_cost = event.price * event.shares
+                # Mark this as potentially problematic
+                event.notes = (event.notes + " | " if event.notes else "") + "WARNING: Sell without open position - possible duplicate import"
             else:
                 # Already short, adding to short position
                 logger.info(f"Adding {event.shares} to existing short position of {position.current_shares}")
