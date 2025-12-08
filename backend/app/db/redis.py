@@ -35,6 +35,9 @@ def get_redis_client():
         except RedisError as e:
             logger.warning(f"⚠️  Redis unavailable: {e}. Caching disabled - continuing without cache.")
             _redis_client = None
+        except RecursionError as e:
+            logger.error(f"❌ Redis recursion error (check circular imports): {e}")
+            _redis_client = None
         except Exception as e:
             logger.error(f"❌ Redis connection error: {e}")
             _redis_client = None
@@ -55,12 +58,15 @@ def close_redis_connection():
 
 def is_redis_available() -> bool:
     """Check if Redis is available"""
-    client = get_redis_client()
-    if not client:
+    global _redis_client
+    
+    # If client is None, Redis is not available
+    if _redis_client is None:
         return False
     
+    # If client exists, verify it's still working
     try:
-        client.ping()
+        _redis_client.ping()
         return True
-    except RedisError:
+    except (RedisError, Exception):
         return False
