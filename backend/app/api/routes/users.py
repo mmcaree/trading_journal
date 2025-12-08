@@ -3,6 +3,7 @@ from sqlalchemy.orm import Session
 import os
 import uuid
 import shutil
+import logging
 from pathlib import Path
 from PIL import Image
 import cloudinary
@@ -34,6 +35,8 @@ from app.services.account_value_service import AccountValueService
 from typing import Optional
 from datetime import datetime
 from app.utils.datetime_utils import utc_now
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter()
 
