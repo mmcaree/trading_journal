@@ -191,16 +191,15 @@ const EventBreakdown: React.FC<EventBreakdownProps> = ({
     
     // Only apply fallbacks for BUY events (sell events don't need original stop loss)
     if (event.event_type === 'buy' && !originalStopLoss) {
-      // Try current stop loss
-      originalStopLoss = stopLoss;
-      // If still nothing and imported, try pending orders
+      // ONLY use event-level stop_loss as fallback if it exists
+      // Do NOT use position.current_stop_loss here - that's for active management only
+      originalStopLoss = event.stop_loss;
+      
+      // If still nothing and imported, try pending orders (historical data)
       if (!originalStopLoss && event.source === 'import' && pendingOrders.length > 0) {
         originalStopLoss = findStopLossForImportedEvent(event);
       }
-      // Last resort: position-level stop loss
-      if (!originalStopLoss) {
-        originalStopLoss = position.current_stop_loss;
-      }
+      // Do NOT fall back to position.current_stop_loss - original risk should remain unchanged
     }
     
     // Calculate ORIGINAL RISK using original_stop_loss (what we risked at entry)
