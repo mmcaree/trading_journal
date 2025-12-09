@@ -237,8 +237,11 @@ const Positions: React.FC = () => {
   };
 
   const handleUpdateStopLossSuccess = () => {
+    console.log('handleUpdateStopLossSuccess called - invalidating positions cache');
     // Invalidate positions cache to show updated stop loss and current risk %
     queryClient.invalidateQueries({ queryKey: ['positions-paginated'] });
+    // Also invalidate position details cache so modal shows updated data
+    queryClient.invalidateQueries({ queryKey: ['position-details'] });
     // Calendar doesn't need invalidation (stop loss doesn't affect P&L)
   };
 

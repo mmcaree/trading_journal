@@ -127,7 +127,9 @@ const UpdateStopLossModal: React.FC<UpdateStopLossModalProps> = ({
       }
 
       // Update the individual event
+      console.log('Updating event with data:', updateData);
       await updatePositionEvent(eventId, updateData);
+      console.log('Event updated successfully');
 
       // Remove from editing state
       setEditingEvents(prev => {
@@ -140,13 +142,14 @@ const UpdateStopLossModal: React.FC<UpdateStopLossModalProps> = ({
       const updatedDetails = await getPositionDetails(position.id);
       setInternalPositionDetails(updatedDetails);
 
-      // Optionally call onSuccess if provided
+      // Call onSuccess to trigger cache invalidation in parent
+      console.log('Calling onSuccess callback');
       if (onSuccess) {
-        // You might want to fetch the updated position here
         onSuccess(position);
       }
 
     } catch (err) {
+      console.error('Error updating stop loss:', err);
       setError(err instanceof Error ? err.message : 'Failed to update event');
     } finally {
       setLoading(false);
