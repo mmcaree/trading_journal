@@ -181,7 +181,7 @@ const UpdateStopLossModal: React.FC<UpdateStopLossModalProps> = ({
     >
       <Alert severity="info" sx={{ mb: 2 }}>
         <Typography variant="body2">
-          <strong>Professional Event-Level Management:</strong> Manage individual stop losses for each buy/sell event. 
+          <strong>Professional Event-Level Management:</strong> Manage individual stop losses for each buy event. 
           This allows for sophisticated risk management where each addition to your position can have its own stop loss level.
         </Typography>
       </Alert>
@@ -206,7 +206,9 @@ const UpdateStopLossModal: React.FC<UpdateStopLossModalProps> = ({
               </TableRow>
             </TableHead>
             <TableBody>
-              {effectivePositionDetails.events.map((event: PositionEvent) => {
+              {effectivePositionDetails.events
+                .filter((event: PositionEvent) => event.event_type.toLowerCase() === 'buy')
+                .map((event: PositionEvent) => {
                 const isEditing = editingEvents[event.id];
                 
                 return (
