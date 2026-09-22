@@ -1,5 +1,6 @@
 # SAR Trading Journal
-
+## * DEPRECATED FOR NEW VERSION OF SITE WHICH IS BUILT ENTIRELY IN JS/TYPESCRIPT *
+## * NEW PROJECT PRIVATE FOR TIME BEING *
 Professional trading journal for tracking both stock and options trades. Built with React/TypeScript and FastAPI.
 
 ## Features
